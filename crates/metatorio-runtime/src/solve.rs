@@ -3,7 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashMap, fs::File, path::Path, sync::Arc};
 
 use metatorio_core::{
-    Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState, Mechanic,
+    Accessibility, AccessibilityOptions, Accessible, Context, DualVar, Flow, GameState,
+    IdWithQuality, Mechanic,
 };
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
 use metatorio_data::{FluidComponent, LabComponent, PrototypeBaseComponent};
@@ -782,12 +783,15 @@ impl Runtime {
         project_id: ProjectId,
         universe_id: crate::id::UniverseId,
     ) -> Result<crate::universe::UniverseSolveResult, RuntimeError> {
-        use crate::document::{FactorySettings, FlowTarget, MechanicEntry, TargetExpression};
-        use metatorio_core::LocatedMechanic;
+        use crate::document::{LocatedTargetExpression, UniverseDocument, UniverseMechanicEntry};
+        use metatorio_core::{LocatedMechanic, Location, TransferLocatedMechanic};
 
-        let universe_doc = self
-            .state
-            .project(project_id)?
+        let snapshot = self.project_snapshot(project_id)?;
+        let accessibility = snapshot.resolve_accessibility();
+        self.cache_accessibility(project_id, accessibility.clone());
+        let project_doc = &snapshot.project_doc;
+        let store = &snapshot.store;
+        let universe_doc = project_doc
             .universes
             .iter()
             .find(|universe| universe.id == universe_id)
@@ -796,96 +800,118 @@ impl Runtime {
                 project: project_id,
                 universe: universe_id,
             })?;
-        let locations = crate::universe::used_locations(&universe_doc);
-        for location in locations {
-            let targets: Vec<FlowTarget> = universe_doc
-                .targets
+
+        // Enumerate the full candidate set: every planet's local mechanics,
+        // plus all Space mechanics, plus a transfer edge for every item from
+        // each planet. One joint universe LP then chooses among all of them.
+        let mut locations: Vec<Location> = store
+            .group(PrototypeGroup::Planet)
+            .map(|record| Location::planet(record.name.clone()))
+            .collect();
+        locations.push(Location::Space);
+        let mut entries: Vec<UniverseMechanicEntry> = Vec::new();
+        let mut mechanics_by_id: HashMap<MechanicId, LocatedMechanic> = HashMap::new();
+        let mut next_mechanic = 1u64;
+        for location in &locations {
+            let (planet, surface) = crate::universe::environment_for(location);
+            let mut game = make_game_state_with_accessibility(store, project_doc, &accessibility);
+            apply_environment_to_game_state(store, &mut game, planet, surface);
+            let context = Context::new(store, &game);
+            let major_quality = game
+                .qualities
                 .iter()
-                .filter(|target| &target.flow.location == &location)
-                .map(|target| FlowTarget {
-                    id: target.id,
-                    flow: target.flow.flow.clone(),
-                    amount: target.amount,
-                })
-                .collect();
-            let expressions: Vec<TargetExpression> = universe_doc
+                .position(|quality| quality == &project_doc.settings.major_quality)
+                .unwrap_or(0);
+            let options = crate::auto_plan::EnumerateOptions {
+                alternative_count: project_doc.planning.alternative_count,
+                machine_preferences: project_doc.planning.machine_preferences.clone(),
+                enumerate_modules: project_doc.planning.enumerate_modules.clone(),
+                enumerate_beacons: project_doc.planning.enumerate_beacons.clone(),
+                quality_limit: game.max_quality,
+                major_quality,
+                planet: planet.map(str::to_string),
+                surface: surface.map(str::to_string),
+                accessibility: Some(accessibility.clone()),
+            };
+            let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
+            let (candidates, _) =
+                crate::auto_plan::filter_accessible_candidates(store, &accessibility, candidates);
+            for mechanic in candidates {
+                let id = MechanicId(next_mechanic);
+                next_mechanic += 1;
+                let located = LocatedMechanic::Local(metatorio_core::LocalLocatedMechanic {
+                    location: location.clone(),
+                    mechanic: mechanic.clone(),
+                });
+                mechanics_by_id.insert(id, located.clone());
+                entries.push(UniverseMechanicEntry {
+                    id,
+                    enabled: true,
+                    mechanic: located,
+                });
+            }
+            if let Location::Planet(_) = location {
+                for record in store.group(PrototypeGroup::Item) {
+                    let weight = store
+                        .item_weight(&record.name)
+                        .map(|weight| weight.weight)
+                        .unwrap_or(store.weight_constants().default_item_weight);
+                    if weight <= 0.0 {
+                        continue;
+                    }
+                    let id = MechanicId(next_mechanic);
+                    next_mechanic += 1;
+                    let located = LocatedMechanic::Transfer(TransferLocatedMechanic {
+                        location: location.clone(),
+                        item: IdWithQuality::new(&record.name, &project_doc.settings.major_quality),
+                    });
+                    mechanics_by_id.insert(id, located.clone());
+                    entries.push(UniverseMechanicEntry {
+                        id,
+                        enabled: true,
+                        mechanic: located,
+                    });
+                }
+            }
+        }
+        if entries.is_empty() {
+            return Err(RuntimeError::InvalidValue(
+                "没有可枚举的宇宙工厂机制候选".to_string(),
+            ));
+        }
+
+        let temp = UniverseDocument {
+            id: universe_id,
+            name: universe_doc.name.clone(),
+            mechanics: entries,
+            targets: universe_doc.targets.clone(),
+            target_expressions: universe_doc
                 .target_expressions
                 .iter()
-                .filter(|expression| &expression.location == &location)
-                .map(|expression| TargetExpression {
+                .map(|expression| LocatedTargetExpression {
                     id: expression.id,
                     constant: expression.constant,
                     terms: expression.terms.clone(),
                 })
-                .collect();
-            if targets.is_empty() && expressions.is_empty() {
-                continue;
-            }
-            let mechanics: Vec<MechanicEntry> = universe_doc
-                .mechanics
-                .iter()
-                .filter_map(|entry| match &entry.mechanic {
-                    LocatedMechanic::Local(local) if &local.location == &location => {
-                        Some(MechanicEntry {
-                            id: entry.id,
-                            enabled: entry.enabled,
-                            mechanic: local.mechanic.clone(),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect();
-            let (planet, surface) = crate::universe::environment_for(&location);
-            let factory = FactoryDocument {
-                id: FactoryId(0),
-                name: format!("universe {} {:?}", universe_id.0, location),
-                settings: FactorySettings {
-                    planet: planet.map(str::to_string),
-                    surface: surface.map(str::to_string),
-                    ..FactorySettings::default()
-                },
-                targets,
-                target_expressions: expressions,
-                mechanics,
-                ..FactoryDocument::default()
-            };
-            let snapshot = self.snapshot_for_factory(project_id, factory)?;
-            let accessibility = snapshot.resolve_accessibility();
-            self.cache_accessibility(project_id, accessibility.clone());
-            let (planned, _) = plan_auto_plan(&snapshot, &accessibility)?;
-            self.state.replace_universe_location_mechanics(
-                project_id,
-                universe_id,
-                &location,
-                planned,
-            )?;
-        }
+                .collect(),
+            strict_source: false,
+            strict_sink: universe_doc.strict_sink,
+        };
+        let planned = crate::universe::solve_universe(store, project_doc, &temp, &accessibility)
+            .map_err(RuntimeError::InvalidValue)?;
+        let crate::universe::UniverseSolveStatus::Solved { mechanics, .. } = planned.status else {
+            return Err(RuntimeError::InvalidValue(
+                "宇宙自动规划未求解：候选集合无可行解".to_string(),
+            ));
+        };
+        let used: Vec<LocatedMechanic> = mechanics
+            .into_iter()
+            .filter(|solution| solution.amount > 1e-9)
+            .filter_map(|solution| mechanics_by_id.get(&solution.mechanic).cloned())
+            .collect();
+        self.state
+            .replace_universe_mechanics(project_id, universe_id, used)?;
         self.solve_universe(project_id, universe_id)
-    }
-
-    fn snapshot_for_factory(
-        &self,
-        project_id: ProjectId,
-        factory_doc: FactoryDocument,
-    ) -> Result<SolveSnapshot, RuntimeError> {
-        let project_doc = self.state.project(project_id)?.clone();
-        Ok(SolveSnapshot {
-            project: project_id,
-            factory: factory_doc.id,
-            revision: self.state.revision,
-            accessibility_epoch: self.accessibility_epoch.load(Ordering::SeqCst),
-            store: self.context_arc(project_id)?,
-            graph: self.graph_for_project(project_id)?,
-            accessibility_options: accessibility_options(&project_doc.settings),
-            accessibility: self
-                .accessibilities
-                .lock()
-                .unwrap()
-                .get(&project_id)
-                .cloned(),
-            project_doc,
-            factory_doc,
-        })
     }
 
     /// 统一执行一个 `RuntimeCommand`，返回结构化产出。

@@ -285,6 +285,10 @@ pub enum UniverseAction {
     SetStrictSink {
         strict: bool,
     },
+    SetMechanicLocation {
+        mechanic: MechanicId,
+        location: Location,
+    },
     /// 高级入口：用 JSON 整体替换 Local 承载的原机制（用于尚无专用编辑器的种类）。
     SetLocalMechanic {
         mechanic: MechanicId,
@@ -314,9 +318,7 @@ pub enum UniverseAction {
         target: TargetId,
         position: usize,
     },
-    AddTargetExpression {
-        location: Location,
-    },
+    AddTargetExpression,
     RemoveTargetExpression {
         expression: TargetExpressionId,
     },
@@ -326,7 +328,7 @@ pub enum UniverseAction {
     },
     AddTargetExpressionTerm {
         expression: TargetExpressionId,
-        flow: DualVar,
+        flow: LocatedDualVar,
     },
     RemoveTargetExpressionTerm {
         expression: TargetExpressionId,
@@ -335,7 +337,7 @@ pub enum UniverseAction {
     SetTargetExpressionTermFlow {
         expression: TargetExpressionId,
         term: TargetTermId,
-        flow: DualVar,
+        flow: LocatedDualVar,
     },
     SetTargetExpressionTermCoefficient {
         expression: TargetExpressionId,

@@ -2047,6 +2047,9 @@
         {/if}
       </section>
     </aside>
+    {#if runtime.selectedUniverse}
+      <UniverseWorkspace universe={runtime.selectedUniverse} />
+    {/if}
   </main>
 </div>
 
@@ -2344,10 +2347,6 @@
       </div>
     </div>
   </div>
-{/if}
-
-{#if runtime.selectedUniverse}
-  <UniverseWorkspace universe={runtime.selectedUniverse} />
 {/if}
 
 {#if newUniverseOpen}
@@ -3317,6 +3316,7 @@
   /* ── 工作区 ─────────────────────────────────────────────────── */
 
   .workspace {
+    position: relative;
     flex: 1 1 auto;
     min-height: 0;
     display: grid;

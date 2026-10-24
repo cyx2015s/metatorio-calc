@@ -831,7 +831,9 @@ impl RuntimeState {
         universe_id: crate::id::UniverseId,
         action: crate::message::UniverseAction,
     ) -> Result<Outcome, RuntimeError> {
-        use crate::document::{LocatedTarget, LocatedTargetExpression, UniverseMechanicEntry};
+        use crate::document::{
+            LocatedTarget, LocatedTargetExpression, LocatedTargetTerm, UniverseMechanicEntry,
+        };
         use crate::message::UniverseAction;
         use metatorio_core::TransferLocatedMechanic;
 
@@ -934,6 +936,39 @@ impl RuntimeState {
                     &mut self.universe_mut(project_id, universe_id)?.strict_sink,
                     strict,
                 );
+                Ok(Outcome::meta_if(changed, project_id))
+            }
+            UniverseAction::SetMechanicLocation { mechanic, location } => {
+                if matches!(location, Location::Space) {
+                    if let Some(entry) = self
+                        .universe_mut(project_id, universe_id)?
+                        .mechanics
+                        .iter_mut()
+                        .find(|entry| entry.id == mechanic)
+                    {
+                        if matches!(entry.mechanic, LocatedMechanic::Transfer(_)) {
+                            return Err(RuntimeError::InvalidValue(
+                                "火箭转移的起点必须是星球".to_string(),
+                            ));
+                        }
+                    }
+                }
+                let universe = self.universe_mut(project_id, universe_id)?;
+                let entry = universe
+                    .mechanics
+                    .iter_mut()
+                    .find(|entry| entry.id == mechanic)
+                    .ok_or(RuntimeError::UniverseMechanicNotFound {
+                        project: project_id,
+                        universe: universe_id,
+                        mechanic,
+                    })?;
+                let changed = match &mut entry.mechanic {
+                    LocatedMechanic::Local(local) => replace(&mut local.location, location),
+                    LocatedMechanic::Transfer(transfer) => {
+                        replace(&mut transfer.location, location)
+                    }
+                };
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::SetLocalMechanic {
@@ -1046,13 +1081,12 @@ impl RuntimeState {
                 let changed = move_item(&mut universe.targets, index, position);
                 Ok(Outcome::meta_if(changed, project_id))
             }
-            UniverseAction::AddTargetExpression { location } => {
+            UniverseAction::AddTargetExpression => {
                 let expression_id = self.allocate_id();
                 self.universe_mut(project_id, universe_id)?
                     .target_expressions
                     .push(LocatedTargetExpression {
                         id: expression_id,
-                        location,
                         constant: 1.0,
                         terms: Vec::new(),
                     });
@@ -1092,7 +1126,7 @@ impl RuntimeState {
                     .iter_mut()
                     .find(|candidate| candidate.id == expression)
                     .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
-                entry.terms.push(TargetTerm {
+                entry.terms.push(LocatedTargetTerm {
                     id: term_id,
                     flow,
                     coefficient: 1.0,
@@ -1734,6 +1768,28 @@ impl RuntimeState {
             .iter_mut()
             .find(|candidate| candidate.id == universe)
             .ok_or(RuntimeError::UniverseNotFound { project, universe })
+    }
+
+    /// Replace all universe mechanics (used by global universe auto-plan).
+    pub fn replace_universe_mechanics(
+        &mut self,
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+        mechanics: Vec<LocatedMechanic>,
+    ) -> Result<(), RuntimeError> {
+        use crate::document::UniverseMechanicEntry;
+        let ids: Vec<MechanicId> = (0..mechanics.len()).map(|_| self.allocate_id()).collect();
+        let universe = self.universe_mut(project, universe)?;
+        universe.mechanics = mechanics
+            .into_iter()
+            .zip(ids)
+            .map(|(mechanic, id)| UniverseMechanicEntry {
+                id,
+                enabled: true,
+                mechanic,
+            })
+            .collect();
+        Ok(())
     }
 
     /// Replace local mechanics at one location (used by universe auto-plan).

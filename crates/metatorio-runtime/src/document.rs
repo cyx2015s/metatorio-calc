@@ -1,6 +1,5 @@
 use metatorio_core::{
-    Accessible, DualVar, IdWithQuality, LocatedDualVar, LocatedMechanic, Location, Mechanic,
-    ModuleConfig,
+    Accessible, DualVar, IdWithQuality, LocatedDualVar, LocatedMechanic, Mechanic, ModuleConfig,
 };
 use metatorio_solver::LpSolver;
 use schemars::JsonSchema;
@@ -251,23 +250,39 @@ impl Default for LocatedTarget {
     }
 }
 
-/// 带地点的目标表达式：常数与各项都在同一地点结算。
+/// 宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct LocatedTargetExpression {
     pub id: TargetExpressionId,
-    pub location: Location,
     pub constant: f64,
-    pub terms: Vec<TargetTerm>,
+    pub terms: Vec<LocatedTargetTerm>,
 }
 
 impl Default for LocatedTargetExpression {
     fn default() -> Self {
         Self {
             id: TargetExpressionId::default(),
-            location: Location::Space,
             constant: 1.0,
             terms: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct LocatedTargetTerm {
+    pub id: TargetTermId,
+    pub flow: LocatedDualVar,
+    pub coefficient: f64,
+}
+
+impl Default for LocatedTargetTerm {
+    fn default() -> Self {
+        Self {
+            id: TargetTermId::default(),
+            flow: LocatedDualVar::default(),
+            coefficient: 1.0,
         }
     }
 }

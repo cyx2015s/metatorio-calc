@@ -394,6 +394,7 @@ export type UniverseAction =
   | { "set-mechanic-enabled": { mechanic: MechanicId; enabled: boolean } }
   | { "set-strict-source": { strict: boolean } }
   | { "set-strict-sink": { strict: boolean } }
+  | { "set-mechanic-location": { mechanic: MechanicId; location: Location } }
   | { "set-local-mechanic": { mechanic: MechanicId; mechanic_json: string } }
   | { mechanic: { mechanic: MechanicId; action: MechanicAction } }
   | { "add-target": { flow: LocatedDualVar; amount: number } }
@@ -401,12 +402,12 @@ export type UniverseAction =
   | { "set-target-flow": { target: TargetId; flow: LocatedDualVar } }
   | { "set-target-amount": { target: TargetId; amount: number } }
   | { "reorder-target": { target: TargetId; position: number } }
-  | { "add-target-expression": { location: Location } }
+  | "add-target-expression"
   | { "remove-target-expression": { expression: TargetExpressionId } }
   | { "set-target-expression-constant": { expression: TargetExpressionId; constant: number } }
-  | { "add-target-expression-term": { expression: TargetExpressionId; flow: DualVar } }
+  | { "add-target-expression-term": { expression: TargetExpressionId; flow: LocatedDualVar } }
   | { "remove-target-expression-term": { expression: TargetExpressionId; term: TargetTermId } }
-  | { "set-target-expression-term-flow": { expression: TargetExpressionId; term: TargetTermId; flow: DualVar } }
+  | { "set-target-expression-term-flow": { expression: TargetExpressionId; term: TargetTermId; flow: LocatedDualVar } }
   | { "set-target-expression-term-coefficient": { expression: TargetExpressionId; term: TargetTermId; coefficient: number } };
 
 export type AppMessage =
@@ -537,11 +538,16 @@ export interface LocatedTarget {
   amount: number;
 }
 
+export interface LocatedTargetTerm {
+  id: TargetTermId;
+  flow: LocatedDualVar;
+  coefficient: number;
+}
+
 export interface LocatedTargetExpression {
   id: TargetExpressionId;
-  location: Location;
   constant: number;
-  terms: TargetTerm[];
+  terms: LocatedTargetTerm[];
 }
 
 export interface UniverseDocument {

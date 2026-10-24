@@ -192,6 +192,11 @@ pub(crate) fn used_locations(universe: &UniverseDocument) -> BTreeSet<Location> 
     for target in &universe.targets {
         locations.insert(target.flow.location.clone());
     }
+    for expression in &universe.target_expressions {
+        for term in &expression.terms {
+            locations.insert(term.flow.location.clone());
+        }
+    }
     locations
 }
 
@@ -360,10 +365,7 @@ pub fn solve_universe(
     let mut expression_flows: SolverFlow<LocatedDualVar> = SolverFlow::default();
     for expression in &universe.target_expressions {
         for term in &expression.terms {
-            expression_flows.insert(
-                LocatedDualVar::new(expression.location.clone(), term.flow.clone()),
-                1.0,
-            );
+            expression_flows.insert(term.flow.clone(), 1.0);
         }
     }
     let mut conversion_target = target.clone();
@@ -449,12 +451,7 @@ pub fn solve_universe(
             coefficients: expression
                 .terms
                 .iter()
-                .map(|term| {
-                    (
-                        LocatedDualVar::new(expression.location.clone(), term.flow.clone()),
-                        term.coefficient,
-                    )
-                })
+                .map(|term| (term.flow.clone(), term.coefficient))
                 .collect(),
         })
         .collect();
@@ -562,7 +559,7 @@ pub fn solve_universe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::{LocatedTarget, ProjectSettings, TargetTerm, UniverseMechanicEntry};
+    use crate::document::{LocatedTarget, ProjectSettings, UniverseMechanicEntry};
     use metatorio_core::{LocalLocatedMechanic, LocatedMechanic, Mechanic, RecipeMechanic};
     use serde_json::json;
 
@@ -626,13 +623,22 @@ mod tests {
             }],
             target_expressions: vec![crate::document::LocatedTargetExpression {
                 id: crate::id::TargetExpressionId(6),
-                location: Location::planet("nauvis"),
-                constant: 1.0,
-                terms: vec![TargetTerm {
-                    id: crate::id::TargetTermId(7),
-                    flow: DualVar::Item(item("iron-ore")),
-                    coefficient: 1.0,
-                }],
+                constant: 2.0,
+                terms: vec![
+                    crate::document::LocatedTargetTerm {
+                        id: crate::id::TargetTermId(7),
+                        flow: LocatedDualVar::new(
+                            Location::planet("nauvis"),
+                            DualVar::Item(item("iron-ore")),
+                        ),
+                        coefficient: 1.0,
+                    },
+                    crate::document::LocatedTargetTerm {
+                        id: crate::id::TargetTermId(8),
+                        flow: LocatedDualVar::new(Location::Space, DualVar::Item(item("iron-ore"))),
+                        coefficient: 1.0,
+                    },
+                ],
             }],
             strict_source: false,
             strict_sink: false,
@@ -774,6 +780,201 @@ mod tests {
         assert!(
             matches!(result.status, UniverseSolveStatus::Solved { .. }),
             "{result:?}"
+        );
+    }
+
+    #[test]
+    fn vanilla_factory_auto_plan_iron_plate() {
+        use crate::document::{
+            AppDocument, DOCUMENT_SCHEMA_VERSION, FactoryDocument, FactorySettings, FlowTarget,
+            ProjectDocument, ProjectSettings,
+        };
+        use crate::id::FactoryId;
+        use crate::id::ProjectId;
+        use crate::solve::Runtime;
+
+        let dump: serde_json::Value =
+            serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap();
+        let store = PrototypeStore::load(&dump).expect("vanilla store");
+        let factory = FactoryDocument {
+            id: FactoryId(2),
+            name: "iron".to_string(),
+            settings: FactorySettings {
+                planet: Some("nauvis".to_string()),
+                ..FactorySettings::default()
+            },
+            targets: vec![FlowTarget {
+                id: crate::id::TargetId(3),
+                flow: DualVar::Item(item("iron-plate")),
+                amount: 1.0,
+            }],
+            ..FactoryDocument::default()
+        };
+        let project = ProjectDocument {
+            id: ProjectId(1),
+            name: "vanilla".to_string(),
+            context_id: Some("vanilla".to_string()),
+            settings: ProjectSettings {
+                all_accessible: true,
+                ..ProjectSettings::default()
+            },
+            factories: vec![factory],
+            ..ProjectDocument::default()
+        };
+        let document = AppDocument {
+            schema_version: DOCUMENT_SCHEMA_VERSION,
+            projects: vec![project],
+        };
+        let mut runtime = Runtime::from_document(document);
+        runtime.install_context("vanilla".to_string(), store);
+        runtime.set_active_context(Some("vanilla".to_string()));
+        runtime
+            .auto_plan(ProjectId(1), FactoryId(2))
+            .expect("factory auto plan");
+        assert!(
+            runtime
+                .state
+                .factory(ProjectId(1), FactoryId(2))
+                .unwrap()
+                .mechanics
+                .iter()
+                .any(|entry| format!("{:?}", entry.mechanic).contains("iron")),
+            "factory auto plan produced no iron mechanics"
+        );
+    }
+
+    #[test]
+    fn vanilla_universe_auto_plan_iron_plate() {
+        use crate::document::{
+            AppDocument, DOCUMENT_SCHEMA_VERSION, LocatedTarget, ProjectDocument, ProjectSettings,
+            UniverseDocument,
+        };
+        use crate::id::ProjectId;
+        use crate::solve::Runtime;
+
+        let dump: serde_json::Value =
+            serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap();
+        let store = PrototypeStore::load(&dump).expect("vanilla store");
+        let universe = UniverseDocument {
+            id: UniverseId(2),
+            name: "iron".to_string(),
+            targets: vec![LocatedTarget {
+                id: crate::id::TargetId(3),
+                flow: LocatedDualVar::new(
+                    Location::planet("nauvis"),
+                    DualVar::Item(item("iron-plate")),
+                ),
+                amount: 1.0,
+            }],
+            ..UniverseDocument::default()
+        };
+        let project = ProjectDocument {
+            id: ProjectId(1),
+            name: "vanilla".to_string(),
+            context_id: Some("vanilla".to_string()),
+            settings: ProjectSettings {
+                all_accessible: true,
+                ..ProjectSettings::default()
+            },
+            universes: vec![universe],
+            ..ProjectDocument::default()
+        };
+        let document = AppDocument {
+            schema_version: DOCUMENT_SCHEMA_VERSION,
+            projects: vec![project],
+        };
+        let mut runtime = Runtime::from_document(document);
+        runtime.install_context("vanilla".to_string(), store);
+        runtime.set_active_context(Some("vanilla".to_string()));
+        let result = runtime
+            .auto_plan_universe(ProjectId(1), UniverseId(2))
+            .expect("universe auto plan");
+        let UniverseSolveStatus::Solved { flows, .. } = result.status else {
+            panic!("iron plate should be planned: {result:?}");
+        };
+        assert!(
+            flows.iter().any(|flow| {
+                flow.flow.location == Location::planet("nauvis")
+                    && flow.flow.flow == DualVar::Item(item("iron-plate"))
+                    && flow.amount > 0.9
+            }),
+            "{flows:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "full vanilla universe auto-plan (33k candidates); run with --release --ignored"]
+    fn vanilla_auto_plan_finds_quantum_processor_without_target_location() {
+        use crate::document::{
+            AppDocument, DOCUMENT_SCHEMA_VERSION, LocatedTargetExpression, LocatedTargetTerm,
+            ProjectDocument, ProjectSettings, UniverseDocument,
+        };
+        use crate::id::ProjectId;
+        use crate::solve::Runtime;
+
+        let dump: serde_json::Value =
+            serde_json::from_str(include_str!("../../../assets/data-raw-dump.json")).unwrap();
+        let store = PrototypeStore::load(&dump).expect("vanilla store");
+        let quantum = item("quantum-processor");
+        let universe = UniverseDocument {
+            id: UniverseId(2),
+            name: "vanilla quantum".to_string(),
+            target_expressions: vec![LocatedTargetExpression {
+                id: crate::id::TargetExpressionId(3),
+                constant: 1.0,
+                terms: vec![
+                    LocatedTargetTerm {
+                        id: crate::id::TargetTermId(4),
+                        flow: LocatedDualVar::new(
+                            Location::planet("aquilo"),
+                            DualVar::Item(quantum.clone()),
+                        ),
+                        coefficient: 1.0,
+                    },
+                    LocatedTargetTerm {
+                        id: crate::id::TargetTermId(5),
+                        flow: LocatedDualVar::new(
+                            Location::planet("nauvis"),
+                            DualVar::Item(quantum.clone()),
+                        ),
+                        coefficient: 1.0,
+                    },
+                ],
+            }],
+            ..UniverseDocument::default()
+        };
+        let project = ProjectDocument {
+            id: ProjectId(1),
+            name: "vanilla".to_string(),
+            context_id: Some("vanilla".to_string()),
+            settings: ProjectSettings {
+                all_accessible: true,
+                solver: metatorio_solver::LpSolver::Highs,
+                ..ProjectSettings::default()
+            },
+            universes: vec![universe],
+            ..ProjectDocument::default()
+        };
+        let document = AppDocument {
+            schema_version: DOCUMENT_SCHEMA_VERSION,
+            projects: vec![project],
+        };
+        let mut runtime = Runtime::from_document(document);
+        runtime.install_context("vanilla".to_string(), store);
+        runtime.set_active_context(Some("vanilla".to_string()));
+        let result = runtime
+            .auto_plan_universe(ProjectId(1), UniverseId(2))
+            .expect("universe auto plan");
+        let UniverseSolveStatus::Solved { flows, .. } = result.status else {
+            panic!("quantum processor should be planned: {result:?}");
+        };
+        assert!(
+            flows.iter().any(|flow| {
+                flow.flow.location == Location::planet("aquilo")
+                    && flow.flow.flow == DualVar::Item(quantum.clone())
+                    && flow.amount > 0.9
+            }),
+            "{flows:?}"
         );
     }
 }

@@ -1065,6 +1065,10 @@ class RuntimeStore {
     await this.universeAction({ "set-strict-sink": { strict } });
   }
 
+  async setUniverseMechanicLocation(mechanic: MechanicId, location: Location): Promise<void> {
+    await this.universeAction({ "set-mechanic-location": { mechanic, location } });
+  }
+
   async addUniverseTarget(flow: LocatedDualVar, amount: number): Promise<void> {
     await this.universeAction({ "add-target": { flow, amount } });
   }
@@ -1077,8 +1081,8 @@ class RuntimeStore {
     await this.universeAction({ "set-target-amount": { target, amount } });
   }
 
-  async addUniverseTargetExpression(location: Location): Promise<void> {
-    await this.universeAction({ "add-target-expression": { location } });
+  async addUniverseTargetExpression(): Promise<void> {
+    await this.universeAction("add-target-expression");
   }
 
   async removeUniverseTargetExpression(expression: TargetExpressionId): Promise<void> {
@@ -1089,7 +1093,7 @@ class RuntimeStore {
     await this.universeAction({ "set-target-expression-constant": { expression, constant } });
   }
 
-  async addUniverseTargetExpressionTerm(expression: TargetExpressionId, flow: DualVar): Promise<void> {
+  async addUniverseTargetExpressionTerm(expression: TargetExpressionId, flow: LocatedDualVar): Promise<void> {
     await this.universeAction({ "add-target-expression-term": { expression, flow } });
   }
 
@@ -1097,7 +1101,7 @@ class RuntimeStore {
     await this.universeAction({ "remove-target-expression-term": { expression, term } });
   }
 
-  async setUniverseTargetExpressionTermFlow(expression: TargetExpressionId, term: TargetTermId, flow: DualVar): Promise<void> {
+  async setUniverseTargetExpressionTermFlow(expression: TargetExpressionId, term: TargetTermId, flow: LocatedDualVar): Promise<void> {
     await this.universeAction({ "set-target-expression-term-flow": { expression, term, flow } });
   }
 

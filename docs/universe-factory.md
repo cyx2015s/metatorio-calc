@@ -32,9 +32,12 @@ constraints are not edited here: every local mechanic owns its location's
 environment. The workspace shares the factory workflow where it applies:
 
 - list/grid views and text filtering for located mechanics;
-- target and located target-expression editing;
+- target editing and arbitrary linear target expressions: every term carries
+  its own location, so one expression can mix items from any planets or Space;
 - local mechanic editing (recipe/mining/item-fuel inline, advanced JSON for the
-  remaining kinds), transfers, enable/disable/delete;
-- per-location automatic planning using the normal factory planner, followed by
-  a joint universe solve;
+  remaining kinds), per-mechanic location editing, transfers,
+  enable/disable/delete;
+- global automatic planning: enumerate every planet's local candidates, all
+  Space candidates, and an item transfer edge from every planet, then solve one
+  joint universe LP;
 - solve results grouped by location.

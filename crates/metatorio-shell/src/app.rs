@@ -2962,7 +2962,7 @@ pub(crate) fn ensure_quality_limit(
             }
             for expression in &universe.target_expressions {
                 for term in &expression.terms {
-                    max_level = max_level.max(flow_quality_level(&qualities, &term.flow));
+                    max_level = max_level.max(flow_quality_level(&qualities, &term.flow.flow));
                 }
             }
             for entry in &universe.mechanics {
