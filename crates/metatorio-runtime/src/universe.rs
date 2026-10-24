@@ -865,7 +865,7 @@ mod tests {
                     Location::planet("nauvis"),
                     DualVar::Item(item("iron-plate")),
                 ),
-                amount: 1.0,
+                amount: 1000.0,
             }],
             ..UniverseDocument::default()
         };
