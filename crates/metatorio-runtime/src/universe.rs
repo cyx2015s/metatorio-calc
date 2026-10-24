@@ -134,7 +134,7 @@ pub(crate) fn environment_for(location: &Location) -> (Option<&str>, Option<&str
     }
 }
 
-fn locate_flow(location: &Location, flow: Flow) -> SolverFlow<LocatedDualVar> {
+pub(crate) fn locate_flow(location: &Location, flow: Flow) -> SolverFlow<LocatedDualVar> {
     flow.into_iter()
         .map(|(flow, amount)| (LocatedDualVar::new(location.clone(), flow), amount))
         .collect()
@@ -143,7 +143,7 @@ fn locate_flow(location: &Location, flow: Flow) -> SolverFlow<LocatedDualVar> {
 /// All asteroid-chunk items are available in space. This intentionally unions
 /// every chunk prototype instead of relying on one space-location name: a
 /// universe factory has one abstract Space location.
-fn space_source_flows(store: &PrototypeStore) -> Flow {
+pub(crate) fn space_source_flows(store: &PrototypeStore) -> Flow {
     let mut out = Flow::default();
     for record in store.group(PrototypeGroup::AsteroidChunk) {
         let Some(chunk) = record.component::<metatorio_data::AsteroidChunkComponent>() else {
@@ -175,7 +175,7 @@ fn space_source_flows(store: &PrototypeStore) -> Flow {
     out
 }
 
-fn planet_source_flows(store: &PrototypeStore, planet: &str) -> Flow {
+pub(crate) fn planet_source_flows(store: &PrototypeStore, planet: &str) -> Flow {
     crate::planet::implicit_source_flows(store, planet, None)
 }
 
@@ -844,6 +844,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "full global strict LP; Rust backend takes minutes, run with --release --ignored"]
     fn vanilla_universe_auto_plan_iron_plate() {
         use crate::document::{
             AppDocument, DOCUMENT_SCHEMA_VERSION, LocatedTarget, ProjectDocument, ProjectSettings,
@@ -874,6 +875,7 @@ mod tests {
             context_id: Some("vanilla".to_string()),
             settings: ProjectSettings {
                 all_accessible: true,
+                solver: metatorio_solver::LpSolver::Highs,
                 ..ProjectSettings::default()
             },
             universes: vec![universe],

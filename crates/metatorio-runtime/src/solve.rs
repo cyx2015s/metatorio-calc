@@ -894,7 +894,7 @@ impl Runtime {
                     terms: expression.terms.clone(),
                 })
                 .collect(),
-            strict_source: false,
+            strict_source: true,
             strict_sink: universe_doc.strict_sink,
         };
         let planned = crate::universe::solve_universe(store, project_doc, &temp, &accessibility)
@@ -909,6 +909,7 @@ impl Runtime {
             .filter(|solution| solution.amount > 1e-9)
             .filter_map(|solution| mechanics_by_id.get(&solution.mechanic).cloned())
             .collect();
+
         self.state
             .replace_universe_mechanics(project_id, universe_id, used)?;
         self.solve_universe(project_id, universe_id)
