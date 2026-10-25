@@ -10,7 +10,7 @@ export const locationLayoutOptions = {
 };
 export const nodeLayoutSize = (node: NetworkModel['nodes'][number]) => ({id:node.id,
   width:node.kind==='mechanic'?145:115,
-  height:Math.max(100,(node.kind==='mechanic'?48:38)*2+16+node.label.split('\n').length*13)});
+  height:Math.max(100,(node.kind==='mechanic'?48:38)*2+16+node.label.split('\n').length*26)});
 
 /** Lay out each location, then arrange whole locations using their transport edges.
  * Cross-location edges remain in the rendered graph; they only connect cluster boxes here. */

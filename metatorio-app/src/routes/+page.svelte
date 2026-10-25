@@ -411,10 +411,10 @@
   const universe = $derived(runtime.selectedUniverse);
   let factory = $derived(universe ? universeView(universe) : runtime.selectedFactory);
   let universeBusy = $state(false);
-  async function runUniverse(auto=false) {
+  async function autoPlanUniverse() {
     if (universeBusy) return;
     universeBusy=true;
-    try {if(auto) await runtime.autoPlanSelectedUniverse(); else await runtime.solveSelectedUniverse();}
+    try {await runtime.autoPlanSelectedUniverse();}
     finally {universeBusy=false;}
   }
   /** 当前项目绑定的游戏上下文（未绑定时回退到全局激活上下文）。 */
@@ -1658,7 +1658,7 @@
         <button
           class="btn primary"
           title="自动规划：按规划偏好的枚举列表生成候选机制 → 选优 → 回写机制列表。总是按严格供给求解，并在完成后自动开启严格供给"
-          onclick={() => universe ? runUniverse(true) : runtime.autoPlan().catch(() => {})}
+          onclick={() => universe ? autoPlanUniverse() : runtime.autoPlan().catch(() => {})}
           disabled={universeBusy || runtime.autoPlanning || !factory}
         >
           {universeBusy || runtime.autoPlanning ? "规划中…" : "自动规划"}
@@ -1696,10 +1696,9 @@
           title="按消耗或产出对象筛选机制；仅影响显示，不改变工厂或求解"
           onclick={() => filterOpen = !filterOpen} disabled={!factory}>筛选{filterActive ? " · 已启用" : ""}</button>
         {#if universe}
-          <button class="btn" disabled={universeBusy} onclick={()=>runUniverse()}>求解</button>
           {#each ['rocket-export','orbital-drop'] as direction}
             <button class="btn" disabled={runtime.universeAddLocation.kind !== 'planet'}
-              title={direction==='rocket-export'?`从左栏所选星球发往太空；消耗物品与火箭载荷；每件成本：重量（kg）× ${project?.settings.orbital_transport_costs?.rocket_export_per_kg??1}`:`从太空投送到左栏所选星球；每件成本：${project?.settings.orbital_transport_costs?.orbital_drop_per_stack??64} ÷ 堆叠数量；变质物品额外成本：${project?.settings.orbital_transport_costs?.orbital_drop_spoil_penalty??3600} ÷ 有效变质时间（tick）`}
+              title={direction==='rocket-export'?`从左栏所选星球发往太空；消耗物品与火箭载荷；每件成本：重量（kg）× ${project?.settings.orbital_transport_costs?.rocket_export_per_kg??1}`:`从太空投送到左栏所选星球；每件成本：${project?.settings.orbital_transport_costs?.orbital_drop_per_stack??64} ÷ 堆叠数量；变质物品额外成本：${project?.settings.orbital_transport_costs?.orbital_drop_spoil_penalty??216000} ÷ 有效变质时间（tick）`}
               onclick={()=>{const location=runtime.universeAddLocation;if(location.kind!=='planet')return;selector={kind:"item",kinds:[],title:direction==='rocket-export'?"选择火箭发运物品":"选择轨道投送物品",onSelect:(name,quality)=>direction==='rocket-export'?runtime.addUniverseRocketExport(location,{id:name,quality}):runtime.addUniverseOrbitalDrop(location,{id:name,quality})}}}>
               + {direction==='rocket-export'?'火箭发运':'轨道投送'}
             </button>

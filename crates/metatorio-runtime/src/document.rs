@@ -150,7 +150,7 @@ impl Default for OrbitalTransportCosts {
         Self {
             rocket_export_per_kg: 1.0,
             orbital_drop_per_stack: 64.0,
-            orbital_drop_spoil_penalty: 3600.0,
+            orbital_drop_spoil_penalty: 60.0 * 60.0 * 60.0,
         }
     }
 }

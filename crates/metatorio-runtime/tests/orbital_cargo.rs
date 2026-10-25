@@ -222,7 +222,7 @@ fn project_price_overrides_roundtrip_and_reach_joint_planning() {
             .settings
             .orbital_transport_costs
             .orbital_drop_spoil_penalty,
-        3600.0
+        216000.0
     );
     let document: AppDocument =
         serde_json::from_value(serde_json::to_value(&r.state.document).unwrap()).unwrap();
@@ -307,7 +307,7 @@ fn drop_spoil_penalty_uses_ticks_and_quality_but_exports_are_unaffected() {
         "item":{"food":{"stack_size":50,"weight":50000,"spoil_ticks":3600,"spoil_result":"waste"},"waste":{"stack_size":50}},
         "quality":{"normal":{"level":0,"next":"rare"},"rare":{"level":2,"spoil_ticks_multiplier":2}}
     })).unwrap();
-    for (quality, expected) in [("normal", 2.28), ("rare", 1.78)] {
+    for (quality, expected) in [("normal", 61.28), ("rare", 31.28)] {
         let cargo = OrbitalCargoMechanic {
             location: Location::planet("a"),
             item: IdWithQuality::new("food", quality),
@@ -356,7 +356,7 @@ fn spoil_penalty_reaches_joint_planning_and_written_mechanic_cost() {
     else {
         panic!("{result:?}")
     };
-    assert!((cost - 378.0).abs() < 1e-8);
+    assert!((cost - 3328.0).abs() < 1e-8);
     let entries = &r.state.document.projects[0].universes[0].mechanics;
     let drop = entries
         .iter()
@@ -368,7 +368,7 @@ fn spoil_penalty_reaches_joint_planning_and_written_mechanic_cost() {
             .find(|m| m.mechanic == drop.id)
             .unwrap()
             .cost
-            - 1.78)
+            - 31.28)
             .abs()
             < 1e-10
     );

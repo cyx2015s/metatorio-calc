@@ -1,5 +1,6 @@
 <script lang="ts">
   import {layoutLocations} from "$lib/mechanics/location-layout";
+  import {networkPngSize} from "$lib/mechanics/network-export";
   import {locationLabel} from "$lib/mechanics/located";
   import { onMount, untrack, tick } from 'svelte';
   import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
@@ -94,10 +95,10 @@
     const uiFont = computed.fontFamily;
     const monoFont = computed.getPropertyValue('--mono').trim() || uiFont;
     return [
-      {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11, 'font-family': uiFont,
-        'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5,
+      {selector: 'node', style: {label: 'data(label)', color: p.text, 'font-size': 11 * iconScale, 'font-family': uiFont,
+        'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5 * iconScale,
         width: 38 * iconScale, height: 38 * iconScale, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
-      {selector: 'node[kind="location"]', style: {shape:'round-rectangle', 'background-opacity':0.06, 'background-color':p.text, 'border-style':'dashed', 'border-width':1, padding:'35px', 'text-valign':'top', 'font-size':16, 'font-weight':600, 'text-margin-y':-10}},
+      {selector: 'node[kind="location"]', style: {shape:'round-rectangle', 'background-opacity':0.06, 'background-color':p.text, 'border-style':'dashed', 'border-width':1, padding:'35px', 'text-valign':'top', 'font-size':16 * iconScale, 'font-weight':600, 'text-margin-y':-10 * iconScale}},
       {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52 * iconScale, height: 48 * iconScale, 'background-color': '#99703b'}},
       {selector: 'node[fluid]', style: {'background-color': '#3b78a4'}},
       {selector: 'node[utility]', style: {'background-color': '#79599d'}},
@@ -108,11 +109,11 @@
       {selector: 'node[icon]', style: {'background-image': 'data(icon)', 'background-fit': 'contain', 'background-clip': 'none'}},
       {selector: 'edge', style: {width: 1.5, 'line-color': p.muted, 'target-arrow-color': p.muted,
         'target-arrow-shape': 'triangle', 'curve-style': 'bezier', label: 'data(label)', color: p.text,
-        'font-size': 10, 'font-family': monoFont, 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-background-color': p.panel,
+        'font-size': 10 * iconScale, 'font-family': monoFont, 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-background-color': p.panel,
         'text-background-opacity': 0.9, 'text-background-padding': '2px'}},
       {selector: 'edge[utility]', style: {opacity: 0.3, label: '', 'curve-style': 'straight'}},
       {selector: 'edge[kind="collapsed"]', style: {'font-family': uiFont}},
-      {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9, 'font-family': uiFont}},
+      {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9 * iconScale, 'font-family': uiFont}},
       {selector: ':selected, .search-match', style: {'border-color': '#d49b14', 'border-width': 4, 'line-color': '#d49b14', 'target-arrow-color': '#d49b14'}},
     ];
   }
@@ -269,7 +270,7 @@
     // Reserve the largest supported icon plus its multiline caption up front,
     // so changing icon size remains layout-free without covering other labels.
     }, children: material.map(node => ({id: node.id, width: node.kind === 'mechanic' ? 145 : 115,
-      height: Math.max(100, (node.kind === 'mechanic' ? 48 : 38) * 2 + 16 + node.label.split('\n').length * 13)})),
+      height: Math.max(100, (node.kind === 'mechanic' ? 48 : 38) * 2 + 16 + node.label.split('\n').length * 26)})),
       edges: snapshot.edges.filter(edge => !edge.utility).map(edge => ({id: edge.id, sources: [edge.source], targets: [edge.target]}))});
     if (!cy || !mounted || revision !== generation) return;
     let positions = new Map(laidOut.children?.map(node => [node.id, {x: (node.x ?? 0) + 75, y: (node.y ?? 0) + 45}]));
@@ -344,11 +345,13 @@
     if (!cy || busy || exporting) return;
     exporting = true; exportError = ''; exportStatus = '正在生成 PNG…';
     try {
-      const blob = await cy.png({output: 'blob-promise', full: true, scale: 1, bg: palette().panel});
+      const bounds = cy.elements().boundingBox();
+      const size = networkPngSize(bounds.w, bounds.h);
+      const blob = await cy.png({output: 'blob-promise', full: true, maxWidth: size.width, maxHeight: size.height, bg: palette().panel});
       const bytes = new Uint8Array(await blob.arrayBuffer());
       exportStatus = '请选择保存位置并确认保存…';
       const path = await saveNetworkPng(`metatorio-network-${project}-${factory}.png`, bytes);
-      exportStatus = path === null ? '已取消导出' : `PNG 已保存到：${path}`;
+      exportStatus = path === null ? '已取消导出' : `PNG 已保存到：${path}${size.reduced ? `（大图已缩小至 ${Number((size.scale * 100).toPrecision(3))}%）` : ''}`;
     } catch (reason) {
       exportStatus = ''; exportError = `PNG 导出失败：${String(reason)}`;
     } finally { exporting = false; }
@@ -384,8 +387,8 @@
     <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
     {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
     <button class="btn" disabled={!ready || busy || exporting} onclick={exportPng}>{exporting ? '导出中…' : '导出 PNG'}</button>
-    <label title="只调整图标大小，保持节点位置和画布缩放">图标大小
-      <select aria-label="网络图标大小" bind:value={iconScale}>
+    <label title="图标与网络文字同比缩放，保持节点位置和画布缩放">显示大小
+      <select aria-label="网络显示大小" bind:value={iconScale}>
         {#each [0.75, 1, 1.25, 1.5, 2] as scale}<option value={scale}>{scale * 100}%</option>{/each}
       </select>
     </label>
