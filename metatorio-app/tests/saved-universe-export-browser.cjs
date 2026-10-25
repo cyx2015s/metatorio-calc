@@ -70,10 +70,17 @@ const root=path.resolve(__dirname,'..'),port=5218,url=`http://127.0.0.1:${port}`
       console.log(await page.evaluate(()=>({saved:window.__realFixtureExports.length,status:document.querySelector('.export-status')?.textContent,alerts:[...document.querySelectorAll('.network-view [role=alert]')].map(e=>e.textContent),buttons:[...document.querySelectorAll('.network-toolbar button')].map(e=>e.textContent)})));
       throw error;
     }
-    assert.equal(await graph.getByRole('alert').count(),0,await graph.innerText());
+    if(await graph.getByRole('alert').count()) {
+      const error=await graph.getByRole('alert').textContent();
+      assert.match(error,/PNG 导出失败.*(?:canvas|Canvas|toBlob)/);
+      assert.equal(await page.evaluate(()=>window.__realFixtureExports.length),count);
+      console.log(JSON.stringify({universe:entry.universe,clustered,...bounds,rendererError:error}));
+      continue;
+    }
     const saved=await page.evaluate(()=>window.__realFixtureExports.at(-1));
     assert.equal(await page.evaluate(()=>window.__realFixtureExports.length),count+1);
-    assert.ok(saved.width<=8192&&saved.height<=8192&&saved.width*saved.height<=16*1024*1024);
+    assert.equal(saved.width,Math.ceil(bounds.width));
+    assert.equal(saved.height,Math.ceil(bounds.height));
     console.log(JSON.stringify({universe:entry.universe,clustered,mechanics:entry.preview.mechanics.length,...bounds,pngWidth:saved.width,pngHeight:saved.height}));
    }
    assert.deepEqual(errors,[]);await page.close();

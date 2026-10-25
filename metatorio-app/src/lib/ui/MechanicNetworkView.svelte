@@ -351,7 +351,7 @@
       const bytes = new Uint8Array(await blob.arrayBuffer());
       exportStatus = '请选择保存位置并确认保存…';
       const path = await saveNetworkPng(`metatorio-network-${project}-${factory}.png`, bytes);
-      exportStatus = path === null ? '已取消导出' : `PNG 已保存到：${path}${size.reduced ? `（大图已缩小至 ${Number((size.scale * 100).toPrecision(3))}%）` : ''}`;
+      exportStatus = path === null ? '已取消导出' : `PNG 已保存到：${path}`;
     } catch (reason) {
       exportStatus = ''; exportError = `PNG 导出失败：${String(reason)}`;
     } finally { exporting = false; }

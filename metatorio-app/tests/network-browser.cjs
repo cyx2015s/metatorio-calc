@@ -34,7 +34,7 @@ const url = `http://127.0.0.1:${port}`;
           return Array.from(atob(canvas.toDataURL().split(',')[1]), c => c.charCodeAt(0));
         }
         if (command === 'save_network_png') {
-          window.__pngExports.push(args);
+          window.__pngExports.push({...args,bytes:args.bytes.slice(0,24)});
           return new Promise((resolve, reject) => {
             window.__finishPngSave = mode => {
               window.__finishPngSave = null;
@@ -240,6 +240,9 @@ const url = `http://127.0.0.1:${port}`;
     await ready();
     await graph.getByRole('button', {name: '重排', exact: true}).click();
     await ready();
+    if (await graph.getByRole('button', {name:'关闭网络详情', exact:true}).count()) await graph.getByRole('button', {name:'关闭网络详情', exact:true}).click();
+    // Keep this repeated save/error test compact; large-size coverage lives in the universe regression.
+    await graph.locator('.network-canvas').evaluate(el=>el._cyreg.cy.nodes().forEach((n,i)=>n.position({x:(i%15)*80,y:Math.floor(i/15)*80})));
     const exportPng = async (mode = 'success') => {
       if (process.env.NETWORK_TEST_TRACE) console.log(`export start: ${mode}`);
       await graph.getByRole('button', {name: '导出 PNG', exact: true}).click();
@@ -254,7 +257,11 @@ const url = `http://127.0.0.1:${port}`;
       await graph.getByRole('button', {name: '导出 PNG', exact: true}).waitFor();
       return Buffer.from(bytes);
     };
+    const bounds=await graph.locator('.network-canvas').evaluate(el=>{const b=el._cyreg.cy.elements().boundingBox();return {w:Math.ceil(b.w),h:Math.ceil(b.h),dpr:window.devicePixelRatio};});
     const png = await exportPng();
+    assert.equal(bounds.dpr,2);
+    assert.equal(png.readUInt32BE(16),bounds.w,'device pixel ratio must not double PNG width');
+    assert.equal(png.readUInt32BE(20),bounds.h,'device pixel ratio must not double PNG height');
     assert.ok((await graph.locator('.export-status').textContent()).startsWith('PNG 已保存到：C:\\Exports\\metatorio-network-1-2.png'));
     assert.equal(png.subarray(1, 4).toString(), 'PNG');
     assert.ok(png.readUInt32BE(16) > 100 && png.readUInt32BE(20) > 100);

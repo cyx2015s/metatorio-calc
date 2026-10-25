@@ -154,11 +154,21 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   const groupFont=await canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').first().numericStyle('font-size'));
   await page.getByLabel('网络显示大小',{exact:true}).selectOption('2');
   await waitFor(async()=>await canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').first().numericStyle('font-size'))===groupFont*2);
-  // Universe layouts can span several enormous location clusters.
+  // Export above the former arbitrary 8192-pixel side limit at original size.
+  await canvas.evaluate(el=>el._cyreg.cy.nodes().filter(n=>!n.isParent()).last().position({x:9000,y:1000}));
+  const originalBounds=await canvas.evaluate(el=>{const b=el._cyreg.cy.elements().boundingBox();return {w:Math.ceil(b.w),h:Math.ceil(b.h)};});
+  const largePng = await exportUniversePng();
+  assert.ok(originalBounds.w>8192);
+  assert.equal(largePng.readUInt32BE(16),originalBounds.w);
+  assert.equal(largePng.readUInt32BE(20),originalBounds.h);
+  assert.doesNotMatch(await page.locator('.export-status').textContent(),/缩小/);
+  // An actual renderer failure is reported and never silently resized.
+  const saves=await page.evaluate(()=>window.__universePngs.length);
   await canvas.evaluate(el=>el._cyreg.cy.nodes().filter(n=>!n.isParent()).last().position({x:1000000,y:500000}));
-  const hugePng = await exportUniversePng();
-  assert.ok(hugePng.readUInt32BE(16)<=8192 && hugePng.readUInt32BE(20)<=8192);
-  assert.match(await page.locator('.export-status').textContent(),/大图已缩小/);
+  await page.getByRole('button',{name:'导出 PNG',exact:true}).click();
+  await waitFor(async()=>await page.getByRole('button',{name:'导出 PNG',exact:true}).isEnabled());
+  assert.match(await page.locator('.network-view [role=alert]').textContent(),/PNG 导出失败/);
+  assert.equal(await page.evaluate(()=>window.__universePngs.length),saves);
   await page.getByRole('button',{name:'列表',exact:true}).click();
   assert.equal(await page.locator('.location-heading').count(),2);
   const originalOrder=await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.map(e=>e.id));

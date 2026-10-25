@@ -146,12 +146,12 @@ planet 图标，太空使用 `space-platform-starter-pack` 图标。文字名称
 仍按原 ID 工作；关闭聚类不修改文档顺序或数值。
 
 网络显示大小同时缩放节点文字、地点标题、边标签和图标；修改大小保持节点位置和画布缩放。
-整图 PNG 导出限制单边 8192 像素、总面积 16 Mi 像素，超限时按比例缩小并在保存结果中标明，
-避免大型宇宙布局超过 WebView 画布限制。
+整图 PNG 按网络边界的原分辨率导出，显式指定尺寸以免设备像素比额外放大。
+不设置应用级单边或总像素上限，也不自动缩小；画布创建或编码失败时显示真实错误。
 
 真实工程导出回归可通过 `external_universe_export.rs` 的忽略测试准备数据：
 `METATORIO_PROJECT_FIXTURE` 指定工程，`METATORIO_NETWORK_FIXTURE_OUT` 指定本地输出，
 `METATORIO_CONTEXT_DUMP` 可指定原型 dump。该测试使用 SoPlex，只在测试副本中应用新惩罚系数，
 不修改输入工程。随后将输出路径作为 `METATORIO_NETWORK_FIXTURE` 运行
-`tests/saved-universe-export-browser.cjs`，逐个验证普通和聚类 PNG。
+`tests/saved-universe-export-browser.cjs`，逐个验证普通和聚类 PNG：成功时核对原尺寸，真实画布不支持时核对错误反馈。
 图形由真实 Svelte/Cytoscape 绘制，图标与保存对话框使用模拟 IPC；保存的 PNG 字节实际写入本地文件。
