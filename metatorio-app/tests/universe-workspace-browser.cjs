@@ -187,21 +187,24 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   assert.deepEqual(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.slice(-2).map(e=>e.mechanic.type)),['rocket-export','orbital-drop']);
   await page.getByRole('button',{name:'网络',exact:true}).click();
   await page.getByLabel('按地点聚类').check();
-  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').length===3),600);
-  const transportEdges=await canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').map(e=>({source:e.source().id(),target:e.target().id(),label:e.data('label')})));
-  assert.equal(transportEdges.filter(e=>e.target==='location:space').length,2);
-  assert.equal(transportEdges.filter(e=>e.source==='location:space').length,1);
-  assert.ok(transportEdges.every(e=>e.label.includes('铁板')));
-  // Actual compound-node geometry must update the endpoints when its box moves.
-  const endpoint=await canvas.evaluate(el=>{const cy=el._cyreg.cy,e=cy.edges('[kind="transport"]').filter(e=>e.target().id()==='location:space').first();return e.targetEndpoint()});
-  await canvas.evaluate(el=>el._cyreg.cy.getElementById('location:space').shift({x:180,y:100}));
-  await waitFor(async()=>canvas.evaluate((el,before)=>{const e=el._cyreg.cy.edges('[kind="transport"]').filter(e=>e.target().id()==='location:space').first(),p=e.targetEndpoint();return Math.abs(p.x-before.x)>10||Math.abs(p.y-before.y)>10},endpoint));
-  await canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').first().emit('tap'));
-  await page.locator('.network-details').getByText('跨地点运输；连线连接远端地点框，数量仅对应此运输机制。',{exact:true}).waitFor();
+  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').length===3),600);
+  const grouped=await canvas.evaluate(el=>{
+    const cy=el._cyreg.cy,transports=window.__layoutDocument.projects[0].universes[0].mechanics.filter(e=>e.mechanic.type!=='local');
+    return {edges:cy.edges().map(e=>({from:e.source().parent().id(),to:e.target().parent().id()})),
+      transports:transports.map(t=>({type:t.mechanic.type,links:cy.getElementById(`m:${t.id}`).connectedEdges().map(e=>({source:e.source().id(),target:e.target().id()}))}))};
+  });
+  assert.ok(grouped.edges.length>0&&grouped.edges.every(e=>e.from===e.to),'only intra-partition edges are drawn');
+  assert.equal(grouped.transports.length,3);
+  assert.ok(grouped.transports.every(t=>t.links.length>0),'local transport connections are retained');
+  assert.ok(grouped.transports.filter(t=>t.type==='orbital-drop').every(t=>t.links.every(e=>e.source.startsWith('m:'))));
   if(process.env.CLUSTER_TRANSPORT_SCREENSHOT){await canvas.evaluate(el=>el._cyreg.cy.fit(undefined,40));await page.screenshot({path:process.env.CLUSTER_TRANSPORT_SCREENSHOT});}
   await exportUniversePng();
   await page.getByLabel('按地点聚类').uncheck();
-  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').length===0));
+  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').length===0));
+  assert.ok(await canvas.evaluate(el=>el._cyreg.cy.edges().some(e=>{
+    const nodes=el._cyreg.cy,from=nodes.getElementById(e.source().id()).data('label'),to=nodes.getElementById(e.target().id()).data('label');
+    return (from.includes('火箭发运')&&to.includes('铁板'))||(from.includes('铁板')&&to.includes('轨道投送'));
+  })), 'ordinary mode restores transport connections');
   await page.getByRole('button',{name:'列表',exact:true}).click();
   assert.equal(await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories)),before);
   await page.locator('.targets-panel .row-item').first().locator('.hover-icon').first().click({button:'right'});
