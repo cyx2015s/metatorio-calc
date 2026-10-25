@@ -1,4 +1,5 @@
 <script lang="ts">
+  import {clusterTransportNetwork} from '$lib/mechanics/location-network';
   import {layoutLocations} from "$lib/mechanics/location-layout";
   import {networkPngTiles} from "$lib/mechanics/network-export";
   import {createNetworkPngSnapshot} from "$lib/mechanics/network-render";
@@ -56,7 +57,7 @@
     return () => {alive = false;};
   });
   const timeScale = $derived(document?.settings.time_scale ?? 'seconds');
-  const model = $derived(buildNetwork({entries, visibleIds, index: workspace.index, solutions, solved,
+  const rawModel = $derived(buildNetwork({entries, visibleIds, index: workspace.index, solutions, solved,
     locatedTargets: [...(universeDocument?.targets.map(t => t.flow) ?? []), ...(universeDocument?.target_expressions.flatMap(e => e.terms.map(t => t.flow)) ?? [])],
     locatedImplicitInputs: locatedSources,
     locatedExternalInputs: universeDocument?.external_inputs??[],
@@ -65,6 +66,7 @@
     externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: universeDocument ? [] : runtime.implicitSourcesCache,
     localize: (kind, name) => runtime.localizedName(kind, name), timeScale,
     mergeRecipes, collapse, showUtilities, onlyEnabled}));
+  const model = $derived(groupLocations ? clusterTransportNetwork(rawModel,(kind,name)=>runtime.localizedName(kind,name),timeScale) : rawModel);
   const needle = $derived(normalizeSearch(query));
   const matches = $derived(model.nodes.filter(node => !needle || normalizeSearch(node.search).includes(needle)));
   // Recipe/machine edits change a merged node's ID. Keep the editor attached to
@@ -100,6 +102,7 @@
         'text-wrap': 'wrap', 'text-max-width': '150px', 'text-valign': 'bottom', 'text-margin-y': 5 * iconScale,
         width: 38 * iconScale, height: 38 * iconScale, 'background-color': '#477761', 'border-width': 2, 'border-color': p.line}},
       {selector: 'node[kind="location"]', style: {shape:'round-rectangle', 'background-opacity':0.06, 'background-color':p.text, 'border-style':'dashed', 'border-width':1, padding:'35px', 'text-valign':'top', 'font-size':16 * iconScale, 'font-weight':600, 'text-margin-y':-10 * iconScale}},
+      {selector: 'node[kind="location"]:childless', style: {width:160,height:100}},
       {selector: 'node[kind="mechanic"]', style: {shape: 'round-rectangle', width: 52 * iconScale, height: 48 * iconScale, 'background-color': '#99703b'}},
       {selector: 'node[fluid]', style: {'background-color': '#3b78a4'}},
       {selector: 'node[utility]', style: {'background-color': '#79599d'}},
@@ -113,6 +116,7 @@
         'font-size': 10 * iconScale, 'font-family': monoFont, 'text-wrap': 'wrap', 'text-max-width': '240px', 'text-background-color': p.panel,
         'text-background-opacity': 0.9, 'text-background-padding': '2px'}},
       {selector: 'edge[utility]', style: {opacity: 0.3, label: '', 'curve-style': 'straight'}},
+      {selector: 'edge[kind="transport"]', style: {'font-family': uiFont,'line-color':'#498cab','target-arrow-color':'#498cab',width:2}},
       {selector: 'edge[kind="collapsed"]', style: {'font-family': uiFont}},
       {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9 * iconScale, 'font-family': uiFont}},
       {selector: ':selected, .search-match', style: {'border-color': '#d49b14', 'border-width': 4, 'line-color': '#d49b14', 'target-arrow-color': '#d49b14'}},
@@ -187,7 +191,7 @@
       cy = graph.default({container, elements: [], style: styles(), layout: {name: 'preset'},
         minZoom: 0.08, maxZoom: 3, pixelRatio: 'auto', textureOnViewport: false});
       elk = new layout.default({workerFactory: () => new worker.default()});
-      cy.on('tap', 'node, edge', event => {if(event.target.isNode() && event.target.isParent()) return; selectObject(event.target.id());});
+      cy.on('tap', 'node, edge', event => {if(event.target.isNode() && event.target.data('kind')==='location') return; selectObject(event.target.id());});
       cy.on('tap', event => { if (event.target === cy) selectObject(); });
       cy.on('pan zoom', () => { saveViewport(); schedulePosition(); });
       cy.on('position', 'node', schedulePosition);
@@ -294,7 +298,7 @@
       ...(node.utility ? {utility: true} : {}), ...(node.target ? {target: true} : {}),
       ...(node.implicit ? {implicit: true} : {}), ...(node.disabled ? {disabled: true} : {}), ...(node.unused ? {unused: true} : {})},
       position: viewState.positions.get(node.id) ?? positions.get(node.id)}));
-    if(clustered) elements.unshift(...clustered.groups.map(group=>({data:{id:group.id,kind:'location',label:locationLabel(group.location,(k,n)=>runtime.localizedName(k,n))},selectable:false})));
+    if(clustered) elements.unshift(...clustered.groups.map(group=>({data:{id:group.id,kind:'location',label:locationLabel(group.location,(k,n)=>runtime.localizedName(k,n))},position:viewState.positions.get(group.id)??clustered.positions.get(group.id),selectable:false})));
     elements.push(...snapshot.edges.map(edge => ({data: {id: edge.id, source: edge.source, target: edge.target,
       label: edge.label, kind: edge.kind, ...(edge.utility ? {utility: true} : {})}})));
     cy.batch(() => { cy!.elements().remove(); cy!.add(elements); });
@@ -377,7 +381,8 @@
   }
 
   function edgeDescription(edge: NetworkEdge) {
-    return edge.kind === 'compatibility' ? '可能的兼容转换，未表示实际分配量。'
+    return edge.kind === 'transport' ? '跨地点运输；连线连接远端地点框，数量仅对应此运输机制。'
+      : edge.kind === 'compatibility' ? '可能的兼容转换，未表示实际分配量。'
       : edge.kind === 'collapsed' ? '中间流的依赖折叠；产出与消耗分别计量，不代表点对点运输分配。'
       : edge.kind === 'external' ? '可用的外部来源；此边不表示实际导入数量。' : edge.label;
   }

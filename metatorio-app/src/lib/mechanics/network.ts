@@ -26,12 +26,14 @@ export interface NetworkNode {
 export interface NetworkContribution { mechanic: number; unitAmount: number; amount: number }
 export interface NetworkEdge {
   id: string; source: string; target: string; label: string;
-  kind: 'flow' | 'collapsed' | 'compatibility' | 'external';
+  kind: 'flow' | 'collapsed' | 'compatibility' | 'external' | 'transport';
+  /** Physical domain of the flow, retained when its intermediate node is collapsed. */
+  flowLocation?: Location;
   flow?: DualVar;
   contributions: NetworkContribution[];
   utility: boolean;
 }
-export interface NetworkModel { nodes: NetworkNode[]; edges: NetworkEdge[]; solved: boolean }
+export interface NetworkModel { nodes: NetworkNode[]; edges: NetworkEdge[]; solved: boolean; locations?: Location[] }
 
 /** Qualities of the pictured prototype, not of an unrelated machine or input. */
 export function networkIconQualities(node: NetworkNode): string[] {
@@ -162,6 +164,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
       if (!Number.isFinite(item.amount) || item.amount === 0 || !source.showUtilities && isUtility(item.flow, item.location ?? entry.location)) continue;
       const flow = flowNode(item.flow, item.location ?? entry.location);
       const link = item.amount < 0 ? edge(flow.id, id, item.flow) : edge(id, flow.id, item.flow);
+      link.flowLocation = flow.location;
       const scale = source.solved ? (entry.enabled ? source.solutions.get(entry.id)?.amount ?? 0 : 0) : 1;
       link.contributions.push({mechanic: entry.id, unitAmount: item.amount, amount: item.amount * scale});
     }
@@ -235,6 +238,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     const a = incoming[0], b = outgoing[0];
     if (nodes.get(a.source)?.kind !== 'mechanic' || nodes.get(b.target)?.kind !== 'mechanic' || a.source === b.target) continue;
     const combined = edge(a.source, b.target, node.flow!, 'collapsed');
+    combined.flowLocation = node.location;
     combined.contributions = [...a.contributions, ...b.contributions];
     combined.label = `${node.label.replaceAll('\n', ' · ')}\n产 ${a.label} → 耗 ${b.label}`;
     edges.delete(a.id); edges.delete(b.id); nodes.delete(node.id);

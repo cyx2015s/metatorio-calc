@@ -18,7 +18,7 @@
     "test:selector-browser": "node tests/selector-session-browser.cjs",
     "test:mechanic-filter": "node --test tests/mechanic-filter.test.mjs",
     "test:mechanic-commands": "node --test tests/mechanic-commands.test.mjs",
-    "test:network": "node --test tests/network.test.mjs",
+    "test:network": "node --test tests/network.test.mjs tests/cluster-transport.test.mjs",
     "test:network-browser": "node tests/network-browser.cjs",
     "test:network-tiles-browser": "node tests/network-tiles-browser.cjs",
     "test:external-inputs": "node --test tests/external-input-shortcuts.test.mjs",

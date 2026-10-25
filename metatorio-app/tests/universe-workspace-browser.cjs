@@ -35,7 +35,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
      await new Promise(r=>setTimeout(r,40));
      return {project:1,universe:7,status:{status:'solved',cost:12.345,mechanics:u.mechanics.map(e=>({mechanic:e.id,location:e.mechanic.location,amount:0.5,cost:4,rate:0.5})),flows:u.targets.map(t=>({flow:t.flow,amount:t.amount,rate:t.amount}))}};
     }
-    if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='rocket-export'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[{location:planet('nauvis'),flow},{location:planet('fulgora'),flow},{location:{kind:'space'},flow}]};
+    if(command==='universe_preview')return {mechanics:u.mechanics.map(e=>({id:e.id,error:null,flows:e.mechanic.type==='rocket-export'?[{flow:{location:e.mechanic.location,flow},amount:-1,rate:-1},{flow:{location:{kind:'space'},flow},amount:1,rate:1}]:e.mechanic.type==='orbital-drop'?[{flow:{location:{kind:'space'},flow},amount:-1,rate:-1},{flow:{location:e.mechanic.location,flow},amount:1,rate:1}]:[{flow:{location:e.mechanic.location,flow},amount:e.id===102?-1:1,rate:1}]})),sources:[{location:planet('nauvis'),flow},{location:planet('fulgora'),flow},{location:{kind:'space'},flow}]};
     if(command==='dispatch'&&args.message.scope==='universe'){
      const message=JSON.parse(JSON.stringify(args.message)),a=message.action.action;window.__universeWrites.push(message);const created=[];
      for(const type of ['rocket-export','orbital-drop']) if(a[`add-${type}`]){const entry={id:next++,enabled:true,mechanic:{type,...a[`add-${type}`]}};created.push(entry.id);u.mechanics.push(entry);}
@@ -185,6 +185,24 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
    await dialog.waitFor({state:'detached'});
   }
   assert.deepEqual(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.slice(-2).map(e=>e.mechanic.type)),['rocket-export','orbital-drop']);
+  await page.getByRole('button',{name:'网络',exact:true}).click();
+  await page.getByLabel('按地点聚类').check();
+  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').length===3),600);
+  const transportEdges=await canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').map(e=>({source:e.source().id(),target:e.target().id(),label:e.data('label')})));
+  assert.equal(transportEdges.filter(e=>e.target==='location:space').length,2);
+  assert.equal(transportEdges.filter(e=>e.source==='location:space').length,1);
+  assert.ok(transportEdges.every(e=>e.label.includes('铁板')));
+  // Actual compound-node geometry must update the endpoints when its box moves.
+  const endpoint=await canvas.evaluate(el=>{const cy=el._cyreg.cy,e=cy.edges('[kind="transport"]').filter(e=>e.target().id()==='location:space').first();return e.targetEndpoint()});
+  await canvas.evaluate(el=>el._cyreg.cy.getElementById('location:space').shift({x:180,y:100}));
+  await waitFor(async()=>canvas.evaluate((el,before)=>{const e=el._cyreg.cy.edges('[kind="transport"]').filter(e=>e.target().id()==='location:space').first(),p=e.targetEndpoint();return Math.abs(p.x-before.x)>10||Math.abs(p.y-before.y)>10},endpoint));
+  await canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').first().emit('tap'));
+  await page.locator('.network-details').getByText('跨地点运输；连线连接远端地点框，数量仅对应此运输机制。',{exact:true}).waitFor();
+  if(process.env.CLUSTER_TRANSPORT_SCREENSHOT){await canvas.evaluate(el=>el._cyreg.cy.fit(undefined,40));await page.screenshot({path:process.env.CLUSTER_TRANSPORT_SCREENSHOT});}
+  await exportUniversePng();
+  await page.getByLabel('按地点聚类').uncheck();
+  await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.edges('[kind="transport"]').length===0));
+  await page.getByRole('button',{name:'列表',exact:true}).click();
   assert.equal(await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories)),before);
   await page.locator('.targets-panel .row-item').first().locator('.hover-icon').first().click({button:'right'});
   await page.getByRole('button',{name:'添加',exact:true}).click();
