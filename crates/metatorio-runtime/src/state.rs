@@ -824,6 +824,17 @@ impl RuntimeState {
                 let changed = replace(&mut self.project_mut(project_id)?.settings.solver, solver);
                 Ok(Outcome::solve_all_if(changed, project_id))
             }
+            ProjectAction::SetOrbitalTransportCosts { costs } => {
+                costs.validate().map_err(RuntimeError::InvalidValue)?;
+                let changed = replace(
+                    &mut self
+                        .project_mut(project_id)?
+                        .settings
+                        .orbital_transport_costs,
+                    costs,
+                );
+                Ok(Outcome::solve_all_if(changed, project_id))
+            }
             ProjectAction::SetContext { context } => {
                 let changed = replace(&mut self.project_mut(project_id)?.context_id, context);
                 Ok(Outcome::solve_all_if(changed, project_id))

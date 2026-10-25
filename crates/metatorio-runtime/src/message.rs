@@ -213,6 +213,9 @@ pub enum ProjectAction {
     SetSolver {
         solver: metatorio_solver::LpSolver,
     },
+    SetOrbitalTransportCosts {
+        costs: crate::document::OrbitalTransportCosts,
+    },
     /// 把项目绑定到某个游戏上下文（缓存 id）；`None` 表示用当前激活上下文。
     SetContext {
         context: Option<String>,

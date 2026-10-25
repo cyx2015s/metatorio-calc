@@ -14,9 +14,10 @@ locations together and are intended for cross-planet production chains.
   environment.
 - `LocatedMechanic::RocketExport { location, item }` consumes one item at a planet
   and its resolved item weight in `RocketWeightCapacity`, then creates the same
-  item at `Space`, at zero cost.
+  item at `Space`. Estimated cost is the item weight in kilograms.
 - `LocatedMechanic::OrbitalDrop { location, item }` consumes one Space item and
-  delivers it to the destination planet. Cost is `1 / stack_size` per item; both
+  delivers it to the destination planet. Cost is `64 / stack_size + C / effective_spoil_ticks` per perishable item
+  (nonperishable items omit the second term); both
   directions preserve quality. Neither mechanism accepts Space as `location`.
 
 ## Balance and conversion
@@ -60,3 +61,12 @@ Frontend tests cover the explicit graph edges, real ELK location layouts, both a
 buttons, list/network grouping, ordinary-factory isolation and virtual scrolling.
 The unpublished universe format uses only `rocket-export` and `orbital-drop`; the
 old `transfer` tag and command names are intentionally not accepted.
+
+Transport price estimates live in `ProjectSettings.orbital_transport_costs`: defaults
+are `rocket_export_per_kg = 1`, `orbital_drop_per_stack = 64`, and `orbital_drop_spoil_penalty = 3600`.
+Effective spoil ticks include the quality spoil-time multiplier, matching local spoilage.
+The project message `set-orbital-transport-costs` updates these estimates through
+normal history, persistence and recomputation. Omitted fields
+receive these defaults; coefficients must be finite and nonnegative. This project
+configuration is used consistently by previews, solves and auto-planning. No frontend
+price editor is exposed yet. Prices do not change physical coefficients or strict-sink rules.

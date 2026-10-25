@@ -4,7 +4,7 @@
 //! independently at each planet/space location. Local mechanics are expanded
 //! with their own environment. Rocket exports consume local items and rocket
 //! weight capacity. Orbital drops consume Space items and deliver them to one
-//! planet, charging one unit per stack. Both directions are explicit mechanics.
+//! planet. Project-level estimates price exports per kg and drops per stack.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -226,6 +226,16 @@ pub fn expand_located_mechanic(
     base: &metatorio_core::GameState,
     mechanic: &LocatedMechanic,
 ) -> Result<Vec<(SolverFlow<LocatedDualVar>, f64)>, String> {
+    expand_located_mechanic_with_costs(store, base, mechanic, &Default::default())
+}
+
+pub fn expand_located_mechanic_with_costs(
+    store: &PrototypeStore,
+    base: &metatorio_core::GameState,
+    mechanic: &LocatedMechanic,
+    costs: &crate::document::OrbitalTransportCosts,
+) -> Result<Vec<(SolverFlow<LocatedDualVar>, f64)>, String> {
+    costs.validate()?;
     match mechanic {
         LocatedMechanic::Local(local) => {
             let (planet, surface) = environment_for(&local.location);
@@ -270,18 +280,34 @@ pub fn expand_located_mechanic(
                 LocatedDualVar::new(Location::Space, DualVar::Item(transfer.item.clone())),
                 1.0,
             );
-            Ok(vec![(flow, 0.0)])
+            Ok(vec![(flow, weight / 1000.0 * costs.rocket_export_per_kg)])
         }
         LocatedMechanic::OrbitalDrop(cargo) => {
             if !matches!(cargo.location, Location::Planet(_)) {
                 return Err("轨道投送的终点必须是星球".into());
             }
-            let stack_size = store
+            let item = store
                 .get(PrototypeGroup::Item, &cargo.item.id)
                 .and_then(|record| record.component::<metatorio_data::ItemComponent>())
-                .map(|item| item.stack_size)
-                .filter(|size| *size > 0)
+                .filter(|item| item.stack_size > 0)
                 .ok_or_else(|| format!("轨道投送物品 {} 缺少有效堆叠数量", cargo.item.id))?;
+            let spoil_penalty = if let Some(ticks) = item.spoil_ticks.filter(|ticks| *ticks > 0) {
+                let multiplier = store
+                    .get(PrototypeGroup::Quality, &cargo.item.quality)
+                    .and_then(|record| record.component::<metatorio_data::QualityComponent>())
+                    .map(|quality| quality.spoil_ticks_multiplier())
+                    .unwrap_or(1.0);
+                let duration = f64::from(ticks) * multiplier;
+                if !duration.is_finite() || duration <= 0.0 {
+                    return Err(format!(
+                        "轨道投送物品 {} 的有效变质时间必须为有限正数",
+                        cargo.item.id
+                    ));
+                }
+                costs.orbital_drop_spoil_penalty / duration
+            } else {
+                0.0
+            };
             let mut flow = SolverFlow::default();
             flow.insert(
                 LocatedDualVar::new(Location::Space, DualVar::Item(cargo.item.clone())),
@@ -291,7 +317,10 @@ pub fn expand_located_mechanic(
                 LocatedDualVar::new(cargo.location.clone(), DualVar::Item(cargo.item.clone())),
                 1.0,
             );
-            Ok(vec![(flow, 1.0 / f64::from(stack_size))])
+            Ok(vec![(
+                flow,
+                costs.orbital_drop_per_stack / f64::from(item.stack_size) + spoil_penalty,
+            )])
         }
     }
 }
@@ -335,8 +364,13 @@ pub fn preview_universe(
     let mechanics = universe
         .mechanics
         .iter()
-        .map(
-            |entry| match expand_located_mechanic(store, &base, &entry.mechanic) {
+        .map(|entry| {
+            match expand_located_mechanic_with_costs(
+                store,
+                &base,
+                &entry.mechanic,
+                &project.settings.orbital_transport_costs,
+            ) {
                 Ok(variants) => {
                     let mut total = SolverFlow::default();
                     for (flow, _) in variants {
@@ -365,8 +399,8 @@ pub fn preview_universe(
                     error: Some(error),
                     solar_balance: None,
                 },
-            },
-        )
+            }
+        })
         .collect();
     let sources = used_locations(universe)
         .iter()
@@ -408,7 +442,12 @@ pub fn solve_universe_with_progress(
         if !entry.enabled {
             continue;
         }
-        for (flow, cost) in expand_located_mechanic(store, &base, &entry.mechanic)? {
+        for (flow, cost) in expand_located_mechanic_with_costs(
+            store,
+            &base,
+            &entry.mechanic,
+            &project.settings.orbital_transport_costs,
+        )? {
             let id = UniverseVarId(next_id);
             next_id += 1;
             flows.insert(id, (flow, cost));

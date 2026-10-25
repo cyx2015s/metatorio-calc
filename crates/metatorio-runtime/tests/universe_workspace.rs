@@ -135,15 +135,15 @@ fn universe_manual_space_input_overrides_free_asteroids_with_explicit_delivery()
             UniverseSolveStatus::Solved { cost, .. } => cost,
             status => panic!("{status:?}"),
         };
-    assert!((solve_cost(&universe) - 0.04).abs() < 1e-6);
+    assert!((solve_cost(&universe) - 2.56).abs() < 1e-6);
     universe.external_inputs.push(LocatedExternalInput {
         id: ExternalInputId(2),
         flow: LocatedDualVar::new(Location::Space, flow),
         penalty: 7.0,
     });
-    assert!((solve_cost(&universe) - 14.04).abs() < 1e-6);
+    assert!((solve_cost(&universe) - 16.56).abs() < 1e-6);
     universe.external_inputs.clear();
-    assert!((solve_cost(&universe) - 0.04).abs() < 1e-6);
+    assert!((solve_cost(&universe) - 2.56).abs() < 1e-6);
 }
 #[test]
 fn universe_editor_commands_clone_and_transfer_edits_are_undoable_and_scoped() {

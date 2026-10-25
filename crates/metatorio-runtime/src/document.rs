@@ -80,6 +80,8 @@ impl Default for ProjectDocument {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
+    /// Estimated orbital logistics prices, independent of physical flow coefficients.
+    pub orbital_transport_costs: OrbitalTransportCosts,
     pub time_scale: TimeScale,
     /// 里程碑（可达性节点级，默认是各科技瓶物品；`unlocked` 是**强制覆盖**——
     /// `unlocked=false` 强制不可达并阻断依赖它的对象，`unlocked=true` 强制可达，
@@ -117,6 +119,7 @@ fn default_major_quality() -> String {
 impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
+            orbital_transport_costs: OrbitalTransportCosts::default(),
             time_scale: TimeScale::Seconds,
             milestones: Vec::new(),
             recipe_productivity: Vec::new(),
@@ -127,6 +130,44 @@ impl Default for ProjectSettings {
             quality_limit: None,
             major_quality: default_major_quality(),
             solver: LpSolver::default(),
+        }
+    }
+}
+
+/// Project-level estimates; future editors can expose these without changing
+/// transport mechanics or the LP model. Weights in prototype data are grams.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct OrbitalTransportCosts {
+    pub rocket_export_per_kg: f64,
+    pub orbital_drop_per_stack: f64,
+    /// Extra drop cost is this coefficient divided by effective spoil time in ticks.
+    pub orbital_drop_spoil_penalty: f64,
+}
+
+impl Default for OrbitalTransportCosts {
+    fn default() -> Self {
+        Self {
+            rocket_export_per_kg: 1.0,
+            orbital_drop_per_stack: 64.0,
+            orbital_drop_spoil_penalty: 3600.0,
+        }
+    }
+}
+
+impl OrbitalTransportCosts {
+    pub fn validate(&self) -> Result<(), String> {
+        if [
+            self.rocket_export_per_kg,
+            self.orbital_drop_per_stack,
+            self.orbital_drop_spoil_penalty,
+        ]
+        .into_iter()
+        .all(|cost| cost.is_finite() && cost >= 0.0)
+        {
+            Ok(())
+        } else {
+            Err("轨道货运成本系数必须是有限的非负数".into())
         }
     }
 }

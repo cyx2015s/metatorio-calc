@@ -1699,7 +1699,7 @@
           <button class="btn" disabled={universeBusy} onclick={()=>runUniverse()}>求解</button>
           {#each ['rocket-export','orbital-drop'] as direction}
             <button class="btn" disabled={runtime.universeAddLocation.kind !== 'planet'}
-              title={direction==='rocket-export'?'从左栏所选星球发往太空；消耗物品与火箭载荷':'从太空投送到左栏所选星球；每件代价为堆叠数量的倒数'}
+              title={direction==='rocket-export'?`从左栏所选星球发往太空；消耗物品与火箭载荷；每件成本：重量（kg）× ${project?.settings.orbital_transport_costs?.rocket_export_per_kg??1}`:`从太空投送到左栏所选星球；每件成本：${project?.settings.orbital_transport_costs?.orbital_drop_per_stack??64} ÷ 堆叠数量；变质物品额外成本：${project?.settings.orbital_transport_costs?.orbital_drop_spoil_penalty??3600} ÷ 有效变质时间（tick）`}
               onclick={()=>{const location=runtime.universeAddLocation;if(location.kind!=='planet')return;selector={kind:"item",kinds:[],title:direction==='rocket-export'?"选择火箭发运物品":"选择轨道投送物品",onSelect:(name,quality)=>direction==='rocket-export'?runtime.addUniverseRocketExport(location,{id:name,quality}):runtime.addUniverseOrbitalDrop(location,{id:name,quality})}}}>
               + {direction==='rocket-export'?'火箭发运':'轨道投送'}
             </button>

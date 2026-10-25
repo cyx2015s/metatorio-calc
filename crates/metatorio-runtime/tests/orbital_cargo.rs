@@ -53,11 +53,11 @@ fn opposite_directions_preserve_quality_and_charge_weight_or_stacks() {
         up[0].0[&LocatedDualVar::new(cargo.location.clone(), DualVar::RocketWeightCapacity)],
         -2000.0
     );
-    assert_eq!(up[0].1, 0.0);
+    assert_eq!(up[0].1, 2.0);
     assert_eq!(down[0].0.len(), 2);
     assert_eq!(down[0].0[&space], -1.0);
     assert_eq!(down[0].0[&local], 1.0);
-    assert_eq!(down[0].1, 0.02);
+    assert_eq!(down[0].1, 1.28);
     for transport in [LocatedMechanic::RocketExport, LocatedMechanic::OrbitalDrop] {
         assert!(
             expand_located_mechanic(
@@ -114,7 +114,7 @@ fn no_hidden_delivery_and_disabled_drop_cannot_satisfy_target() {
     else {
         panic!("{result:?}")
     };
-    assert!((cost - 2.0).abs() < 1e-8);
+    assert!((cost - 328.0).abs() < 1e-8);
     assert_eq!(mechanics.len(), 2);
     assert_eq!(
         mechanics
@@ -122,7 +122,7 @@ fn no_hidden_delivery_and_disabled_drop_cannot_satisfy_target() {
             .find(|m| m.mechanic == MechanicId(10))
             .unwrap()
             .cost,
-        0.0
+        2.0
     );
     assert_eq!(
         mechanics
@@ -130,7 +130,7 @@ fn no_hidden_delivery_and_disabled_drop_cannot_satisfy_target() {
             .find(|m| m.mechanic == MechanicId(11))
             .unwrap()
             .cost,
-        0.02
+        1.28
     );
     assert!(mechanics.iter().all(|m| (m.amount - 100.0).abs() < 1e-8));
     r.state.document.projects[0].universes[0].mechanics[1].enabled = false;
@@ -148,7 +148,7 @@ fn joint_planning_writes_both_directions_with_actual_delivery_cost() {
     let UniverseSolveStatus::Solved { cost, .. } = result.status else {
         panic!("{result:?}")
     };
-    assert!((cost - 2.0).abs() < 1e-8);
+    assert!((cost - 328.0).abs() < 1e-8);
     let entries = &r.state.document.projects[0].universes[0].mechanics;
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|e|matches!(&e.mechanic,LocatedMechanic::RocketExport(c) if c.location==Location::planet("a")&&c.item.quality=="rare")));
@@ -180,4 +180,196 @@ fn transport_commands_are_editable_clonable_and_undoable() {
     }
     assert_eq!(r.state.document, before);
     assert!(serde_json::from_value::<LocatedMechanic>(json!({"type":"transfer"})).is_err());
+}
+
+#[test]
+fn default_prices_match_50kg_and_50_item_stack_examples() {
+    let store =
+        PrototypeStore::load(&json!({"item":{"ore":{"stack_size":50,"weight":50000}}})).unwrap();
+    let up = expand_located_mechanic(
+        &store,
+        &Default::default(),
+        &LocatedMechanic::RocketExport(cargo()),
+    )
+    .unwrap();
+    let down = expand_located_mechanic(
+        &store,
+        &Default::default(),
+        &LocatedMechanic::OrbitalDrop(cargo()),
+    )
+    .unwrap();
+    assert_eq!(up[0].1, 50.0);
+    assert_eq!(down[0].1, 1.28);
+}
+
+#[test]
+fn project_price_overrides_roundtrip_and_reach_joint_planning() {
+    use metatorio_runtime::document::OrbitalTransportCosts;
+    let default: OrbitalTransportCosts = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(default, OrbitalTransportCosts::default());
+    let partial: OrbitalTransportCosts =
+        serde_json::from_value(json!({"rocket_export_per_kg":3})).unwrap();
+    assert_eq!(partial.orbital_drop_per_stack, 64.0);
+    let mut r = runtime();
+    let reply = r.dispatch(serde_json::from_value(json!({"scope":"project","action":{"project":1,"action":{"set-orbital-transport-costs":{"costs":{"rocket_export_per_kg":3,"orbital_drop_per_stack":100}}}}})).unwrap()).unwrap();
+    assert!(reply.changed);
+    assert!(reply.commands.iter().any(|c| matches!(
+        c,
+        metatorio_runtime::RuntimeCommand::RecomputeUniverse { .. }
+    )));
+    assert_eq!(
+        r.state.document.projects[0]
+            .settings
+            .orbital_transport_costs
+            .orbital_drop_spoil_penalty,
+        3600.0
+    );
+    let document: AppDocument =
+        serde_json::from_value(serde_json::to_value(&r.state.document).unwrap()).unwrap();
+    assert_eq!(document, r.state.document);
+    let result = r.auto_plan_universe(ProjectId(1), UniverseId(3)).unwrap();
+    let UniverseSolveStatus::Solved { cost, .. } = result.status else {
+        panic!("{result:?}")
+    };
+    assert!((cost - 800.0).abs() < 1e-8);
+    let document = r.state.document.clone();
+    assert!(r.dispatch(serde_json::from_value(json!({"scope":"project","action":{"project":1,"action":{"set-orbital-transport-costs":{"costs":{"orbital_drop_spoil_penalty":-1}}}}})).unwrap()).is_err());
+    assert_eq!(r.state.document, document);
+    // Undo planning, then the price edit; coefficients use the normal history path.
+    for _ in 0..2 {
+        r.dispatch(serde_json::from_value(json!({"scope":"history","action":"undo"})).unwrap())
+            .unwrap();
+    }
+    assert_eq!(
+        r.state.document.projects[0]
+            .settings
+            .orbital_transport_costs,
+        default
+    );
+    for bad in [-1.0, f64::NAN, f64::INFINITY] {
+        for costs in [
+            OrbitalTransportCosts {
+                rocket_export_per_kg: bad,
+                ..default
+            },
+            OrbitalTransportCosts {
+                orbital_drop_per_stack: bad,
+                ..default
+            },
+            OrbitalTransportCosts {
+                orbital_drop_spoil_penalty: bad,
+                ..default
+            },
+        ] {
+            assert!(
+                metatorio_runtime::universe::expand_located_mechanic_with_costs(
+                    &store(),
+                    &Default::default(),
+                    &LocatedMechanic::RocketExport(cargo()),
+                    &costs
+                )
+                .is_err()
+            );
+        }
+    }
+}
+
+#[test]
+fn positive_export_price_avoids_surplus_without_strict_space_balance() {
+    let mut r = runtime();
+    let universe = &mut r.state.document.projects[0].universes[0];
+    universe.targets[0].flow.location = Location::planet("a");
+    universe.strict_sink = false;
+    universe
+        .mechanics
+        .push(metatorio_runtime::document::UniverseMechanicEntry {
+            id: MechanicId(10),
+            enabled: true,
+            mechanic: LocatedMechanic::RocketExport(cargo()),
+        });
+    let result = r.solve_universe(ProjectId(1), UniverseId(3)).unwrap();
+    let UniverseSolveStatus::Solved {
+        cost, mechanics, ..
+    } = result.status
+    else {
+        panic!("{result:?}")
+    };
+    assert_eq!(cost, 0.0);
+    assert!(mechanics.iter().all(|m| m.amount == 0.0));
+    assert!(!r.state.document.projects[0].universes[0].strict_sink);
+}
+
+#[test]
+fn drop_spoil_penalty_uses_ticks_and_quality_but_exports_are_unaffected() {
+    use metatorio_runtime::document::OrbitalTransportCosts;
+    use metatorio_runtime::universe::expand_located_mechanic_with_costs;
+    let store = PrototypeStore::load(&json!({
+        "item":{"food":{"stack_size":50,"weight":50000,"spoil_ticks":3600,"spoil_result":"waste"},"waste":{"stack_size":50}},
+        "quality":{"normal":{"level":0,"next":"rare"},"rare":{"level":2,"spoil_ticks_multiplier":2}}
+    })).unwrap();
+    for (quality, expected) in [("normal", 2.28), ("rare", 1.78)] {
+        let cargo = OrbitalCargoMechanic {
+            location: Location::planet("a"),
+            item: IdWithQuality::new("food", quality),
+        };
+        let down = expand_located_mechanic(
+            &store,
+            &Default::default(),
+            &LocatedMechanic::OrbitalDrop(cargo.clone()),
+        )
+        .unwrap();
+        assert!((down[0].1 - expected).abs() < 1e-10);
+        let up = expand_located_mechanic(
+            &store,
+            &Default::default(),
+            &LocatedMechanic::RocketExport(cargo.clone()),
+        )
+        .unwrap();
+        assert_eq!(up[0].1, 50.0);
+        let costs = OrbitalTransportCosts {
+            orbital_drop_spoil_penalty: 0.0,
+            ..Default::default()
+        };
+        let down = expand_located_mechanic_with_costs(
+            &store,
+            &Default::default(),
+            &LocatedMechanic::OrbitalDrop(cargo),
+            &costs,
+        )
+        .unwrap();
+        assert_eq!(down[0].1, 1.28);
+    }
+}
+
+#[test]
+fn spoil_penalty_reaches_joint_planning_and_written_mechanic_cost() {
+    let mut r = runtime();
+    r.install_context("cargo".into(),PrototypeStore::load(&json!({
+        "item":{"ore":{"stack_size":50,"weight":2000,"spoil_ticks":3600,"spoil_result":"waste"},"waste":{"stack_size":50}},
+        "planet":{"a":{},"b":{}},
+        "quality":{"normal":{"level":0,"next":"rare"},"rare":{"level":2,"spoil_ticks_multiplier":2}}
+    })).unwrap());
+    let result = r.auto_plan_universe(ProjectId(1), UniverseId(3)).unwrap();
+    let UniverseSolveStatus::Solved {
+        cost, mechanics, ..
+    } = result.status
+    else {
+        panic!("{result:?}")
+    };
+    assert!((cost - 378.0).abs() < 1e-8);
+    let entries = &r.state.document.projects[0].universes[0].mechanics;
+    let drop = entries
+        .iter()
+        .find(|e| matches!(e.mechanic, LocatedMechanic::OrbitalDrop(_)))
+        .unwrap();
+    assert!(
+        (mechanics
+            .iter()
+            .find(|m| m.mechanic == drop.id)
+            .unwrap()
+            .cost
+            - 1.78)
+            .abs()
+            < 1e-10
+    );
 }

@@ -170,6 +170,7 @@ export type ProjectAction =
   | { "set-quality-limit": { quality: string | null } }
   | { "set-major-quality": { quality: string } }
   | { "set-solver": { solver: LpSolver } }
+  | { "set-orbital-transport-costs": { costs: OrbitalTransportCosts } }
   | { "set-mining-productivity": { productivity: number } }
   | { "set-context": { context: string | null } }
   | { "add-milestone": { node: Accessible; unlocked: boolean } }
@@ -505,7 +506,14 @@ export interface RecipeProductivityView {
   source: "auto" | "user";
 }
 
+export interface OrbitalTransportCosts {
+  rocket_export_per_kg: number;
+  orbital_drop_per_stack: number;
+  orbital_drop_spoil_penalty: number;
+}
+
 export interface ProjectSettings {
+  orbital_transport_costs: OrbitalTransportCosts;
   time_scale: TimeScale;
   /** 里程碑（可达性节点级；unlocked 是强制覆盖——false 强制不可达并阻断依赖，true 强制可达）。 */
   milestones: Milestone[];
