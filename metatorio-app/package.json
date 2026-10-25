@@ -20,6 +20,7 @@
     "test:mechanic-commands": "node --test tests/mechanic-commands.test.mjs",
     "test:network": "node --test tests/network.test.mjs",
     "test:network-browser": "node tests/network-browser.cjs",
+    "test:network-tiles-browser": "node tests/network-tiles-browser.cjs",
     "test:external-inputs": "node --test tests/external-input-shortcuts.test.mjs",
     "test:external-inputs-browser": "node tests/external-inputs-browser.cjs",
     "test:project-files-browser": "node tests/project-files-browser.cjs",

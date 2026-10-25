@@ -339,14 +339,14 @@ async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String
     .map_err(|error| error.to_string())?
 }
 
-/// GUI-only export: the native dialog selects the destination; success is
-/// returned only after the PNG has actually been written.
+/// The dialog is shown once; subsequent tiles stream into a native PNG encoder.
 #[tauri::command]
-async fn save_network_png(
+async fn begin_network_png(
     app: AppHandle,
     file_name: String,
-    bytes: Vec<u8>,
-) -> Result<Option<String>, String> {
+    width: u32,
+    height: u32,
+) -> Result<Option<metatorio_shell::network_png::ExportInfo>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let Some(picked) = app
             .dialog()
@@ -357,13 +357,46 @@ async fn save_network_png(
         else {
             return Ok(None);
         };
-        let path = picked.into_path().map_err(|error| error.to_string())?;
-        std::fs::write(&path, bytes)
-            .map_err(|error| format!("无法保存到 {}：{error}", path.display()))?;
-        Ok(Some(path.to_string_lossy().into_owned()))
+        let path = picked.into_path().map_err(|e| e.to_string())?;
+        app.state::<metatorio_shell::network_png::NetworkPngExports>()
+            .begin(path, width, height)
+            .map(Some)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn write_network_png_tile(
+    app: AppHandle,
+    export_id: u64,
+    x: u32,
+    y: u32,
+    image_base64: String,
+) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<metatorio_shell::network_png::NetworkPngExports>()
+            .tile(export_id, x, y, &image_base64)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn finish_network_png(app: AppHandle, export_id: u64) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<metatorio_shell::network_png::NetworkPngExports>()
+            .finish(export_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+async fn abort_network_png(app: AppHandle, export_id: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<metatorio_shell::network_png::NetworkPngExports>()
+            .abort(export_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -419,7 +452,9 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             cwd.join(path)
         }
     }));
-    let mut builder = tauri::Builder::default().manage(requests);
+    let mut builder = tauri::Builder::default()
+        .manage(requests)
+        .manage(metatorio_shell::network_png::NetworkPngExports::default());
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     if !options.headless {
         // First plugin: a second GUI launch only forwards files to this window.
@@ -489,7 +524,10 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             productivity,
             pick_project_file,
             pick_project_save_path,
-            save_network_png,
+            begin_network_png,
+            write_network_png_tile,
+            finish_network_png,
+            abort_network_png,
             project_save_path,
             open_project_file,
             take_project_open_requests,

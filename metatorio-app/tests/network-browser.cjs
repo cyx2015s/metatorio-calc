@@ -1,3 +1,4 @@
+const {installNetworkPngMock}=require('./network-png-mock.cjs');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const {seed, waitFor} = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
@@ -33,16 +34,6 @@ const url = `http://127.0.0.1:${port}`;
           ctx.fillRect(0, 0, 32, 32);
           return Array.from(atob(canvas.toDataURL().split(',')[1]), c => c.charCodeAt(0));
         }
-        if (command === 'save_network_png') {
-          window.__pngExports.push({...args,bytes:args.bytes.slice(0,24)});
-          return new Promise((resolve, reject) => {
-            window.__finishPngSave = mode => {
-              window.__finishPngSave = null;
-              if (mode === 'error') reject(Error('模拟磁盘写入失败'));
-              else resolve(mode === 'cancel' ? null : `C:\\Exports\\${args.fileName}`);
-            };
-          });
-        }
         const value = await raw(command, args);
         if (command === 'dispatch') {
           const edit = args.message.action?.action?.mechanic;
@@ -63,6 +54,7 @@ const url = `http://127.0.0.1:${port}`;
         return [[item('coal'), 1], ['Electricity', -1000]];
       };
     });
+    await page.addInitScript(installNetworkPngMock,{deferDialog:true});
     await page.goto(url);
     await page.locator('.mech-card').first().waitFor();
     assert.equal(await page.getByRole('button', {name: '列表', exact: true}).getAttribute('aria-pressed'), 'true');
@@ -242,7 +234,7 @@ const url = `http://127.0.0.1:${port}`;
     await ready();
     if (await graph.getByRole('button', {name:'关闭网络详情', exact:true}).count()) await graph.getByRole('button', {name:'关闭网络详情', exact:true}).click();
     // Keep this repeated save/error test compact; large-size coverage lives in the universe regression.
-    await graph.locator('.network-canvas').evaluate(el=>el._cyreg.cy.nodes().forEach((n,i)=>n.position({x:(i%15)*80,y:Math.floor(i/15)*80})));
+    await graph.locator('.network-canvas').evaluate(el=>el._cyreg.cy.nodes().forEach((n,i)=>n.position({x:(i%15)*240,y:Math.floor(i/15)*240})));
     const exportPng = async (mode = 'success') => {
       if (process.env.NETWORK_TEST_TRACE) console.log(`export start: ${mode}`);
       await graph.getByRole('button', {name: '导出 PNG', exact: true}).click();
@@ -252,10 +244,9 @@ const url = `http://127.0.0.1:${port}`;
       assert.match(await graph.locator('.export-status').textContent(), /请选择保存位置/);
       // Signature and dimensions are in the first 24 bytes; avoid serializing
       // the entire image through Playwright just to inspect its header.
-      const bytes = await page.evaluate(() => window.__pngExports.at(-1).bytes.slice(0, 24));
       await page.evaluate(mode => window.__finishPngSave(mode), mode);
       await graph.getByRole('button', {name: '导出 PNG', exact: true}).waitFor();
-      return Buffer.from(bytes);
+      return Buffer.from(await page.evaluate(() => window.__pngExports.at(-1).bytes));
     };
     const bounds=await graph.locator('.network-canvas').evaluate(el=>{const b=el._cyreg.cy.elements().boundingBox();return {w:Math.ceil(b.w),h:Math.ceil(b.h),dpr:window.devicePixelRatio};});
     const png = await exportPng();
@@ -277,6 +268,18 @@ const url = `http://127.0.0.1:${port}`;
     assert.equal(await graph.getByRole('button', {name: '重试布局', exact: true}).count(), 0, 'export errors do not claim the graph layout failed');
     await exportPng();
     assert.equal(await graph.getByRole('alert').count(), 0, 'export can be retried after a write failure');
+    const aborts=await page.evaluate(()=>window.__pngAborts);
+    await page.evaluate(()=>window.__holdPngTile=true);
+    await graph.getByRole('button',{name:'导出 PNG',exact:true}).click();
+    await waitFor(async()=>await page.evaluate(()=>!!window.__finishPngSave));
+    await page.evaluate(()=>window.__finishPngSave('success'));
+    await waitFor(async()=>await page.evaluate(()=>!!window.__releasePngTile));
+    await graph.getByRole('button',{name:'取消导出',exact:true}).click();
+    await page.evaluate(()=>{window.__holdPngTile=false;window.__releasePngTile();window.__releasePngTile=null;});
+    await graph.getByRole('button',{name:'导出 PNG',exact:true}).waitFor();
+    assert.equal(await graph.locator('.export-status').textContent(),'已取消导出');
+    assert.equal(await page.evaluate(()=>window.__pngAborts),aborts+1);
+    assert.equal(await page.evaluate(()=>window.__pngExports.at(-1).bytes.length),0);
     if (process.env.NETWORK_SCREENSHOT) {
       await graph.getByRole('button', {name: '定位匹配', exact: true}).click();
       await page.waitForTimeout(200);
@@ -319,12 +322,11 @@ const url = `http://127.0.0.1:${port}`;
     assert.equal(await panel.count(), 0);
     assert.equal(await graph.locator('.network-canvas').evaluate(node => node._cyreg.cy.$(':selected').length), 0, 'closing the editor clears graph selection');
     await page.waitForTimeout(200);
-    const nodePoint = await graph.locator('.network-canvas').evaluate(node => node._cyreg.cy.nodes('[kind="mechanic"]').first().renderedPosition());
-    const canvas = await graph.locator('.network-canvas').boundingBox();
-    if (process.env.NETWORK_TEST_TRACE) console.log('node click', {canvas, nodePoint, viewport: page.viewportSize()});
-    await graph.locator('.network-canvas').evaluate(node => node.scrollIntoView({block: 'center'}));
-    const visibleCanvas = await graph.locator('.network-canvas').boundingBox();
-    await page.mouse.click(visibleCanvas.x + nodePoint.x, visibleCanvas.y + nodePoint.y);
+    await graph.locator('.network-canvas').evaluate(node => {node.scrollIntoView({block:'center'});const cy=node._cyreg.cy;cy.zoom(Math.max(.65,cy.zoom()));cy.center(cy.nodes('[kind="mechanic"]').first());});
+    await page.waitForTimeout(100);
+    const nodePoint=await graph.locator('.network-canvas').evaluate(node=>node._cyreg.cy.nodes('[kind="mechanic"]').first().renderedPosition());
+    const visibleCanvas=await graph.locator('.network-canvas').boundingBox();
+    await page.mouse.click(visibleCanvas.x+nodePoint.x,visibleCanvas.y+nodePoint.y);
     await panel.waitFor();
     assert.equal(await card.getAttribute('data-mechanic-editor'), '2', 'a real canvas node click opens the shared editor');
     await page.keyboard.press('Escape');

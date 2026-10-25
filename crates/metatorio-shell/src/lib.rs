@@ -9,6 +9,7 @@ pub mod app;
 mod auto_plan_progress;
 pub mod host;
 pub mod mcp;
+pub mod network_png;
 pub mod options;
 pub mod prototype_calculation;
 mod rich_text;

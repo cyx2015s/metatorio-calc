@@ -57,10 +57,20 @@ export async function autoPlanUniverse(project: number, universe: UniverseId): P
   return call("auto_plan_universe", { project, universe });
 }
 
-/** Native save dialog; null means cancelled, a path means writing succeeded. */
-export async function saveNetworkPng(fileName: string, bytes: Uint8Array): Promise<string | null> {
-  return call("save_network_png", { fileName, bytes: Array.from(bytes) });
+export interface NetworkPngExport {id:number;width:number;height:number;tile_width:number;tile_height:number}
+/** Select a destination before doing any rendering. Null means cancelled. */
+export function beginNetworkPng(fileName:string,width:number,height:number):Promise<NetworkPngExport|null>{
+  return call("begin_network_png",{fileName,width,height});
 }
+export async function writeNetworkPngTile(exportId:number,x:number,y:number,png:Blob):Promise<void>{
+  const imageBase64=await new Promise<string>((resolve,reject)=>{
+    const reader=new FileReader();reader.onload=()=>resolve((reader.result as string).split(',')[1]);
+    reader.onerror=()=>reject(reader.error);reader.readAsDataURL(png);
+  });
+  return call("write_network_png_tile",{exportId,x,y,imageBase64});
+}
+export function finishNetworkPng(exportId:number):Promise<string>{return call("finish_network_png",{exportId});}
+export function abortNetworkPng(exportId:number):Promise<void>{return call("abort_network_png",{exportId});}
 
 /** 撤销/重做可用性（启动时初始化按钮态；之后每次 dispatch 的回执里也带）。 */
 export async function historyState(): Promise<HistoryStatus> {

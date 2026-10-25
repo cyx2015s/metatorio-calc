@@ -1,3 +1,4 @@
+const {installNetworkPngMock}=require('./network-png-mock.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const {seed,waitFor}=require('./mechanic-layout.cjs');
 const assert=require('node:assert/strict');
@@ -18,7 +19,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
    const local=(id,location)=>({id,enabled:true,mechanic:{type:'local',location,mechanic:structuredClone(p.factories[0].mechanics[0].mechanic)}});
    p.universes=[{id:7,name:'宇宙工厂',external_inputs:[],strict_source:true,strict_sink:false,mechanics:[local(101,planet('nauvis')),local(102,planet('fulgora')),{id:103,enabled:true,mechanic:{type:'rocket-export',location:planet('nauvis'),item:q('iron-plate')}}],targets:[{id:201,flow:{location:planet('nauvis'),flow:{Fluid:{name:'water',temperature:[15,100]}}},amount:1},{id:202,flow:{location:{kind:'space'},flow},amount:2}],target_expressions:[{id:301,constant:1,terms:[{id:401,flow:{location:planet('fulgora'),flow},coefficient:1},{id:402,flow:{location:{kind:'space'},flow},coefficient:2}]}]}];
    const u=p.universes[0],raw=window.__TAURI_INTERNALS__.invoke;let next=500;
-   window.__universeWrites=[];window.__universeSolves=0;window.__locationIcons=[];window.__universePngs=[];
+   window.__universeWrites=[];window.__universeSolves=0;window.__locationIcons=[];window.__pngExports=[];
    window.__TAURI_INTERNALS__.invoke=async(command,args={})=>{
     if(command==='icon'){
      window.__locationIcons.push(args);
@@ -27,7 +28,6 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
      ctx.fillRect(0,0,64,64);ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText(args.name.slice(0,3),6,35);
      return Array.from(atob(canvas.toDataURL().split(',')[1]),c=>c.charCodeAt(0));
     }
-    if(command==='save_network_png'){window.__universePngs.push(args);return `C:\\Exports\\${args.fileName}`;}
     if(command==='suggest')return [{kind:'recipe',name:'iron-plate',role:'producer'}];
     if(command==='solve_universe' ||command==='auto_plan_universe') {
      window.__universeSolves++;
@@ -66,6 +66,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
     return value;
    };
   });
+  await page.addInitScript(installNetworkPngMock);
   await page.goto(url);
 
   await page.getByRole('button',{name:'宇宙工厂',exact:true}).click();
@@ -137,12 +138,12 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await waitFor(async()=>(await page.locator('.cost-value').textContent())==='12.345');
   if(process.env.UNIVERSE_NETWORK_SCREENSHOT)await page.screenshot({path:process.env.UNIVERSE_NETWORK_SCREENSHOT});
   async function exportUniversePng() {
-    const before=await page.evaluate(()=>window.__universePngs.length);
+    const before=await page.evaluate(()=>window.__pngExports.length);
     await page.getByRole('button',{name:'导出 PNG',exact:true}).click();
     await waitFor(async()=>await page.getByRole('button',{name:'导出 PNG',exact:true}).isEnabled());
     assert.equal(await page.locator('.network-view [role=alert]').count(),0,await page.locator('.network-view').innerText());
-    await waitFor(async()=>await page.evaluate(n=>window.__universePngs.length>n,before));
-    const bytes=Buffer.from(await page.evaluate(()=>window.__universePngs.at(-1).bytes.slice(0,24)));
+    await waitFor(async()=>await page.evaluate(n=>window.__pngExports.length>n,before));
+    const bytes=Buffer.from(await page.evaluate(()=>window.__pngExports.at(-1).bytes.slice(0,24)));
     assert.equal(bytes.subarray(1,4).toString(),'PNG');
     return bytes;
   }
@@ -162,13 +163,15 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   assert.equal(largePng.readUInt32BE(16),originalBounds.w);
   assert.equal(largePng.readUInt32BE(20),originalBounds.h);
   assert.doesNotMatch(await page.locator('.export-status').textContent(),/缩小/);
-  // An actual renderer failure is reported and never silently resized.
-  const saves=await page.evaluate(()=>window.__universePngs.length);
-  await canvas.evaluate(el=>el._cyreg.cy.nodes().filter(n=>!n.isParent()).last().position({x:1000000,y:500000}));
+  // Native transfer errors abort the temporary export and remain retryable.
+  const aborts=await page.evaluate(()=>window.__pngAborts);
+  await page.evaluate(()=>window.__failPngTile=true);
   await page.getByRole('button',{name:'导出 PNG',exact:true}).click();
   await waitFor(async()=>await page.getByRole('button',{name:'导出 PNG',exact:true}).isEnabled());
-  assert.match(await page.locator('.network-view [role=alert]').textContent(),/PNG 导出失败/);
-  assert.equal(await page.evaluate(()=>window.__universePngs.length),saves);
+  assert.match(await page.locator('.network-view [role=alert]').textContent(),/PNG 导出失败.*分区传输失败/);
+  assert.equal(await page.evaluate(()=>window.__pngAborts),aborts+1);
+  assert.equal(await page.evaluate(()=>window.__pngExports.at(-1).bytes.length),0);
+  await page.evaluate(()=>window.__failPngTile=false);
   await page.getByRole('button',{name:'列表',exact:true}).click();
   assert.equal(await page.locator('.location-heading').count(),2);
   const originalOrder=await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.map(e=>e.id));

@@ -1,12 +1,13 @@
 <script lang="ts">
   import {layoutLocations} from "$lib/mechanics/location-layout";
-  import {networkPngSize} from "$lib/mechanics/network-export";
+  import {networkPngTiles} from "$lib/mechanics/network-export";
+  import {createNetworkPngSnapshot} from "$lib/mechanics/network-render";
   import {locationLabel} from "$lib/mechanics/located";
   import { onMount, untrack, tick } from 'svelte';
   import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
   import type { ElkNode } from 'elkjs/lib/elk-api';
   import { runtime } from '$lib/runtime/store.svelte';
-  import { saveNetworkPng } from '$lib/runtime/client';
+  import {beginNetworkPng,writeNetworkPngTile,finishNetworkPng,abortNetworkPng} from '$lib/runtime/client';
   import { buildNetwork, networkRate, networkIconQualities, type NetworkNode, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
   import type { MechanicViewProps } from '$lib/mechanics/workspace';
   import { mechanicPrototype } from '$lib/display-labels';
@@ -30,7 +31,7 @@
   let positionFrame = 0;
   const searchResultsId = $derived(`network-search-${project}-${factory}`);
   let ready = $state(false), busy = $state(false), error = $state('');
-  let exporting = $state(false), exportStatus = $state(''), exportError = $state('');
+  let exporting = $state(false), exportCancelled = $state(false), exportStatus = $state(''), exportError = $state('');
   let collapse = $state(untrack(() => viewState.collapse));
   let showUtilities = $state(untrack(() => viewState.showUtilities));
   let onlyEnabled = $state(untrack(() => viewState.onlyEnabled));
@@ -308,7 +309,7 @@
     }
     if (selectedId) cy.getElementById(selectedId).select();
     schedulePosition();
-    busy = false; renderRevision++;
+    renderRevision++;
     // Icon requests are deduplicated by the existing runtime cache. Old generations
     // cannot add icons after a document, context, factory or view change.
     for (let offset = 0; offset < snapshot.nodes.length && revision === generation && mounted; offset += 8) {
@@ -336,6 +337,7 @@
         }
       }));
     }
+    if (revision === generation && mounted) busy = false;
   }
   function relayout() {
     viewState.positions.clear(); viewState.zoom = undefined;
@@ -343,19 +345,37 @@
   }
   async function exportPng() {
     if (!cy || busy || exporting) return;
-    exporting = true; exportError = ''; exportStatus = '正在生成 PNG…';
+    exporting = true; exportCancelled = false; exportError = ''; exportStatus = '正在准备分区渲染…';
+    let exportId:number|null=null;
+    let snapshot:Awaited<ReturnType<typeof createNetworkPngSnapshot>>|undefined;
     try {
-      const bounds = cy.elements().boundingBox();
-      const size = networkPngSize(bounds.w, bounds.h);
-      const blob = await cy.png({output: 'blob-promise', full: true, maxWidth: size.width, maxHeight: size.height, bg: palette().panel});
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      exportStatus = '请选择保存位置并确认保存…';
-      const path = await saveNetworkPng(`metatorio-network-${project}-${factory}.png`, bytes);
-      exportStatus = path === null ? '已取消导出' : `PNG 已保存到：${path}`;
-    } catch (reason) {
-      exportStatus = ''; exportError = `PNG 导出失败：${String(reason)}`;
-    } finally { exporting = false; }
+      snapshot=await createNetworkPngSnapshot(cy,palette().panel,()=>exportCancelled||!mounted);
+      exportStatus='请选择保存位置并确认保存…';
+      const session=await beginNetworkPng(`metatorio-network-${project}-${factory}.png`,snapshot.width,snapshot.height);
+      if(!session){exportStatus='已取消导出';return;}
+      exportId=session.id;
+      const total=Math.ceil(snapshot.width/session.tile_width)*Math.ceil(snapshot.height/session.tile_height);
+      let completed=0;
+      for(const tile of networkPngTiles(snapshot.width,snapshot.height,session.tile_width,session.tile_height)){
+        if(exportCancelled||!mounted)throw new Error('已取消导出');
+        exportStatus=`正在渲染与合成分区 ${completed+1}/${total}…`;
+        const png=await snapshot.render(tile);
+        await writeNetworkPngTile(exportId,tile.x,tile.y,png);
+        completed++;
+      }
+      if(exportCancelled||!mounted)throw new Error('已取消导出');
+      exportStatus='正在完成 PNG 文件…';
+      const path=await finishNetworkPng(exportId);exportId=null;
+      exportStatus=`PNG 已保存到：${path}`;
+    } catch(reason){
+      if(exportCancelled||!mounted){exportStatus='已取消导出';}
+      else {exportStatus='';exportError=`PNG 导出失败：${String(reason)}`;}
+    } finally {
+      if(exportId!==null)await abortNetworkPng(exportId).catch(reason=>{exportError ||= `清理临时导出失败：${String(reason)}`;});
+      snapshot?.destroy();exporting=false;
+    }
   }
+
   function edgeDescription(edge: NetworkEdge) {
     return edge.kind === 'compatibility' ? '可能的兼容转换，未表示实际分配量。'
       : edge.kind === 'collapsed' ? '中间流的依赖折叠；产出与消耗分别计量，不代表点对点运输分配。'
@@ -387,6 +407,7 @@
     <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
     {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
     <button class="btn" disabled={!ready || busy || exporting} onclick={exportPng}>{exporting ? '导出中…' : '导出 PNG'}</button>
+    {#if exporting}<button class="btn" disabled={exportCancelled} onclick={()=>exportCancelled=true}>取消导出</button>{/if}
     <label title="图标与网络文字同比缩放，保持节点位置和画布缩放">显示大小
       <select aria-label="网络显示大小" bind:value={iconScale}>
         {#each [0.75, 1, 1.25, 1.5, 2] as scale}<option value={scale}>{scale * 100}%</option>{/each}
