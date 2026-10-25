@@ -28,7 +28,7 @@ fn time_limit_seconds() -> f64 {
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
-        .unwrap_or(300.0)
+        .unwrap_or(900.0)
 }
 
 fn write_number(out: &mut String, value: f64) -> Result<(), ResolutionError> {
