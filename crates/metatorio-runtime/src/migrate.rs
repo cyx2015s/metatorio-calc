@@ -366,7 +366,7 @@ fn mechanic_of(
         "reactor" => json!({
             "type": "reactor",
             "reactor": id_of(inst_get(inst, "reactor"), q),
-            "neighbours": inst.get("neighbours").cloned().unwrap_or(json!(0)),
+            "neighbours": inst.get("neighbours").cloned().unwrap_or(Value::Null),
             "fuel": fuel_value(inst_get(inst, "fuel"), q, store),
         }),
         "fluid-fuel" => json!({

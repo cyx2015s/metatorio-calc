@@ -349,6 +349,59 @@ pub fn calculation_detail(store: &PrototypeStore, record: &PrototypeRecord) -> C
         {
             stat(&mut stats, "science-value", value, Number);
         }
+        let multiplier = quality.map_or(1.0, QualityComponent::default_multiplier);
+        if let Some(reactor) = record.component::<metatorio_data::FusionReactorComponent>() {
+            stat(
+                &mut stats,
+                "fluid-usage",
+                reactor.max_fluid_usage * 60.0 * multiplier,
+                PerSecond,
+            );
+            stat(
+                &mut stats,
+                "power",
+                reactor.power_input.amount * 60.0,
+                Watts,
+            );
+            if let Some(fluid) = reactor
+                .output_fluid_box
+                .filter
+                .as_deref()
+                .and_then(|n| store.get(PrototypeGroup::Fluid, n))
+                .and_then(|r| r.component::<FluidComponent>())
+            {
+                let temperature = reactor
+                    .target_temperature
+                    .unwrap_or(fluid.default_temperature);
+                stat(
+                    &mut stats,
+                    "fusion-fuel-power",
+                    reactor.max_fluid_usage
+                        * 60.0
+                        * fluid.heat_capacity().amount
+                        * temperature
+                        * multiplier
+                        / reactor.burner.effectivity,
+                    Watts,
+                );
+            }
+        }
+        if let Some(generator) = record.component::<metatorio_data::FusionGeneratorComponent>() {
+            stat(
+                &mut stats,
+                "fluid-usage",
+                generator.max_fluid_usage * 60.0 * multiplier,
+                PerSecond,
+            );
+            if let Some(limit) = generator.energy_source.output_flow_limit {
+                stat(
+                    &mut stats,
+                    "max-output",
+                    limit.amount * 60.0 * multiplier,
+                    Watts,
+                );
+            }
+        }
         if !stats.is_empty() {
             detail.qualities.push(QualityCalculation {
                 quality: name.clone(),

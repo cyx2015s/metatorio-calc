@@ -80,6 +80,8 @@ impl Default for ProjectDocument {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
+    /// Hidden per-prototype estimates, shared by fission and fusion; absent = 3.
+    pub reactor_neighbours: std::collections::BTreeMap<String, u8>,
     /// Estimated orbital logistics prices, independent of physical flow coefficients.
     pub orbital_transport_costs: OrbitalTransportCosts,
     pub time_scale: TimeScale,
@@ -119,6 +121,7 @@ fn default_major_quality() -> String {
 impl Default for ProjectSettings {
     fn default() -> Self {
         Self {
+            reactor_neighbours: Default::default(),
             orbital_transport_costs: OrbitalTransportCosts::default(),
             time_scale: TimeScale::Seconds,
             milestones: Vec::new(),
@@ -542,6 +545,8 @@ pub enum MechanicKind {
     Generator,
     Boiler,
     Reactor,
+    FusionReactor,
+    FusionGenerator,
     Solar,
     FluidFuel,
     FluidHeat,
@@ -552,7 +557,7 @@ pub enum MechanicKind {
 }
 
 impl MechanicKind {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 17] = [
         Self::Recipe,
         Self::Mining,
         Self::Spoil,
@@ -562,6 +567,8 @@ impl MechanicKind {
         Self::Generator,
         Self::Boiler,
         Self::Reactor,
+        Self::FusionReactor,
+        Self::FusionGenerator,
         Self::Solar,
         Self::FluidFuel,
         Self::FluidHeat,
@@ -581,6 +588,8 @@ impl MechanicKind {
             Self::Generator => Mechanic::Generator(Default::default()),
             Self::Boiler => Mechanic::Boiler(Default::default()),
             Self::Reactor => Mechanic::Reactor(Default::default()),
+            Self::FusionReactor => Mechanic::FusionReactor(Default::default()),
+            Self::FusionGenerator => Mechanic::FusionGenerator(Default::default()),
             Self::Solar => Mechanic::Solar(Default::default()),
             Self::FluidFuel => Mechanic::FluidFuel(Default::default()),
             Self::FluidHeat => Mechanic::FluidHeat(Default::default()),
@@ -602,6 +611,8 @@ impl MechanicKind {
             Mechanic::Generator(_) => Self::Generator,
             Mechanic::Boiler(_) => Self::Boiler,
             Mechanic::Reactor(_) => Self::Reactor,
+            Mechanic::FusionReactor(_) => Self::FusionReactor,
+            Mechanic::FusionGenerator(_) => Self::FusionGenerator,
             Mechanic::Solar(_) => Self::Solar,
             Mechanic::FluidFuel(_) => Self::FluidFuel,
             Mechanic::FluidHeat(_) => Self::FluidHeat,

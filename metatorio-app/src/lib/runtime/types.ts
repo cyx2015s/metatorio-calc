@@ -144,6 +144,8 @@ export function accessibleKindFor(kind: string): string | null {
     case "generator":
     case "boiler":
     case "reactor":
+    case "fusion-reactor":
+    case "fusion-generator":
     case "solar-panel":
     case "accumulator":
     case "beacon":
@@ -170,6 +172,7 @@ export type ProjectAction =
   | { "set-quality-limit": { quality: string | null } }
   | { "set-major-quality": { quality: string } }
   | { "set-solver": { solver: LpSolver } }
+  | { "set-reactor-neighbours": { estimates: Record<string,number> } }
   | { "set-orbital-transport-costs": { costs: OrbitalTransportCosts } }
   | { "set-mining-productivity": { productivity: number } }
   | { "set-context": { context: string | null } }
@@ -195,6 +198,8 @@ export type MechanicKind =
   | "generator"
   | "boiler"
   | "reactor"
+  | "fusion-reactor"
+  | "fusion-generator"
   | "solar"
   | "fluid-fuel"
   | "fluid-heat"
@@ -248,7 +253,7 @@ export type BoilerMechanicAction =
 export type ReactorMechanicAction =
   | { "set-reactor": { reactor: IdWithQuality } }
   | { "set-fuel": { fuel: Fuel | null } }
-  | { "set-neighbours": { neighbours: number } };
+  | { "set-neighbours": { neighbours: number | null } };
 
 export type SolarMechanicAction =
   | { "set-solar-panel": { solar_panel: IdWithQuality } }
@@ -281,6 +286,8 @@ export type MechanicAction =
   | { generator: GeneratorMechanicAction }
   | { boiler: BoilerMechanicAction }
   | { reactor: ReactorMechanicAction }
+  | { "fusion-reactor": ReactorMechanicAction }
+  | { "fusion-generator": { "set-generator": {generator:IdWithQuality} } | { "set-temperature": {temperature:number|null} } }
   | { solar: SolarMechanicAction }
   | { "fluid-fuel": FluidFuelMechanicAction }
   | { "fluid-heat": FluidHeatMechanicAction }
@@ -513,6 +520,7 @@ export interface OrbitalTransportCosts {
 }
 
 export interface ProjectSettings {
+  reactor_neighbours?: Record<string,number>;
   orbital_transport_costs: OrbitalTransportCosts;
   time_scale: TimeScale;
   /** 里程碑（可达性节点级；unlocked 是强制覆盖——false 强制不可达并阻断依赖，true 强制可达）。 */
@@ -700,7 +708,7 @@ export interface Mechanic {
   /** boiler 的 heat-fluid-inside 模式输出温度（null = 流体最高温度）。 */
   output_temperature?: number | null;
   fuel?: Fuel | null;
-  neighbours?: number;
+  neighbours?: number | null;
   weight_mode?: boolean;
   module_config?: ModuleConfig;
   [key: string]: unknown;
@@ -1045,6 +1053,8 @@ export interface PrototypeDetail {
   heat_output_j: number | null;
   /** 流体箱过滤（如 "steam"）。 */
   fluid_filter: string | null;
+  output_fluid_filter?: string | null;
+  fusion_fuel_power_j?: number | null;
   beacon_module_slots: number | null;
   default_temperature: number | null;
   // quality（kind = "quality"）
@@ -1067,6 +1077,8 @@ export type CatalogKind =
   | "generator"
   | "boiler"
   | "reactor"
+  | "fusion-reactor"
+  | "fusion-generator"
   | "solar-panel"
   | "accumulator"
   | "beacon"

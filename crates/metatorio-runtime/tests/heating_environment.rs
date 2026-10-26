@@ -36,7 +36,7 @@ fn fixture() -> PrototypeStore {
         "plant":{"tree":{"growth_ticks":60,"minable":{"mining_time":1,"result":"ore"},"heating_energy":"400kW"}},
         "generator":{"generator":{"fluid_box":{"filter":"water"},"fluid_usage_per_tick":1,"maximum_temperature":500,"heating_energy":"500kW"}},
         "boiler":{"boiler":{"energy_source":{"type":"void"},"energy_consumption":"1MW","mode":"heat-fluid-inside","fluid_box":{"filter":"water"},"heating_energy":"600kW"}},
-        "reactor":{"reactor":{"energy_source":{"type":"void"},"consumption":"10MW","heating_energy":"700kW"}},
+        "reactor":{"reactor":{"neighbour_bonus":0,"energy_source":{"type":"void"},"consumption":"10MW","heating_energy":"700kW"}},
         "solar-panel":{"panel":{"production":"60kW","heating_energy":"800kW"}},
         "accumulator":{"storage":{"energy_source":{"type":"electric","buffer_capacity":"5MJ"},"heating_energy":"900kW"}},
         "rocket-silo":{"silo":{"crafting_speed":1,"energy_source":{"type":"void"},"rocket_parts_required":50,"to_be_inserted_to_rocket_inventory_size":1,"heating_energy":"1MW"}}

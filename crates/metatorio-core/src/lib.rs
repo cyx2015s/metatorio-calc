@@ -31,10 +31,11 @@ pub use location::{
     LocalLocatedMechanic, LocatedDualVar, LocatedMechanic, Location, OrbitalCargoMechanic,
 };
 pub use mechanic::{
-    BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
-    ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
-    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic,
-    TileExtractMechanic, VirtualScienceMechanic,
+    BeaconConfig, BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel,
+    FusionGeneratorMechanic, FusionReactorMechanic, GeneratorMechanic, ItemFuelMechanic,
+    ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic, ReactorMechanic,
+    RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic, TileExtractMechanic,
+    VirtualScienceMechanic,
 };
 pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};
 pub use productivity::{InfiniteTechLevel, ProductivityResult, compute_productivity};

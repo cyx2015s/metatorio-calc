@@ -12,10 +12,10 @@ use crate::dual_var::DualVar;
 use crate::energy::{FluidFuelSpec, FuelSpec, ItemFuelSpec, energy_source_as_flow};
 use crate::id::IdWithQuality;
 use crate::mechanic::{
-    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, GeneratorMechanic,
-    ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic, ModuleConfig, PlantMechanic,
-    ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic,
-    TileExtractMechanic, quality_by_level,
+    BoilerMechanic, FluidFuelMechanic, FluidHeatMechanic, Fuel, FusionGeneratorMechanic,
+    GeneratorMechanic, ItemFuelMechanic, ItemLaunchMechanic, Mechanic, MiningMechanic,
+    ModuleConfig, PlantMechanic, ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic,
+    TileDisposeMechanic, TileExtractMechanic, quality_by_level,
 };
 use crate::prim_var::Expansion;
 use crate::quality::calc_quality_distribution;
@@ -27,9 +27,10 @@ use metatorio_data::types::{
 };
 use metatorio_data::{
     AccumulatorComponent, BoilerComponent, CraftingMachineComponent, EntityComponent,
-    GeneratorComponent, ItemComponent, MinableProperties, MiningDrillComponent,
-    OffshorePumpComponent, PlantComponent, ReactorComponent, RecipeComponent,
-    ResourceEntityComponent, RocketSiloComponent, SolarPanelComponent, TileComponent,
+    FusionGeneratorComponent, FusionReactorComponent, GeneratorComponent, ItemComponent,
+    MinableProperties, MiningDrillComponent, OffshorePumpComponent, PlantComponent,
+    ReactorComponent, RecipeComponent, ResourceEntityComponent, RocketSiloComponent,
+    SolarPanelComponent, TileComponent,
 };
 
 /// Expand all mechanisms in the caller-provided order.
@@ -71,6 +72,12 @@ pub fn expand<'a, C: Clone>(
             }
             Mechanic::Boiler(mechanic) => expand_boiler(config, mechanic, ctx, &mut expansion),
             Mechanic::Reactor(mechanic) => expand_reactor(config, mechanic, ctx, &mut expansion),
+            Mechanic::FusionReactor(mechanic) => {
+                expand_fusion_reactor(config, mechanic, ctx, &mut expansion)
+            }
+            Mechanic::FusionGenerator(mechanic) => {
+                expand_fusion_generator(config, mechanic, ctx, &mut expansion)
+            }
             Mechanic::Solar(mechanic) => expand_solar(config, mechanic, ctx, &mut expansion),
             Mechanic::FluidFuel(mechanic) => {
                 expand_fluid_fuel(config, mechanic, ctx, &mut expansion)
@@ -123,7 +130,10 @@ fn mechanic_heating(ctx: &Context, mechanic: &Mechanic) -> f64 {
         Mechanic::TileExtract(mechanic) => entity(&mechanic.machine.id),
         Mechanic::Generator(mechanic) => entity(&mechanic.generator.id),
         Mechanic::Boiler(mechanic) => entity(&mechanic.boiler.id),
-        Mechanic::Reactor(mechanic) => entity(&mechanic.reactor.id),
+        Mechanic::Reactor(mechanic) | Mechanic::FusionReactor(mechanic) => {
+            entity(&mechanic.reactor.id)
+        }
+        Mechanic::FusionGenerator(mechanic) => entity(&mechanic.generator.id),
         Mechanic::Solar(mechanic) => {
             entity(&mechanic.solar_panel.id)
                 + solar_balance(ctx, mechanic).map_or(0.0, |balance| {
@@ -187,7 +197,10 @@ pub fn instance_cost(store: &PrototypeStore, mechanic: &Mechanic) -> f64 {
             let _ = mechanic;
             1.0 / 16.0
         }
-        Mechanic::Reactor(mechanic) => area(&mechanic.reactor.id),
+        Mechanic::Reactor(mechanic) | Mechanic::FusionReactor(mechanic) => {
+            area(&mechanic.reactor.id)
+        }
+        Mechanic::FusionGenerator(mechanic) => area(&mechanic.generator.id),
         Mechanic::Solar(mechanic) => area(&mechanic.solar_panel.id),
         Mechanic::Spoil(mechanic) => store
             .item(&mechanic.item.id)
@@ -1421,6 +1434,11 @@ fn expand_reactor<C: Clone>(
         return;
     }
     let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
+    if let EnergySource::Burner(source) = &reactor.energy_source
+        && !valid_burner_fuel(ctx, source, fuel.as_ref())
+    {
+        return;
+    }
     let mut temp = TempFlow::new();
     let mut fulfillment = 1.0;
     add_energy(
@@ -1434,7 +1452,13 @@ fn expand_reactor<C: Clone>(
         &mut fulfillment,
     );
 
-    let neighbour_multiplier = 1.0 + f64::from(mechanic.neighbours) * reactor.neighbour_bonus;
+    let neighbour_multiplier = 1.0
+        + f64::from(mechanic.neighbours.unwrap_or_else(|| {
+            metatorio_data::fusion::reactor_neighbours(
+                &ctx.game.reactor_neighbours,
+                &mechanic.reactor.id,
+            )
+        })) * reactor.neighbour_bonus;
     let requested_heat = reactor.consumption.amount * 60.0 * neighbour_multiplier * fulfillment;
     let max_transfer = reactor.heat_buffer.max_transfer.amount * 60.0;
     let heat = if max_transfer > 0.0 {
@@ -1874,4 +1898,195 @@ mod tests {
             temperature: [165, 500],
         }));
     }
+}
+
+/// An invalid explicit fuel must never turn a reactor into free heat/plasma.
+fn valid_burner_fuel(
+    ctx: &Context,
+    source: &metatorio_data::types::BurnerEnergySource,
+    fuel: Option<&FuelSpec<'_>>,
+) -> bool {
+    match fuel {
+        None => true,
+        Some(FuelSpec::Item(spec)) => item_record(ctx, spec.name).is_some_and(|item| {
+            item.fuel_value().amount > 0.0
+                && source
+                    .fuel_categories
+                    .iter()
+                    .any(|c| item.fuel_categories.contains(c))
+                && (item.burnt_result.is_empty() || source.burnt_inventory_size.unwrap_or(0) > 0)
+        }),
+        Some(FuelSpec::Fluid(_)) => false,
+    }
+}
+
+fn expand_fusion_reactor<C: Clone>(
+    config: C,
+    mechanic: &ReactorMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    let Some(reactor) = ctx
+        .prototype
+        .entity(&mechanic.reactor.id)
+        .and_then(|r| r.component::<FusionReactorComponent>())
+    else {
+        return;
+    };
+    let (Some(input), Some(output)) = (
+        reactor.input_fluid_box.filter.as_deref(),
+        reactor.output_fluid_box.filter.as_deref(),
+    ) else {
+        return;
+    };
+    let (Some(input_fluid), Some(output_fluid)) =
+        (fluid_record(ctx, input), fluid_record(ctx, output))
+    else {
+        return;
+    };
+    let neighbours = mechanic.neighbours.unwrap_or_else(|| {
+        metatorio_data::fusion::reactor_neighbours(
+            &ctx.game.reactor_neighbours,
+            &mechanic.reactor.id,
+        )
+    });
+    let Some(temperature) =
+        metatorio_data::fusion::fusion_temperature(reactor, output_fluid, neighbours)
+    else {
+        return;
+    };
+    let base_temperature = reactor
+        .target_temperature
+        .unwrap_or(output_fluid.default_temperature);
+    let rate = reactor.max_fluid_usage * 60.0;
+    let base_power = rate * output_fluid.heat_capacity().amount * base_temperature;
+    if !base_power.is_finite() || base_power <= 0.0 || rate <= 0.0 {
+        return;
+    }
+    let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
+    if !valid_burner_fuel(ctx, &reactor.burner, fuel.as_ref()) {
+        return;
+    }
+    let lower = reactor
+        .minimum_input_temperature
+        .unwrap_or(input_fluid.default_temperature)
+        .max(input_fluid.default_temperature);
+    let upper = reactor
+        .maximum_input_temperature
+        .unwrap_or_else(|| input_fluid.max_temperature())
+        .min(input_fluid.max_temperature());
+    if lower > upper {
+        return;
+    }
+    let mut temp = TempFlow::new();
+    let mut fulfillment = 1.0;
+    add_energy(
+        ctx,
+        &mut temp,
+        &EnergySource::Burner(reactor.burner.clone()),
+        EnergyAmount {
+            amount: base_power / 60.0,
+        },
+        &Effect::default(),
+        fuel.as_ref(),
+        false,
+        &mut fulfillment,
+    );
+    add_fluid_interval(&mut temp, input, -rate, lower, upper);
+    add_fluid_interval(
+        &mut temp,
+        output,
+        rate,
+        f64::from(temperature),
+        f64::from(temperature),
+    );
+    // Quality scales plasma/coolant and fusion fuel, but not the sustaining power.
+    temp.scale(default_quality_multiplier(ctx, &mechanic.reactor.quality));
+    add_energy(
+        ctx,
+        &mut temp,
+        &EnergySource::Electric(reactor.energy_source.clone()),
+        reactor.power_input,
+        &Effect::default(),
+        None,
+        false,
+        &mut fulfillment,
+    );
+    out.variables.extend(temp.into_variables(config));
+}
+
+fn expand_fusion_generator<C: Clone>(
+    config: C,
+    mechanic: &FusionGeneratorMechanic,
+    ctx: &Context,
+    out: &mut Expansion<C>,
+) {
+    let Some(generator) = ctx
+        .prototype
+        .entity(&mechanic.generator.id)
+        .and_then(|r| r.component::<FusionGeneratorComponent>())
+    else {
+        return;
+    };
+    let (Some(input), Some(output)) = (
+        generator.input_fluid_box.filter.as_deref(),
+        generator.output_fluid_box.filter.as_deref(),
+    ) else {
+        return;
+    };
+    let (Some(fluid), Some(spent)) = (fluid_record(ctx, input), fluid_record(ctx, output)) else {
+        return;
+    };
+    let minimum = generator
+        .minimum_input_temperature
+        .unwrap_or(fluid.default_temperature)
+        .max(fluid.default_temperature);
+    let maximum = generator
+        .maximum_input_temperature
+        .unwrap_or_else(|| fluid.max_temperature())
+        .min(fluid.max_temperature());
+    let (lower, upper) = match mechanic.temperature {
+        Some(t) => (f64::from(t), f64::from(t)),
+        None if generator.burns_fluid => (minimum, maximum),
+        None => (fluid.default_temperature, fluid.default_temperature),
+    };
+    if lower < minimum || upper > maximum || lower > upper {
+        return;
+    }
+    // Unlike ordinary steam generators this uses absolute temperature, not ΔT.
+    let energy = if generator.burns_fluid {
+        fluid.fuel_value().amount
+    } else {
+        fluid.heat_capacity().amount * lower
+    };
+    let energy = energy * generator.effectivity;
+    let limit = generator
+        .energy_source
+        .output_flow_limit
+        .map_or(0.0, |p| p.amount * 60.0);
+    if !energy.is_finite() || energy <= 0.0 || limit <= 0.0 {
+        return;
+    }
+    let rate = (generator.max_fluid_usage * 60.0).min(limit / energy);
+    if !rate.is_finite() || rate <= 0.0 {
+        return;
+    }
+    let mut temp = TempFlow::new();
+    add_fluid_interval(&mut temp, input, -rate, lower, upper);
+    add_fluid_interval(
+        &mut temp,
+        output,
+        rate,
+        spent.default_temperature,
+        spent.default_temperature,
+    );
+    temp.add(DualVar::Electricity, rate * energy);
+    for (name, amount) in &generator.energy_source.emissions_per_minute {
+        temp.add(DualVar::Pollution { name: name.clone() }, amount / 60.0);
+    }
+    temp.scale(default_quality_multiplier(ctx, &mechanic.generator.quality));
+    if let Some(drain) = generator.energy_source.drain {
+        temp.add(DualVar::Electricity, -drain.amount * 60.0);
+    }
+    out.variables.extend(temp.into_variables(config));
 }

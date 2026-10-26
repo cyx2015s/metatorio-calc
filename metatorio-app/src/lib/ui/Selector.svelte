@@ -82,6 +82,8 @@
     "generator",
     "boiler",
     "reactor",
+    "fusion-reactor",
+    "fusion-generator",
     "solar-panel",
     "accumulator",
     "beacon",

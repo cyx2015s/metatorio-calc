@@ -154,6 +154,16 @@ fn require_fuel(store: &PrototypeStore, fuel: &Option<Fuel>) -> Result<(), Runti
 
 fn validate_project(store: &PrototypeStore, action: &ProjectAction) -> Result<(), RuntimeError> {
     match action {
+        ProjectAction::SetReactorNeighbours { estimates } => {
+            for name in estimates.keys() {
+                require(store, PrototypeGroup::Entity, "反应堆", name)?;
+                let entity = store.entity(name).unwrap();
+                if !entity.has("ReactorComponent") && !entity.has("FusionReactorComponent") {
+                    return Err(RuntimeError::InvalidValue(format!("{name} 不是反应堆")));
+                }
+            }
+            Ok(())
+        }
         ProjectAction::SetQualityLimit {
             quality: Some(quality),
         } => require_quality(store, quality),
@@ -429,6 +439,19 @@ fn validate_mechanic(store: &PrototypeStore, action: &MechanicAction) -> Result<
             }
             crate::message::ReactorMechanicAction::SetFuel { fuel } => require_fuel(store, fuel),
             crate::message::ReactorMechanicAction::SetNeighbours { .. } => Ok(()),
+        },
+        MechanicAction::FusionReactor(action) => match action {
+            crate::message::ReactorMechanicAction::SetReactor { reactor } => {
+                require_component(store, reactor, "FusionReactorComponent")
+            }
+            crate::message::ReactorMechanicAction::SetFuel { fuel } => require_fuel(store, fuel),
+            crate::message::ReactorMechanicAction::SetNeighbours { .. } => Ok(()),
+        },
+        MechanicAction::FusionGenerator(action) => match action {
+            crate::message::FusionGeneratorMechanicAction::SetGenerator { generator } => {
+                require_component(store, generator, "FusionGeneratorComponent")
+            }
+            crate::message::FusionGeneratorMechanicAction::SetTemperature { .. } => Ok(()),
         },
         MechanicAction::Solar(action) => match action {
             crate::message::SolarMechanicAction::SetSolarPanel { solar_panel } => {
@@ -898,5 +921,21 @@ mod tests {
                 "dispose {tile}"
             );
         }
+    }
+}
+
+fn require_component(
+    store: &PrototypeStore,
+    id: &IdWithQuality,
+    component: &str,
+) -> Result<(), RuntimeError> {
+    require_id(store, PrototypeGroup::Entity, "聚变设备", id)?;
+    if store.entity(&id.id).is_some_and(|r| r.has(component)) {
+        Ok(())
+    } else {
+        Err(RuntimeError::InvalidValue(format!(
+            "{} 不支持 {component}",
+            id.id
+        )))
     }
 }

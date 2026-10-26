@@ -329,6 +329,8 @@ pub enum Mechanic {
     Generator(GeneratorMechanic),
     Boiler(BoilerMechanic),
     Reactor(ReactorMechanic),
+    FusionReactor(FusionReactorMechanic),
+    FusionGenerator(FusionGeneratorMechanic),
     Solar(SolarMechanic),
     FluidFuel(FluidFuelMechanic),
     FluidHeat(FluidHeatMechanic),
@@ -460,7 +462,8 @@ pub struct BoilerMechanic {
 #[serde(default)]
 pub struct ReactorMechanic {
     pub reactor: IdWithQuality,
-    pub neighbours: u8,
+    /// None inherits the project estimate, falling back to 3.
+    pub neighbours: Option<u8>,
     /// 明确燃料（反应堆通常使用物品）；None = 自动选择/无需燃料。
     pub fuel: Option<Fuel>,
 }
@@ -598,4 +601,13 @@ mod tests {
         let neither = config.get_effect_for(&ctx, Some(&receiver(false, false)));
         assert_eq!(neither.speed, 0.0);
     }
+}
+
+/// Fusion reactors share reactor identity, fuel and neighbour editing semantics.
+pub type FusionReactorMechanic = ReactorMechanic;
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FusionGeneratorMechanic {
+    pub generator: IdWithQuality,
+    pub temperature: Option<i32>,
 }

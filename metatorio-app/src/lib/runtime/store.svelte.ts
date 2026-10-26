@@ -1489,14 +1489,15 @@ class RuntimeStore {
   /** 采纳建议：新增对应机制并设置主项（机器由兼容回退自动推断）。 */
   async addSuggestion(candidate:{kind:string;name:string},destination?:MechanicScope,location?:Location):Promise<void>{
     const scope:MechanicScope=destination??(this.selectedUniverseId!=null?{project:this.requireProject(),factory:this.selectedUniverseId,kind:'universe' as const}:this.requireFactory());
-    const kind=({recipe:'recipe',resource:'mining','item-fuel':'item-fuel','virtual-science':'virtual-science',generator:'generator'} as Record<string,import('./types').MechanicKind>)[candidate.kind];
+    const kind=({recipe:'recipe',resource:'mining','item-fuel':'item-fuel','virtual-science':'virtual-science',generator:'generator','fusion-reactor':'fusion-reactor','fusion-generator':'fusion-generator'} as Record<string,import('./types').MechanicKind>)[candidate.kind];
     if(!kind)throw new Error(`未知建议类型 ${candidate.kind}`);
     const result=await this.send(scope.kind==='universe'?{scope:'universe',action:{project:scope.project,universe:scope.factory,action:{'add-local-mechanic':{location:location??this.universeAddLocation,kind}}}}:{scope:'factory',action:{project:scope.project,factory:scope.factory,action:{'mechanic-list':{add:{kind}}}}});
     const id=result.created.mechanics.at(-1);if(id==null)return;
     const commands=this.mechanicCommands(scope);
     if(candidate.kind==='recipe')await commands.setRecipe(id,candidate.name);
     else if(candidate.kind==='resource')await commands.setResource(id,candidate.name);
-    else if(candidate.kind==='generator')await commands.setGenerator(id,candidate.name);
+    else if(candidate.kind==='generator'||candidate.kind==='fusion-generator')await commands.setGenerator(id,candidate.name);
+    else if(candidate.kind==='fusion-reactor')await commands.setReactor(id,candidate.name);
     else await commands.setItem(id,candidate.name);
   }
 
@@ -1951,8 +1952,8 @@ class RuntimeStore {
     return this.mechanicCommands().setFuelTemperature(mechanic, temperature);
   }
 
-  /** 反应堆相邻数（0-8）。 */
-  async setNeighbours(mechanic: MechanicId, neighbours: number): Promise<void> {
+  /** 反应堆相邻数；null 继承项目估计。 */
+  async setNeighbours(mechanic: MechanicId, neighbours: number | null): Promise<void> {
     return this.mechanicCommands().setNeighbours(mechanic, neighbours);
   }
 

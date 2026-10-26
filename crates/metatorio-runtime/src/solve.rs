@@ -2233,6 +2233,7 @@ pub fn make_game_state_with_accessibility(
     accessibility: &metatorio_core::Accessibility,
 ) -> GameState {
     let mut game = GameState::default();
+    game.reactor_neighbours = project.settings.reactor_neighbours.clone();
     let qualities = prototype.quality_order();
     if !qualities.is_empty() {
         game.qualities = qualities.to_vec();

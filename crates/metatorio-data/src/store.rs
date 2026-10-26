@@ -709,6 +709,7 @@ impl PrototypeStore {
                     add(&mut out, name, fluid.max_temperature());
                 }
             }
+            self.add_fusion_temperatures(&mut out, &Default::default());
             for list in out.values_mut() {
                 list.sort_unstable();
                 list.dedup();

@@ -213,6 +213,9 @@ pub enum ProjectAction {
     SetSolver {
         solver: metatorio_solver::LpSolver,
     },
+    SetReactorNeighbours {
+        estimates: std::collections::BTreeMap<String, u8>,
+    },
     SetOrbitalTransportCosts {
         costs: crate::document::OrbitalTransportCosts,
     },
@@ -527,6 +530,8 @@ pub enum MechanicAction {
     Generator(GeneratorMechanicAction),
     Boiler(BoilerMechanicAction),
     Reactor(ReactorMechanicAction),
+    FusionReactor(ReactorMechanicAction),
+    FusionGenerator(FusionGeneratorMechanicAction),
     Solar(SolarMechanicAction),
     FluidFuel(FluidFuelMechanicAction),
     FluidHeat(FluidHeatMechanicAction),
@@ -633,7 +638,7 @@ pub enum BoilerMechanicAction {
 pub enum ReactorMechanicAction {
     SetReactor { reactor: IdWithQuality },
     SetFuel { fuel: Option<Fuel> },
-    SetNeighbours { neighbours: u8 },
+    SetNeighbours { neighbours: Option<u8> },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -976,4 +981,11 @@ mod tests {
         ];
         assert_eq!(actions.len(), 4);
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum FusionGeneratorMechanicAction {
+    SetGenerator { generator: IdWithQuality },
+    SetTemperature { temperature: Option<i32> },
 }

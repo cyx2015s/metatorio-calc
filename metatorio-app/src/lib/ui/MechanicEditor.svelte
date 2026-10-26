@@ -146,6 +146,7 @@
   let machineQuality = $derived(entry.mechanic.machine?.quality ?? "normal");
   // 本地化显示名（无翻译回退内部 id）
   let primaryLabel = $derived(primaryName ? runtime.localizedName(primaryKind(), primaryName) : "");
+  const neighbourEstimate = $derived(runtime.document?.projects.find(p=>p.id===project)?.settings.reactor_neighbours?.[primaryName] ?? 3);
   let machineLabel = $derived(machineName ? runtime.localizedName(machineKind(), machineName) : "");
   let fluidLabel = $derived(fluidName ? runtime.localizedName("fluid", fluidName) : "");
   function primaryKind(): CatalogKind {
@@ -155,11 +156,13 @@
       case "mining":
         return "resource";
       case "generator":
-        return "generator";
+      case "fusion-generator":
+        return kind;
       case "boiler":
         return "boiler";
       case "reactor":
-        return "reactor";
+      case "fusion-reactor":
+        return kind;
       case "solar":
         return "solar-panel";
       case "fluid-fuel":
@@ -206,9 +209,9 @@
   let beaconCount = $derived(beacons.reduce((sum, beacon) => sum + beacon.count, 0));
   let hasMachine = $derived(kind === "recipe" || kind === "mining" || kind === "tile-extract");
   let hasModules = $derived(kind === "recipe" || kind === "mining");
-  let hasFuel = $derived(((kind === "recipe" || kind === "mining") && machineEnergySource === "burner") || kind === "boiler" || kind === "reactor");
-  let hasSettings = $derived(!entry.transport && (hasFuel || ["generator", "boiler", "reactor", "solar", "fluid-heat", "item-launch"].includes(kind)));
-  let amountUnit = $derived(entry.transport ? "件/s" : hasMachine || ["generator", "boiler", "reactor", "solar"].includes(kind) ? "台" : "系数");
+  let hasFuel = $derived(((kind === "recipe" || kind === "mining") && machineEnergySource === "burner") || kind === "boiler" || (kind === "reactor" || kind === "fusion-reactor"));
+  let hasSettings = $derived(!entry.transport && (hasFuel || ["generator", "fusion-generator", "boiler", "reactor", "fusion-reactor", "solar", "fluid-heat", "item-launch"].includes(kind)));
+  let amountUnit = $derived(entry.transport ? "件/s" : hasMachine || ["generator", "fusion-generator", "boiler", "reactor", "fusion-reactor", "solar"].includes(kind) ? "台" : "系数");
 </script>
 
 <div class="identity" class:off={!entry.enabled} data-mechanic-editor={entry.id} aria-label={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel}`}>
@@ -267,7 +270,7 @@
               {#if entry.mechanic.fuel}<Icon type={entry.mechanic.fuel.kind === "fluid" ? "fluid" : "item"}
                 name={entry.mechanic.fuel.kind === "fluid" ? entry.mechanic.fuel.fluid : entry.mechanic.fuel.item.id} size={20} />
               {/if}
-              {kind === "reactor" ? `相邻 ${entry.mechanic.neighbours ?? 0}` : kind === "item-launch" ? (entry.mechanic.weight_mode ? "按重量" : "按槽位") : "参数"} ▾
+              {(kind === "reactor" || kind === "fusion-reactor") ? `相邻 ${entry.mechanic.neighbours ?? neighbourEstimate}` : kind === "item-launch" ? (entry.mechanic.weight_mode ? "按重量" : "按槽位") : "参数"} ▾
             </button>
           {/snippet}
 
@@ -277,7 +280,7 @@
               {#if entry.mechanic.fuel}<button class="btn ghost" onclick={() => actions.commands.setFuel(entry.id, null).catch(() => {})}>恢复自动</button>{/if}
             </div>
           {/if}
-            {#if ["generator", "boiler", "tile-extract", "reactor", "solar", "fluid-heat"].includes(kind)}
+            {#if ["generator", "fusion-generator", "boiler", "tile-extract", "reactor", "fusion-reactor", "solar", "fluid-heat"].includes(kind)}
             <div class="row2">
               {#if kind === "generator" || kind === "boiler"}
                 <button class="icon-btn" class:empty={!fluidName} title={`流体：${fluidLabel || "未选择"} · 点击更换`} onclick={() => onPick("fluid")}>
@@ -318,24 +321,32 @@
                     />
                   </label>
                 {/if}
+              {:else if kind === "fusion-generator"}
+                <label class="sub temp" title="等离子体输入温度；留空使用原型默认温度">
+                  输入温度 <input aria-label="聚变发电机输入温度" type="number" step="1" value={entry.mechanic.temperature ?? ""} placeholder="默认"
+                    onchange={event=>{const raw=event.currentTarget.value;const value=raw===""?null:Number(raw);if(value===null||Number.isInteger(value))actions.commands.setMechanicTemperature(entry.id,value).catch(()=>{});}} />
+                </label>
               {:else if kind === "tile-extract"}
                 <button class="icon-btn" class:empty={!machineName} title={`抽水机：${machineLabel || "未选择"} · 点击更换`} onclick={() => onPick("offshore-pump")}>
                   <HoverIcon type="entity" name={machineName || "offshore-pump"} size={24} quality={machineQuality} />
                 </button>
                 <span class="sub">{machineLabel || "选择抽水机"}</span>
                 <button class="btn ghost" title="更换抽水机" onclick={() => onPick("offshore-pump")}>更换</button>
-              {:else if kind === "reactor"}
-                <label class="sub temp" title="相邻反应堆数量（0-8）">
+              {:else if (kind === "reactor" || kind === "fusion-reactor")}
+                <label class="sub temp" title="相邻反应堆数量；留空继承项目估计">
                   相邻
                   <input
                     type="number"
                     min="0"
-                    max="8"
+                    max="255"
                     step="1"
-                    value={entry.mechanic.neighbours ?? 0}
+                    aria-label="反应堆邻居数"
+                    placeholder={`项目估计 ${neighbourEstimate}`}
+                    value={entry.mechanic.neighbours ?? ""}
                     onchange={(event) => {
-                      const value = Number((event.currentTarget as HTMLInputElement).value);
-                      if (Number.isFinite(value) && value >= 0 && value <= 8) {
+                      const raw = (event.currentTarget as HTMLInputElement).value;
+                      const value = raw === "" ? null : Number(raw);
+                      if (value === null || (Number.isInteger(value) && value >= 0 && value <= 255)) {
                         actions.commands.setNeighbours(entry.id, value).catch(() => {});
                       }
                     }}
@@ -408,7 +419,7 @@
                     onclick={() =>
                       actions.commands.setWeightMode(entry.id, !(entry.mechanic.weight_mode ?? false)).catch(() => {})}
                   >{entry.mechanic.weight_mode ? "按重量" : "按堆叠槽位"}</button>
-                {:else if kind === "boiler" || kind === "reactor"}
+                {:else if kind === "boiler" || (kind === "reactor" || kind === "fusion-reactor")}
                   {#if kind === "boiler" && fuelIsFluid(entry.mechanic.fuel)}
                     <label class="sub temp" title="燃料流体温度（留空 = 默认温度）">
                       燃料温度

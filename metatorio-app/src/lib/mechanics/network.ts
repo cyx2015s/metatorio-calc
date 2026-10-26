@@ -41,8 +41,8 @@ export function networkIconQualities(node: NetworkNode): string[] {
   }
   return [...new Set(node.entries.flatMap(({mechanic: m}) => {
     const prototype = m.type === 'recipe' ? m.recipe : m.type === 'solar' ? m.solar_panel
-      : m.type === 'generator' ? m.generator : m.type === 'boiler' ? m.boiler
-      : m.type === 'reactor' ? m.reactor : m.type === 'plant' ? m.seed
+      : (m.type === 'generator' || m.type === 'fusion-generator') ? m.generator : m.type === 'boiler' ? m.boiler
+      : (m.type === 'reactor' || m.type === 'fusion-reactor') ? m.reactor : m.type === 'plant' ? m.seed
       : ['spoil', 'item-fuel', 'item-launch', 'virtual-science'].includes(m.type) ? m.item : undefined;
     return prototype ? [prototype.quality] : [];
   }))];

@@ -145,6 +145,7 @@
         {#if detail.uses_module_effects != null}<span>机器插件 / 插件塔</span><strong>{detail.uses_module_effects ? "接受" : "不接受"} / {detail.uses_beacon_effects !== false ? "接受" : "不接受"}</strong>{/if}
         {#if detail.fuel_categories?.length}<span>燃料类别</span><strong><RichText text={detail.fuel_categories.map(id=>runtime.richName("fuel-category",id)).join(" / ")} /></strong>{/if}
         {#if detail.burner_fuel_categories?.length}<span>可用燃料</span><strong><RichText text={detail.burner_fuel_categories.map(id=>runtime.richName("fuel-category",id)).join(" / ")} /></strong>{/if}
+        {#if detail.output_fluid_filter}<span>输出流体</span><strong><RichText text={runtime.richName("fluid",detail.output_fluid_filter)} /></strong>{/if}
         {#if detail.fluid_filter}<span>流体限制</span><strong><RichText text={runtime.richName("fluid",detail.fluid_filter)} /></strong>{/if}
         {#if detail.boiler_mode}<span>锅炉模式</span><strong>{detail.boiler_mode === "heat-fluid-inside" ? "加热流体" : "独立输出"}</strong>{/if}
         {#if detail.quality_next}<span>下一品质</span><strong><RichText text={runtime.richName("quality",detail.quality_next)} /> · {compactNumber((detail.quality_next_probability ?? 0) * 100)}%</strong>{/if}

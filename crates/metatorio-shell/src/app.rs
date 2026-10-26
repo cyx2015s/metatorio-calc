@@ -25,8 +25,9 @@ use metatorio_data::store::{PrototypeGroup, PrototypeRecord, PrototypeStore};
 use metatorio_data::types::{Ingredient, Product, TechnologyMaxLevel};
 use metatorio_data::{
     BeaconComponent, BoilerComponent, BurnerGeneratorComponent, CraftingMachineComponent,
-    EntityComponent, FluidComponent, GeneratorComponent, ItemComponent, MiningDrillComponent,
-    ModuleComponent, PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
+    EntityComponent, FluidComponent, FusionGeneratorComponent, FusionReactorComponent,
+    GeneratorComponent, ItemComponent, MiningDrillComponent, ModuleComponent,
+    PrototypeBaseComponent, QualityComponent, ReactorComponent, RecipeComponent,
     ResourceEntityComponent, TechnologyComponent,
 };
 use metatorio_runtime::{
@@ -668,6 +669,8 @@ pub struct PrototypeDetail {
     pub heat_output_j: Option<f64>,
     /// 流体箱过滤（如 "steam"）。
     pub fluid_filter: Option<String>,
+    pub output_fluid_filter: Option<String>,
+    pub fusion_fuel_power_j: Option<f64>,
     // beacon
     pub beacon_module_slots: Option<u16>,
     // fluid
@@ -2271,6 +2274,24 @@ pub(crate) fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Sug
             }
         }
         DualVar::Fluid { name, .. } => {
+            for record in store.group(PrototypeGroup::Entity) {
+                if let Some(r) = record.component::<FusionReactorComponent>() {
+                    if r.output_fluid_box.filter.as_deref() == Some(name.as_str()) {
+                        push("fusion-reactor", &record.name, "producer");
+                    }
+                    if r.input_fluid_box.filter.as_deref() == Some(name.as_str()) {
+                        push("fusion-reactor", &record.name, "consumer");
+                    }
+                }
+                if let Some(g) = record.component::<FusionGeneratorComponent>() {
+                    if g.output_fluid_box.filter.as_deref() == Some(name.as_str()) {
+                        push("fusion-generator", &record.name, "producer");
+                    }
+                    if g.input_fluid_box.filter.as_deref() == Some(name.as_str()) {
+                        push("fusion-generator", &record.name, "consumer");
+                    }
+                }
+            }
             for record in store.group(PrototypeGroup::Recipe) {
                 let Some(recipe) = record.component::<RecipeComponent>() else {
                     continue;
@@ -2293,6 +2314,9 @@ pub(crate) fn suggest_for_flow(store: &PrototypeStore, flow: DualVar) -> Vec<Sug
         }
         DualVar::Electricity => {
             for record in store.group(PrototypeGroup::Entity) {
+                if record.has("FusionGeneratorComponent") {
+                    push("fusion-generator", &record.name, "producer");
+                }
                 if record.has("GeneratorComponent") || record.has("BurnerGeneratorComponent") {
                     push("generator", &record.name, "producer");
                 }
@@ -2459,6 +2483,8 @@ pub(crate) fn catalog_index_from_store(
         ),
         ("boiler", &["BoilerComponent"][..], true),
         ("reactor", &["ReactorComponent"][..], true),
+        ("fusion-reactor", &["FusionReactorComponent"][..], false),
+        ("fusion-generator", &["FusionGeneratorComponent"][..], false),
         ("solar-panel", &["SolarPanelComponent"][..], false),
         ("accumulator", &["AccumulatorComponent"][..], false),
         ("beacon", &["BeaconComponent"][..], true),
@@ -2915,7 +2941,8 @@ pub(crate) fn mechanic_quality_level(qualities: &[String], mechanic: &Mechanic) 
         Mechanic::ItemLaunch(mechanic) => vec![&mechanic.item],
         Mechanic::Generator(mechanic) => vec![&mechanic.generator],
         Mechanic::Boiler(mechanic) => vec![&mechanic.boiler],
-        Mechanic::Reactor(mechanic) => vec![&mechanic.reactor],
+        Mechanic::Reactor(mechanic) | Mechanic::FusionReactor(mechanic) => vec![&mechanic.reactor],
+        Mechanic::FusionGenerator(mechanic) => vec![&mechanic.generator],
         Mechanic::Solar(mechanic) => vec![&mechanic.solar_panel, &mechanic.accumulator],
         _ => Vec::new(),
     };
@@ -4697,6 +4724,44 @@ pub fn prototype_detail(
         detail.heating_radius = Some(reactor.heating_radius);
         detail.machine_energy_source = Some(energy_source_kind(&reactor.energy_source).to_string());
         detail.burner_fuel_categories = burner_fuel_categories_of(&reactor.energy_source);
+    }
+    if let Some(reactor) = record.component::<FusionReactorComponent>() {
+        detail.fluid_filter = reactor.input_fluid_box.filter.clone();
+        detail.output_fluid_filter = reactor.output_fluid_box.filter.clone();
+        detail.fluid_usage_per_tick = Some(reactor.max_fluid_usage);
+        detail.target_temperature = reactor.target_temperature.or_else(|| {
+            reactor
+                .output_fluid_box
+                .filter
+                .as_deref()
+                .and_then(|name| store.get(PrototypeGroup::Fluid, name))
+                .and_then(|r| r.component::<FluidComponent>())
+                .map(|f| f.default_temperature)
+        });
+        detail.fusion_fuel_power_j = reactor
+            .output_fluid_box
+            .filter
+            .as_deref()
+            .and_then(|name| store.get(PrototypeGroup::Fluid, name))
+            .and_then(|r| r.component::<FluidComponent>())
+            .map(|f| {
+                reactor.max_fluid_usage
+                    * f.heat_capacity().amount
+                    * detail.target_temperature.unwrap_or(0.0)
+                    / reactor.burner.effectivity
+            });
+        detail.energy_consumption_j = Some(reactor.power_input.amount);
+        detail.neighbour_bonus = Some(reactor.neighbour_bonus);
+        detail.machine_energy_source = Some("electric".to_owned());
+        detail.burner_fuel_categories = reactor.burner.fuel_categories.clone();
+    }
+    if let Some(generator) = record.component::<FusionGeneratorComponent>() {
+        detail.fluid_filter = generator.input_fluid_box.filter.clone();
+        detail.output_fluid_filter = generator.output_fluid_box.filter.clone();
+        detail.fluid_usage_per_tick = Some(generator.max_fluid_usage);
+        detail.max_power_output_j = generator.energy_source.output_flow_limit.map(|p| p.amount);
+        detail.effectivity = Some(generator.effectivity);
+        detail.burns_fluid = Some(generator.burns_fluid);
     }
     if let Some(resource) = record.component::<ResourceEntityComponent>() {
         detail.categories = vec![effective_resource_category(resource)];
@@ -6595,6 +6660,76 @@ mod tests {
             "倍率对比：1e-6={:?}，1.0={:?}",
             outcomes[0].2.is_ok(),
             outcomes[1].2.is_ok()
+        );
+    }
+}
+
+#[cfg(test)]
+mod fusion_tests {
+    use super::*;
+    #[test]
+    fn fusion_catalog_details_suggestions_and_quality_facts() {
+        let dump = serde_json::json!({
+            "quality":{"normal":{"level":0,"next":"rare","order":"a"},"rare":{"level":2,"default_multiplier":1.6,"order":"b"}},
+            "fluid":{"cold":{"default_temperature":-150},"hot":{"default_temperature":180},"plasma":{"default_temperature":1000000,"max_temperature":10000000,"heat_capacity":"25J"}},
+            "fusion-reactor":{"r":{"max_fluid_usage":4.0/60.0,"power_input":"10MW","burner":{"fuel_categories":["fusion"]},"energy_source":{"type":"electric"},"input_fluid_box":{"filter":"cold"},"output_fluid_box":{"filter":"plasma"}}},
+            "fusion-generator":{"g":{"max_fluid_usage":2.0/60.0,"energy_source":{"type":"electric","output_flow_limit":"50MW"},"input_fluid_box":{"filter":"plasma"},"output_fluid_box":{"filter":"hot"}}}
+        });
+        let store = PrototypeStore::load(&dump).unwrap();
+        let index = catalog_index_from_store(&store, &HashMap::new());
+        assert!(
+            index
+                .iter()
+                .any(|e| e.kind == "fusion-reactor" && e.name == "r")
+        );
+        assert!(
+            index
+                .iter()
+                .any(|e| e.kind == "fusion-generator" && e.name == "g")
+        );
+        assert!(
+            suggest_for_flow(&store, DualVar::Electricity)
+                .iter()
+                .any(|s| s.kind == "fusion-generator")
+        );
+        let state = AppState::default();
+        state
+            .runtime
+            .lock()
+            .unwrap()
+            .install_context("fusion".into(), store);
+        let reactor =
+            prototype_detail(&state, "fusion".into(), "fusion-reactor".into(), "r".into())
+                .unwrap()
+                .unwrap();
+        assert_eq!(reactor.output_fluid_filter.as_deref(), Some("plasma"));
+        assert_eq!(reactor.burner_fuel_categories, ["fusion"]);
+        let facts = reactor.calculation;
+        let stats = &facts
+            .qualities
+            .iter()
+            .find(|q| q.quality == "rare")
+            .unwrap()
+            .stats;
+        assert!(
+            stats
+                .iter()
+                .any(|s| s.key == "power" && (s.value - 10e6).abs() < 1e-5)
+        );
+        assert!(
+            stats
+                .iter()
+                .any(|s| s.key == "fusion-fuel-power" && (s.value - 160e6).abs() < 1e-5)
+        );
+        assert_eq!(
+            mechanic_quality_level(
+                &["normal".into(), "rare".into()],
+                &Mechanic::FusionGenerator(metatorio_core::FusionGeneratorMechanic {
+                    generator: IdWithQuality::new("g", "rare"),
+                    temperature: None
+                })
+            ),
+            1
         );
     }
 }

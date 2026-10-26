@@ -51,6 +51,8 @@
     { kind: "generator", label: "发电机" },
     { kind: "boiler", label: "锅炉" },
     { kind: "reactor", label: "反应堆" },
+    { kind: "fusion-reactor", label: "聚变反应堆" },
+    { kind: "fusion-generator", label: "聚变发电机" },
     { kind: "solar", label: "太阳能" },
     { kind: "fluid-fuel", label: "流体燃料" },
     { kind: "fluid-heat", label: "流体热" },

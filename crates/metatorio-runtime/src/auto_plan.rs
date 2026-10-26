@@ -967,6 +967,7 @@ fn enumerate_energy(
     options: &EnumerateOptions,
     out: &mut Vec<Mechanic>,
 ) {
+    let fluid_temperatures = store.fluid_temperatures_with_reactors(&ctx.game.reactor_neighbours);
     let major_quality = quality_name(ctx, options.major_quality);
     let quality_range = options.quality_limit + 1;
     // 能量设备同样受表面条件约束（如只能建在特定星球的发电机/锅炉）。
@@ -1023,8 +1024,7 @@ fn enumerate_energy(
                 // 副产物，生产它再浪费一部分，有可能比专门生产低温流体更高效。这个取舍属于
                 // **求解器**，不属于枚举层——在枚举层砍掉，求解器就永远考虑不到那种方案了。
                 // 所以 > `maximum_temperature` 的档一律保留。
-                let mut temperatures: Vec<i32> = store
-                    .fluid_temperatures()
+                let mut temperatures: Vec<i32> = fluid_temperatures
                     .get(&fluid_name)
                     .map(Vec::as_slice)
                     .unwrap_or_default()
@@ -1097,16 +1097,14 @@ fn enumerate_energy(
                     // （如 fluid-heater）枚举表里所有可升温的流体，让求解器挑。
                     let fluids: Vec<String> = match boiler.fluid_box.filter.clone() {
                         Some(filter) => vec![filter],
-                        None => store
-                            .fluid_temperatures()
+                        None => fluid_temperatures
                             .iter()
                             .filter(|(_, temperatures)| temperatures.len() >= 2)
                             .map(|(name, _)| name.clone())
                             .collect(),
                     };
                     for fluid_name in fluids {
-                        let temperatures = store
-                            .fluid_temperatures()
+                        let temperatures = fluid_temperatures
                             .get(&fluid_name)
                             .cloned()
                             .unwrap_or_default();
@@ -1130,11 +1128,63 @@ fn enumerate_energy(
                 }
             }
         }
+        if record.has("FusionReactorComponent") {
+            out.push(Mechanic::FusionReactor(
+                metatorio_core::FusionReactorMechanic {
+                    reactor: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                    neighbours: None,
+                    fuel: None,
+                },
+            ));
+        }
+        if let Some(generator) = record.component::<metatorio_data::FusionGeneratorComponent>() {
+            if let Some(name) = generator.input_fluid_box.filter.as_deref()
+                && let Some(fluid) = fluid_record(ctx, name)
+            {
+                if generator.burns_fluid && fluid.fuel_value().amount > 0.0 {
+                    out.push(Mechanic::FusionGenerator(
+                        metatorio_core::FusionGeneratorMechanic {
+                            generator: IdWithQuality::new(
+                                record.name.clone(),
+                                major_quality.clone(),
+                            ),
+                            temperature: None,
+                        },
+                    ));
+                } else if !generator.burns_fluid {
+                    for &temperature in fluid_temperatures
+                        .get(name)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                    {
+                        let t = f64::from(temperature);
+                        if t > 0.0
+                            && t >= generator
+                                .minimum_input_temperature
+                                .unwrap_or(fluid.default_temperature)
+                            && generator
+                                .maximum_input_temperature
+                                .is_none_or(|max| t <= max)
+                        {
+                            out.push(Mechanic::FusionGenerator(
+                                metatorio_core::FusionGeneratorMechanic {
+                                    generator: IdWithQuality::new(
+                                        record.name.clone(),
+                                        major_quality.clone(),
+                                    ),
+                                    temperature: Some(temperature),
+                                },
+                            ));
+                        }
+                    }
+                }
+            }
+        }
         if let Some(_reactor) = record.component::<ReactorComponent>() {
             out.push(Mechanic::Reactor(metatorio_core::ReactorMechanic {
                 reactor: IdWithQuality::new(record.name.clone(), major_quality.clone()),
                 fuel: None,
-                neighbours: 3,
+                neighbours: None,
             }));
         }
     }

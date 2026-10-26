@@ -238,9 +238,10 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
           break;
         }
         case "generator":
+        case "fusion-generator":
           openSelector(
-            "generator",
-            "选择发电机",
+            kind,
+            kind === "fusion-generator" ? "选择聚变发电机" : "选择发电机",
             (name, quality) => commands.setGenerator(mechanic, name, quality),
             [],
             [],
@@ -262,9 +263,10 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
           );
           break;
         case "reactor":
+        case "fusion-reactor":
           openSelector(
-            "reactor",
-            "选择反应堆",
+            kind,
+            kind === "fusion-reactor" ? "选择聚变反应堆" : "选择反应堆",
             (name, quality) => commands.setReactor(mechanic, name, quality),
             [],
             [],
@@ -418,8 +420,8 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
     } else if (type === "boiler") {
       entityKind = "boiler";
       entityId = m?.boiler?.id ?? null;
-    } else if (type === "reactor") {
-      entityKind = "reactor";
+    } else if (type === "reactor" || type === "fusion-reactor") {
+      entityKind = type;
       entityId = m?.reactor?.id ?? null;
     }
 
@@ -428,7 +430,7 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
     if (entityKind && entityId) {
       const detail = await runtime.getDetail(entityKind, entityId);
       const categories = detail?.burner_fuel_categories ?? [];
-      const energySource = detail?.machine_energy_source;
+      const energySource = type === "fusion-reactor" ? "burner" : detail?.machine_energy_source;
       if (energySource === "burner" || categories.length > 0) {
         // burner 机器：只允许物品燃料（有热值），且（无类别限制 或 类别匹配）。
         allowedNames = (runtime.catalogIndex?.entries ?? [])

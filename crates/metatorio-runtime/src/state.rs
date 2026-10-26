@@ -824,6 +824,13 @@ impl RuntimeState {
                 let changed = replace(&mut self.project_mut(project_id)?.settings.solver, solver);
                 Ok(Outcome::solve_all_if(changed, project_id))
             }
+            ProjectAction::SetReactorNeighbours { estimates } => {
+                let changed = replace(
+                    &mut self.project_mut(project_id)?.settings.reactor_neighbours,
+                    estimates,
+                );
+                Ok(Outcome::solve_all_if(changed, project_id))
+            }
             ProjectAction::SetOrbitalTransportCosts { costs } => {
                 costs.validate().map_err(RuntimeError::InvalidValue)?;
                 let changed = replace(
@@ -2831,6 +2838,25 @@ fn apply_mechanic_action(
             };
             apply_boiler_action(mechanic, action)
         }
+        MechanicAction::FusionReactor(action) => {
+            let Mechanic::FusionReactor(mechanic) = mechanic else {
+                return Err(kind_mismatch("fusion-reactor"));
+            };
+            apply_reactor_action(mechanic, action)
+        }
+        MechanicAction::FusionGenerator(action) => {
+            let Mechanic::FusionGenerator(mechanic) = mechanic else {
+                return Err(kind_mismatch("fusion-generator"));
+            };
+            match action {
+                crate::message::FusionGeneratorMechanicAction::SetGenerator { generator } => {
+                    Ok(replace(&mut mechanic.generator, generator))
+                }
+                crate::message::FusionGeneratorMechanicAction::SetTemperature { temperature } => {
+                    Ok(replace(&mut mechanic.temperature, temperature))
+                }
+            }
+        }
         MechanicAction::Reactor(action) => {
             let Mechanic::Reactor(mechanic) = mechanic else {
                 return Err(kind_mismatch("reactor"));
@@ -2903,6 +2929,8 @@ fn kind_mismatch(kind: &'static str) -> RuntimeError {
         "generator" => "该机制不是 generator 类型",
         "boiler" => "该机制不是 boiler 类型",
         "reactor" => "该机制不是 reactor 类型",
+        "fusion-reactor" => "该机制不是 fusion-reactor 类型",
+        "fusion-generator" => "该机制不是 fusion-generator 类型",
         "solar" => "该机制不是 solar 类型",
         "fluid-fuel" => "该机制不是 fluid-fuel 类型",
         "fluid-heat" => "该机制不是 fluid-heat 类型",
@@ -3033,11 +3061,6 @@ fn apply_reactor_action(
         }
         ReactorMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
         ReactorMechanicAction::SetNeighbours { neighbours } => {
-            if neighbours > 8 {
-                return Err(RuntimeError::InvalidValue(
-                    "反应堆相邻数量不能超过 8".to_string(),
-                ));
-            }
             Ok(replace(&mut mechanic.neighbours, neighbours))
         }
     }

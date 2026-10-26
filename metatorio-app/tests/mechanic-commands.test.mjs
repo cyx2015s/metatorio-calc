@@ -76,3 +76,16 @@ test('module edits use the current mechanism kind within the captured factory', 
   await assert.rejects(commands.moduleMessage(3, 'clear-modules'), /不支持模块配置/);
   assert.equal(messages.length, 1);
 });
+
+test('fusion edits use their own action tags and support inherited neighbours',async()=>{
+ const {commands,first,messages}=fixture();
+ first.mechanics.push({id:4,mechanic:{type:'fusion-reactor'}},{id:5,mechanic:{type:'fusion-generator'}});
+ await commands.setReactor(4,'fusion-reactor','rare');
+ await commands.setNeighbours(4,null);
+ await commands.setFuel(4,{kind:'item',item:{id:'fusion-power-cell',quality:'normal'}});
+ await commands.setGenerator(5,'fusion-generator','legendary');
+ await commands.setMechanicTemperature(5,4000000);
+ assert.deepEqual(messages.map(m=>Object.keys(m.action.action.mechanic.action)[0]),['fusion-reactor','fusion-reactor','fusion-reactor','fusion-generator','fusion-generator']);
+ assert.equal(messages[1].action.action.mechanic.action['fusion-reactor']['set-neighbours'].neighbours,null);
+ assert.equal(messages[4].action.action.mechanic.action['fusion-generator']['set-temperature'].temperature,4000000);
+});

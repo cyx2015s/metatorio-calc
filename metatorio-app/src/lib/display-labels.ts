@@ -12,7 +12,7 @@ export function lookupName(names: ReadonlyMap<string, string>, kind: string, nam
   if (kind === "flow") return flowLabels[name] || name;
   const alias = kind === "planet" ? "space-location" : kind === "space-location" ? "planet"
     : kind === "module" ? "item"
-    : ["machine", "mining-machine", "offshore-pump", "generator", "boiler", "reactor", "beacon", "resource", "solar-panel", "accumulator"].includes(kind) ? "entity" : undefined;
+    : ["machine", "mining-machine", "offshore-pump", "generator", "boiler", "reactor", "fusion-reactor", "fusion-generator", "beacon", "resource", "solar-panel", "accumulator"].includes(kind) ? "entity" : undefined;
   return names.get(`${kind}/${name}`) || (alias && names.get(`${alias}/${name}`)) || name;
 }
 
@@ -33,9 +33,9 @@ export function mechanicPrototype(mechanic: Mechanic): {kind:string;name:string}
     case "mining": return {kind:"resource",name:mechanic.resource || ""};
     case "solar": return {kind:"entity",name:mechanic.solar_panel?.id || ""};
     case "tile-extract": return {kind:"tile",name:mechanic.tile || ""};
-    case "generator": return {kind:"entity",name:mechanic.generator?.id || ""};
+    case "fusion-generator": case "generator": return {kind:"entity",name:mechanic.generator?.id || ""};
     case "boiler": return {kind:"entity",name:mechanic.boiler?.id || ""};
-    case "reactor": return {kind:"entity",name:mechanic.reactor?.id || ""};
+    case "fusion-reactor": case "reactor": return {kind:"entity",name:mechanic.reactor?.id || ""};
     case "fluid-fuel": case "fluid-heat": return {kind:"fluid",name:mechanic.fluid || ""};
     case "plant": return {kind:"item",name:mechanic.seed?.id || ""};
     default: return {kind:"item",name:mechanic.item?.id || ""};

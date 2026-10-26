@@ -14,6 +14,7 @@ export const statLabels: Record<string, string> = {
   "module-productivity-multiplier": "产能插件倍率", "science-multiplier": "科研容量倍率", "accumulator-multiplier": "蓄电容量倍率",
   "stack-size": "堆叠数量", "spoil-time": "变质时间", "max-output": "最大发电功率", "heat-output": "额定热功率",
   "efficiency": "效率", "max-temperature": "最高温度", "default-temperature": "默认温度", "target-temperature": "目标温度",
+  "fusion-fuel-power": "聚变燃料功率（无邻居加成）",
   "fluid-usage": "流体消耗", "neighbour-bonus": "相邻加成", "quality-level": "品质等级",
 };
 export function formatStat(stat: CalculationStat): string {
@@ -49,6 +50,7 @@ export function detailStats(detail: PrototypeDetail | null, quality = "normal"):
   add("max-output", detail.max_power_output_j, "watts", 60); add("heat-output", detail.heat_output_j, "watts", 60);
   add("efficiency", detail.effectivity, "multiplier"); add("max-temperature", detail.maximum_temperature, "number");
   add("default-temperature", detail.default_temperature, "number"); add("target-temperature", detail.target_temperature, "number");
+  add("fusion-fuel-power", detail.fusion_fuel_power_j, "watts", 60);
   add("fluid-usage", detail.fluid_usage_per_tick, "per-second", 60); add("neighbour-bonus", detail.neighbour_bonus, "percent");
   add("quality-level", detail.quality_level, "number");
   const calculation = detail.calculation;

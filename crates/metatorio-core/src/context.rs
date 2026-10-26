@@ -27,6 +27,7 @@ impl Context<'_> {
 /// 与原型数据分离（原型不可变、进程可变）；默认值 = "无加成、仅 normal 品质"。
 #[derive(Debug, Clone)]
 pub struct GameState {
+    pub reactor_neighbours: std::collections::BTreeMap<String, u8>,
     /// 品质列表（索引 = 品质等级，0 = normal；含解锁上限）。
     pub qualities: Vec<String>,
     /// 解锁的品质上限索引（0 = normal）。
@@ -50,6 +51,7 @@ pub struct GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self {
+            reactor_neighbours: Default::default(),
             qualities: vec!["normal".to_string()],
             max_quality: 0,
             recipe_productivity: IndexMap::with_hasher(RandomState::default()),

@@ -407,7 +407,7 @@ fn reactor_outputs_heat() {
         }),
         Mechanic::Reactor(ReactorMechanic {
             reactor: id("reactor"),
-            neighbours: 2,
+            neighbours: Some(2),
             fuel: Some(Fuel::Item { item: id("fuel") }),
         }),
     );
@@ -450,7 +450,7 @@ fn reactor_quality_uses_default_multiplier() {
         }),
         Mechanic::Reactor(ReactorMechanic {
             reactor: IdWithQuality::new("reactor", "quality"),
-            neighbours: 0,
+            neighbours: Some(0),
             fuel: Some(Fuel::Item {
                 item: IdWithQuality::new("fuel", "quality"),
             }),

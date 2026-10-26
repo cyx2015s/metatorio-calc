@@ -140,9 +140,8 @@ export class MechanicCommands {
   }
 
   async setGenerator(mechanic: MechanicId, generator: string, quality = "normal"): Promise<void> {
-    await this.mechanicMessage(mechanic, {
-      generator: { "set-generator": { generator: { id: generator, quality } } },
-    });
+    const action={"set-generator":{generator:{id:generator,quality}}};
+    await this.mechanicMessage(mechanic,this.mechanicKind(mechanic)==="fusion-generator"?{"fusion-generator":action}:{generator:action});
   }
 
   async setBoiler(mechanic: MechanicId, boiler: string, quality = "normal"): Promise<void> {
@@ -208,6 +207,7 @@ export class MechanicCommands {
         "fluid-heat": { "set-temperature": { temperature } },
       });
     }
+    if (kind === "fusion-generator") return this.mechanicMessage(mechanic,{"fusion-generator":{"set-temperature":{temperature}}});
     if (kind === "generator") {
       return this.mechanicMessage(mechanic, { generator: { "set-temperature": { temperature } } });
     }
@@ -229,8 +229,9 @@ export class MechanicCommands {
     if (kind === "boiler") {
       return this.mechanicMessage(mechanic, { boiler: { "set-fuel": { fuel } } });
     }
-    if (kind === "reactor") {
-      return this.mechanicMessage(mechanic, { reactor: { "set-fuel": { fuel } } });
+    if (kind === "reactor" || kind === "fusion-reactor") {
+      const action={"set-fuel":{fuel}};
+      return this.mechanicMessage(mechanic,kind==="fusion-reactor"?{"fusion-reactor":action}:{reactor:action});
     }
     throw new Error(`${kind} 机制不支持指定燃料`);
   }
@@ -250,9 +251,10 @@ export class MechanicCommands {
     throw new Error(`${kind} 机制不支持设置燃料温度`);
   }
 
-  /** 反应堆相邻数（0-8）。 */
-  async setNeighbours(mechanic: MechanicId, neighbours: number): Promise<void> {
-    await this.mechanicMessage(mechanic, { reactor: { "set-neighbours": { neighbours } } });
+  /** 反应堆相邻数；null 继承项目估计。 */
+  async setNeighbours(mechanic: MechanicId, neighbours: number | null): Promise<void> {
+    const action={"set-neighbours":{neighbours}};
+    await this.mechanicMessage(mechanic,this.mechanicKind(mechanic)==="fusion-reactor"?{"fusion-reactor":action}:{reactor:action});
   }
 
   /** 火箭发射重量模式（true = 按重量；false = 按堆叠槽位）。 */
@@ -261,9 +263,8 @@ export class MechanicCommands {
   }
 
   async setReactor(mechanic: MechanicId, reactor: string, quality = "normal"): Promise<void> {
-    await this.mechanicMessage(mechanic, {
-      reactor: { "set-reactor": { reactor: { id: reactor, quality } } },
-    });
+    const action={"set-reactor":{reactor:{id:reactor,quality}}};
+    await this.mechanicMessage(mechanic,this.mechanicKind(mechanic)==="fusion-reactor"?{"fusion-reactor":action}:{reactor:action});
   }
 
   async setSolarPanel(mechanic: MechanicId, solarPanel: string, quality = "normal"): Promise<void> {

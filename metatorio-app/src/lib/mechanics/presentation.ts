@@ -9,6 +9,8 @@ export const mechanicKindLabels: Record<string, string> = {
     generator: "发电机",
     boiler: "锅炉",
     reactor: "反应堆",
+    "fusion-reactor": "聚变反应堆",
+    "fusion-generator": "聚变发电机",
     solar: "太阳能",
     "fluid-fuel": "流体燃料",
     "fluid-heat": "流体热",
