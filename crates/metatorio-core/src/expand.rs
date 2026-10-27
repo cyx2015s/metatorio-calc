@@ -467,6 +467,9 @@ fn expand_recipe<C: Clone>(
     let Some(machine) = crafter.component::<CraftingMachineComponent>() else {
         return;
     };
+    if !machine.supports_recipe_fluid_input(recipe) {
+        return;
+    }
     let recipe_time = if recipe.energy_required > 0.0 {
         recipe.energy_required
     } else {

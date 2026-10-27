@@ -1130,6 +1130,7 @@ macro_rules! ty {
 /// 无法在 schema 中命名 → 由手写类型 `crate::types::BoilerMode` 解析；
 /// fire_flicker_enabled 与计算无关 → 完全跳过。
 pub const DEFAULT_FIELD_RULES: &[FieldRule] = &[
+    ty!("FluidBox", "production_type", "String"),
     ty!("BoilerPrototype", "mode", "crate::types::BoilerMode"),
     skip!("BoilerPrototype", "fire_flicker_enabled"),
     skip!("EntityPrototype", "map_color"),

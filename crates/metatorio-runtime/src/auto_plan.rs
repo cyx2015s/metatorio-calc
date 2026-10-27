@@ -350,6 +350,9 @@ fn fluid_record<'a>(ctx: &'a Context, name: &str) -> Option<&'a FluidComponent> 
 }
 
 fn machine_fits_recipe(machine: &CraftingMachineComponent, recipe: &RecipeComponent) -> bool {
+    if !machine.supports_recipe_fluid_input(recipe) {
+        return false;
+    }
     let required = effective_recipe_categories(recipe);
     if required.is_empty() {
         return true;

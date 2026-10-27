@@ -80,16 +80,18 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
         case "machine": {
           // 机器列表按当前配方的 categories 过滤（组装机/电炉/火箭发射井等）
           const recipeId = entry?.mechanic.recipe?.id;
-          const filter = recipeId
-            ? (await runtime.getDetail("recipe", recipeId))?.categories ?? []
-            : [];
+          const recipe = recipeId ? await runtime.getDetail("recipe", recipeId) : null;
+          const filter = recipe?.categories ?? [];
+          const allowedNames = recipe?.ingredients?.some(ingredient => ingredient.kind === 'fluid')
+            ? (runtime.catalogIndex?.entries ?? []).filter(entry => entry.kind === 'machine' && entry.supports_fluid_input).map(entry => entry.name)
+            : undefined;
           openSelector(
             "machine",
             "选择机器",
             (name, quality) => commands.setMachine(mechanic, name, quality),
             [{ kind: "machine", label: "制造机" }],
             filter,
-            undefined,
+            allowedNames,
             entry?.mechanic.machine?.id,
             entry?.mechanic.machine?.quality,
           );

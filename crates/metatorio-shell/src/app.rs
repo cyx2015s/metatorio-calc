@@ -508,6 +508,8 @@ pub struct GroupCount {
 /// 目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。
 #[derive(Debug, Clone, Serialize)]
 pub struct IndexEntry {
+    /// Recipe fluid input capability, independent of fluid fuel.
+    pub supports_fluid_input: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tile: Option<metatorio_core::planet::TileCapabilities>,
     pub kind: String,
@@ -2452,6 +2454,7 @@ pub(crate) fn catalog_index_from_store(
                         0
                     };
                     out.push(IndexEntry {
+                        supports_fluid_input: false,
                         tile: None,
                         kind: kind.to_string(),
                         name: name.clone(),
@@ -2522,6 +2525,9 @@ pub(crate) fn catalog_index_from_store(
                         _ => Vec::new(),
                     };
                     out.push(IndexEntry {
+                        supports_fluid_input: record
+                            .component::<CraftingMachineComponent>()
+                            .is_some_and(CraftingMachineComponent::supports_fluid_input),
                         tile: None,
                         kind: kind.to_string(),
                         name: name.clone(),
@@ -2545,6 +2551,7 @@ pub(crate) fn catalog_index_from_store(
     // 能力随索引一起下发；前端按用途过滤，不为每块地格发送详情请求。
     for record in store.group(PrototypeGroup::Tile) {
         out.push(IndexEntry {
+            supports_fluid_input: false,
             tile: metatorio_core::planet::tile_capabilities(store, &record.name),
             kind: "tile".to_string(),
             name: record.name.clone(),
@@ -2573,6 +2580,7 @@ pub(crate) fn catalog_index_from_store(
                         continue;
                     };
                     out.push(IndexEntry {
+                        supports_fluid_input: false,
                         tile: None,
                         kind: "module".to_string(),
                         name: name.clone(),
@@ -2612,6 +2620,7 @@ pub(crate) fn catalog_index_from_store(
                         .map(|resource| vec![effective_resource_category(resource)])
                         .unwrap_or_default();
                     out.push(IndexEntry {
+                        supports_fluid_input: false,
                         tile: None,
                         kind: "resource".to_string(),
                         name: name.clone(),
@@ -2634,6 +2643,7 @@ pub(crate) fn catalog_index_from_store(
     // quality
     for name in store.quality_order() {
         out.push(IndexEntry {
+            supports_fluid_input: false,
             tile: None,
             kind: "quality".to_string(),
             name: name.clone(),
@@ -3148,6 +3158,9 @@ pub(crate) fn ensure_machine_compat_scoped(
 
     match &mechanism {
         Mechanic::Recipe(recipe) => {
+            let recipe_component = store
+                .get(PrototypeGroup::Recipe, &recipe.recipe.id)
+                .and_then(|record| record.component::<RecipeComponent>());
             let recipe_categories = store
                 .get(PrototypeGroup::Recipe, &recipe.recipe.id)
                 .and_then(|record| record.component::<RecipeComponent>())
@@ -3159,6 +3172,8 @@ pub(crate) fn ensure_machine_compat_scoped(
                     .and_then(|record| record.component::<CraftingMachineComponent>())
                     .is_some_and(|machine| {
                         categories_overlap(&recipe_categories, &machine.crafting_categories)
+                            && recipe_component
+                                .is_none_or(|recipe| machine.supports_recipe_fluid_input(recipe))
                     });
             if machine_ok {
                 return Ok(());
@@ -3171,6 +3186,9 @@ pub(crate) fn ensure_machine_compat_scoped(
                         .component::<CraftingMachineComponent>()
                         .is_some_and(|machine| {
                             categories_overlap(&recipe_categories, &machine.crafting_categories)
+                                && recipe_component.is_none_or(|recipe| {
+                                    machine.supports_recipe_fluid_input(recipe)
+                                })
                         })
                 },
                 |record| {
@@ -5347,6 +5365,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn manual_recipe_and_machine_edits_repair_fluid_input_in_both_factory_modes() {
+        for universe_mode in [false, true] {
+            let concrete = file_host();
+            let app: Arc<dyn Host> = concrete.clone();
+            let (project, factory, universe, mechanic) = {
+                let mut runtime = concrete.state.runtime.lock().unwrap();
+                let dump = serde_json::from_str(include_str!(
+                    "../../metatorio-data/tests/fixtures/ammonia-fluid-smelting.json"
+                ))
+                .unwrap();
+                let store = PrototypeStore::load(&dump).unwrap();
+                let index = catalog_index_from_store(&store, &HashMap::new());
+                for (name, expected) in [
+                    ("stone-furnace", false),
+                    ("steel-furnace", false),
+                    ("assembling-machine-1", false),
+                    ("assembling-machine-2", true),
+                    ("blast-furnace", true),
+                ] {
+                    assert_eq!(
+                        index
+                            .iter()
+                            .find(|entry| entry.kind == "machine" && entry.name == name)
+                            .unwrap()
+                            .supports_fluid_input,
+                        expected,
+                        "{name}"
+                    );
+                }
+                runtime.install_context("test".into(), store);
+                runtime.set_active_context(Some("test".into()));
+                let project = runtime
+                    .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                        name: "fluid input".into(),
+                    }))
+                    .unwrap()
+                    .created
+                    .projects[0];
+                let factory = runtime.state.document.projects[0].factories[0].id;
+                runtime.state.document.projects[0].settings.all_accessible = true;
+                let universe=runtime.dispatch(serde_json::from_value(serde_json::json!({"scope":"project","action":{"project":project,"action":{"add-universe":{"name":"test"}}}})).unwrap()).unwrap().created.universes[0];
+                let add = if universe_mode {
+                    serde_json::json!({"scope":"universe","action":{"project":project,"universe":universe,"action":{"add-local-mechanic":{"location":{"kind":"planet","name":"nauvis"},"kind":"recipe"}}}})
+                } else {
+                    serde_json::json!({"scope":"factory","action":{"project":project,"factory":factory,"action":{"mechanic-list":{"add":{"kind":"recipe"}}}}})
+                };
+                let mechanic = runtime
+                    .dispatch(serde_json::from_value(add).unwrap())
+                    .unwrap()
+                    .created
+                    .mechanics[0];
+                (project, factory, universe, mechanic)
+            };
+            for edit in [
+                serde_json::json!({"set-recipe":{"recipe":{"id":"reduce-iron-chloride","quality":"normal"}}}),
+                serde_json::json!({"set-machine":{"machine":{"id":"stone-furnace","quality":"normal"}}}),
+            ] {
+                let action =
+                    serde_json::json!({"mechanic":{"mechanic":mechanic,"action":{"recipe":edit}}});
+                let message = if universe_mode {
+                    serde_json::json!({"scope":"universe","action":{"project":project,"universe":universe,"action":action}})
+                } else {
+                    serde_json::json!({"scope":"factory","action":{"project":project,"factory":factory,"action":action}})
+                };
+                dispatch(&app, serde_json::from_value(message).unwrap())
+                    .await
+                    .unwrap();
+                let runtime = concrete.state.runtime.lock().unwrap();
+                let selected = if universe_mode {
+                    let metatorio_core::LocatedMechanic::Local(local) =
+                        &runtime.state.document.projects[0].universes[0].mechanics[0].mechanic
+                    else {
+                        panic!("local expected")
+                    };
+                    let Mechanic::Recipe(recipe) = &local.mechanic else {
+                        panic!("recipe expected")
+                    };
+                    recipe
+                } else {
+                    let Mechanic::Recipe(recipe) =
+                        &runtime.state.document.projects[0].factories[0].mechanics[0].mechanic
+                    else {
+                        panic!("recipe expected")
+                    };
+                    recipe
+                };
+                assert_eq!(selected.machine.id, "blast-furnace");
+            }
+            std::fs::remove_dir_all(&concrete.dir).unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn concurrent_file_opens_are_deduplicated_and_save_as_updates_origin() {
         let host = file_host();
         let app: Arc<dyn Host> = host.clone();
@@ -5773,6 +5884,7 @@ mod tests {
     #[test]
     fn index_entry_filter_matches_kind_and_name() {
         let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            supports_fluid_input: false,
             tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
@@ -5832,6 +5944,7 @@ mod tests {
     /// 测试用目录条目（只填与匹配相关的字段）。
     fn index_entry(kind: &str, name: &str, localized: &str) -> IndexEntry {
         IndexEntry {
+            supports_fluid_input: false,
             tile: None,
             kind: kind.to_string(),
             name: name.to_string(),

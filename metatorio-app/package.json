@@ -21,6 +21,7 @@
     "test:fusion-browser": "node tests/fusion-browser.cjs",
     "test:update-chain-browser": "node tests/update-chain-browser.cjs",
     "test:network-scope-switch-browser": "node tests/network-scope-switch-browser.cjs",
+    "test:recipe-fluid-input-browser": "node tests/recipe-fluid-input-browser.cjs",
     "test:network": "node --test tests/network.test.mjs tests/cluster-transport.test.mjs",
     "test:network-browser": "node tests/network-browser.cjs",
     "test:network-tiles-browser": "node tests/network-tiles-browser.cjs",

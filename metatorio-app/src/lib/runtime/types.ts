@@ -921,6 +921,7 @@ export interface CalculationStat { key: string; value: number; unit: "number" | 
 export interface CalculationDetail { item_weight?: { weight: number; source: "explicit" | "cursor" | "recipe" | "default"; recipe?: string; fallback?: string }; surface_properties?: Record<string, number>; research?: {units: number | null; unit_seconds: number; ingredients: {name: string; per_unit: number; total: number | null}[]; prerequisites: string[]}; stats: CalculationStat[]; qualities: { quality: string; stats: CalculationStat[] }[]; tile?: TileCapabilities; }
 
 export interface IndexEntry {
+  supports_fluid_input?: boolean;
   tile?: TileCapabilities;
   kind: string;
   name: string;

@@ -18,6 +18,7 @@ fn fluid_dump() -> Value {
         "assembling-machine": {
             "assembling-machine-1": {
                 "crafting_speed": 1.0,
+                "fluid_boxes": [{"production_type":"input"}, {"production_type":"output"}],
                 "energy_usage": "0J",
                 "energy_source": { "type": "electric", "drain": "0J" }
             }

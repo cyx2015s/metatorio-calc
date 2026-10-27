@@ -1150,6 +1150,7 @@ impl RuntimeState {
                 let compat = matches!(
                     &action,
                     MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
+                        | MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
                         | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
                 );
                 let clamp = matches!(
@@ -1450,10 +1451,11 @@ impl RuntimeState {
                 self.apply_mechanic_list(project_id, factory_id, action)
             }
             FactoryAction::Mechanic { mechanic, action } => {
-                // 配方/资源变化后，让外层校验机器与配方/资源的类别兼容性。
+                // Recipe or machine edits both recheck categories and fluid input support.
                 let needs_compat = matches!(
                     &action,
                     MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
+                        | MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
                         | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
                 );
                 // 机器变化后，让外层按机器槽位上限钳制插件数量。

@@ -1,0 +1,421 @@
+{
+  "_fixture_source": "ammonia 1.5.5 / Factorio 2.1.22; calculation fields only, cached context 53cf07c33b7eae93",
+  "recipe": {
+    "reduce-iron-chloride": {
+      "type": "recipe",
+      "name": "reduce-iron-chloride",
+      "categories": [
+        "smelting"
+      ],
+      "enabled": false,
+      "energy_required": 1,
+      "ingredients": [
+        {
+          "type": "fluid",
+          "name": "pure-iron-chloride",
+          "amount": 160
+        },
+        {
+          "type": "fluid",
+          "name": "hydrogen",
+          "amount": 200
+        }
+      ],
+      "results": [
+        {
+          "type": "fluid",
+          "name": "molten-iron",
+          "amount": 175
+        },
+        {
+          "type": "fluid",
+          "name": "hydrogen-chloride",
+          "amount": 120,
+          "ignored_by_productivity": 120
+        }
+      ],
+      "main_product": "molten-iron",
+      "allow_productivity": true,
+      "icons": [
+        {
+          "icon": "__space-age__/graphics/icons/fluid/molten-iron.png"
+        },
+        {
+          "icon": "__ammonia__/graphics/icons/fluid/pure-iron-chloride.png",
+          "scale": 0.3,
+          "shift": [
+            8,
+            8
+          ]
+        }
+      ],
+      "subgroup": "fluid-recipes",
+      "order": "j[hydrometallurgy]-f[reduce]-a[iron]",
+      "crafting_machine_tint": {
+        "primary": {
+          "r": 0.8,
+          "g": 0.5,
+          "b": 0.2,
+          "a": 1
+        },
+        "secondary": {
+          "r": 0.9,
+          "g": 0.9,
+          "b": 0.9,
+          "a": 1
+        }
+      },
+      "auto_recycle": false
+    },
+    "reduce-copper-chloride": {
+      "type": "recipe",
+      "name": "reduce-copper-chloride",
+      "categories": [
+        "smelting"
+      ],
+      "enabled": false,
+      "energy_required": 1,
+      "ingredients": [
+        {
+          "type": "fluid",
+          "name": "pure-copper-chloride",
+          "amount": 160
+        },
+        {
+          "type": "fluid",
+          "name": "hydrogen",
+          "amount": 200
+        }
+      ],
+      "results": [
+        {
+          "type": "fluid",
+          "name": "molten-copper",
+          "amount": 175
+        },
+        {
+          "type": "fluid",
+          "name": "hydrogen-chloride",
+          "amount": 120,
+          "ignored_by_productivity": 120
+        }
+      ],
+      "main_product": "molten-copper",
+      "allow_productivity": true,
+      "icons": [
+        {
+          "icon": "__space-age__/graphics/icons/fluid/molten-copper.png"
+        },
+        {
+          "icon": "__ammonia__/graphics/icons/fluid/pure-copper-chloride.png",
+          "scale": 0.3,
+          "shift": [
+            8,
+            8
+          ]
+        }
+      ],
+      "subgroup": "fluid-recipes",
+      "order": "j[hydrometallurgy]-f[reduce]-b[copper]",
+      "crafting_machine_tint": {
+        "primary": {
+          "r": 0.2,
+          "g": 0.6,
+          "b": 0.6,
+          "a": 1
+        },
+        "secondary": {
+          "r": 0.9,
+          "g": 0.9,
+          "b": 0.9,
+          "a": 1
+        }
+      },
+      "auto_recycle": false
+    }
+  },
+  "quality": {
+    "normal": {
+      "level": 0
+    }
+  },
+  "fluid": {
+    "pure-iron-chloride": {
+      "default_temperature": 25,
+      "max_temperature": 200
+    },
+    "hydrogen": {
+      "default_temperature": 25,
+      "max_temperature": 5500
+    },
+    "molten-iron": {
+      "default_temperature": 1500
+    },
+    "hydrogen-chloride": {
+      "default_temperature": 25,
+      "max_temperature": 12000
+    },
+    "pure-copper-chloride": {
+      "default_temperature": 25,
+      "max_temperature": 200
+    },
+    "molten-copper": {
+      "default_temperature": 1100
+    }
+  },
+  "item": {},
+  "assembling-machine": {
+    "assembling-machine-1": {
+      "crafting_categories": [
+        "crafting",
+        "advanced-crafting"
+      ],
+      "crafting_speed": 0.5,
+      "energy_usage": "75kW",
+      "energy_source": {
+        "type": "electric",
+        "usage_priority": "secondary-input",
+        "emissions_per_minute": {
+          "pollution": 4
+        }
+      },
+      "collision_box": [
+        [
+          -1.2,
+          -1.2
+        ],
+        [
+          1.2,
+          1.2
+        ]
+      ],
+      "fluid_boxes": []
+    },
+    "assembling-machine-2": {
+      "crafting_categories": [
+        "crafting",
+        "advanced-crafting",
+        "crafting-with-fluid"
+      ],
+      "crafting_speed": 0.75,
+      "energy_usage": "150kW",
+      "energy_source": {
+        "type": "electric",
+        "usage_priority": "secondary-input",
+        "emissions_per_minute": {
+          "pollution": 3
+        }
+      },
+      "collision_box": [
+        [
+          -1.2,
+          -1.2
+        ],
+        [
+          1.2,
+          1.2
+        ]
+      ],
+      "module_slots": 2,
+      "fluid_boxes": [
+        {
+          "production_type": "input"
+        },
+        {
+          "production_type": "output"
+        }
+      ]
+    },
+    "blast-furnace": {
+      "crafting_categories": [
+        "smelting"
+      ],
+      "crafting_speed": 3,
+      "energy_usage": "300kW",
+      "energy_source": {
+        "type": "heat",
+        "max_temperature": 4000,
+        "specific_heat": "0.5MJ",
+        "max_transfer": "100GW",
+        "min_working_temperature": 650,
+        "minimum_glow_temperature": 500,
+        "connections": [
+          {
+            "position": [
+              1,
+              0
+            ],
+            "direction": 4
+          },
+          {
+            "position": [
+              -1,
+              0
+            ],
+            "direction": 12
+          }
+        ]
+      },
+      "collision_box": [
+        [
+          -1.2,
+          -1.2
+        ],
+        [
+          1.2,
+          1.2
+        ]
+      ],
+      "module_slots": 4,
+      "fluid_boxes": [
+        {
+          "production_type": "input"
+        },
+        {
+          "production_type": "input"
+        },
+        {
+          "production_type": "output"
+        },
+        {
+          "production_type": "output"
+        }
+      ]
+    }
+  },
+  "furnace": {
+    "stone-furnace": {
+      "crafting_categories": [
+        "smelting"
+      ],
+      "crafting_speed": 1,
+      "energy_usage": "90kW",
+      "energy_source": {
+        "type": "burner",
+        "fuel_categories": [
+          "chemical"
+        ],
+        "effectivity": 1,
+        "fuel_inventory_size": 1,
+        "emissions_per_minute": {
+          "pollution": 2
+        },
+        "light_flicker": {
+          "color": [
+            0,
+            0,
+            0
+          ],
+          "minimum_intensity": 0.6,
+          "maximum_intensity": 0.95
+        },
+        "smoke": [
+          {
+            "name": "smoke",
+            "deviation": [
+              0.1,
+              0.1
+            ],
+            "frequency": 5,
+            "position": [
+              0,
+              -0.8
+            ],
+            "starting_vertical_speed": 0.08,
+            "starting_frame_deviation": 60
+          }
+        ]
+      },
+      "collision_box": [
+        [
+          -0.7,
+          -0.7
+        ],
+        [
+          0.7,
+          0.7
+        ]
+      ],
+      "fluid_boxes": []
+    },
+    "steel-furnace": {
+      "crafting_categories": [
+        "smelting"
+      ],
+      "crafting_speed": 2,
+      "energy_usage": "90kW",
+      "energy_source": {
+        "type": "burner",
+        "fuel_categories": [
+          "chemical"
+        ],
+        "effectivity": 1,
+        "emissions_per_minute": {
+          "pollution": 4
+        },
+        "fuel_inventory_size": 1,
+        "light_flicker": {
+          "color": [
+            0,
+            0,
+            0
+          ],
+          "minimum_intensity": 0.6,
+          "maximum_intensity": 0.95
+        },
+        "smoke": [
+          {
+            "name": "smoke",
+            "frequency": 10,
+            "position": [
+              0.7,
+              -1.2
+            ],
+            "starting_vertical_speed": 0.08,
+            "starting_frame_deviation": 60
+          }
+        ]
+      },
+      "collision_box": [
+        [
+          -0.7,
+          -0.7
+        ],
+        [
+          0.7,
+          0.7
+        ]
+      ],
+      "fluid_boxes": []
+    },
+    "electric-furnace": {
+      "crafting_categories": [
+        "smelting"
+      ],
+      "crafting_speed": 2,
+      "energy_usage": "180kW",
+      "energy_source": {
+        "type": "electric",
+        "usage_priority": "secondary-input",
+        "emissions_per_minute": {
+          "pollution": 1
+        }
+      },
+      "collision_box": [
+        [
+          -1.2,
+          -1.2
+        ],
+        [
+          1.2,
+          1.2
+        ]
+      ],
+      "module_slots": 2,
+      "fluid_boxes": []
+    }
+  },
+  "planet": {
+    "nauvis": {}
+  }
+}

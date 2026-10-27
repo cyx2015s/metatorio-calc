@@ -2353,6 +2353,7 @@ mod tests {
     #[test]
     fn auto_plan_targets_resolve_strictly_with_hints() {
         let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            supports_fluid_input: false,
             tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
@@ -2442,6 +2443,7 @@ mod tests {
     #[test]
     fn auto_plan_accepts_fluid_targets() {
         let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            supports_fluid_input: false,
             tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
@@ -2518,6 +2520,7 @@ mod tests {
     #[test]
     fn auto_plan_rejects_unknown_names_before_creating_anything() {
         let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
+            supports_fluid_input: false,
             tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
