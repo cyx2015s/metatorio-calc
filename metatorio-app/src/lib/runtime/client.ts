@@ -268,4 +268,4 @@ export function onCommandError(handler: (errors: (string | RuntimeDiagnostic)[])
 }
 
 export function onUniverseSolveResult(handler:(result:import('./types').UniverseSolveResult)=>void):Promise<()=>void>{return listen<import('./types').UniverseSolveResult>('universe-solve-result',e=>handler(e.payload));}
-export function onUniverseSolveError(handler:(error:{project:number;universe:number;message:string})=>void):Promise<()=>void>{return listen<{project:number;universe:number;message:string}>('universe-solve-error',e=>handler(e.payload));}
+export function onUniverseSolveError(handler:(error:{project:number;universe:number;revision?:number;message:string|RuntimeDiagnostic})=>void):Promise<()=>void>{return listen<{project:number;universe:number;revision?:number;message:string|RuntimeDiagnostic}>('universe-solve-error',e=>handler(e.payload));}

@@ -1,5 +1,6 @@
 import {onUniverseSolveResult,onUniverseSolveError} from './client';
 import {universeSolveSignatures} from '$lib/mechanics/universe-signature';
+import {factoryImplicitSignature, factorySolveSignatures} from '$lib/mechanics/factory-signature';
 import { universeView } from "$lib/mechanics/located";
 import { universePreview, type UniversePreview } from "./client";
 import { MechanicCommands, type MechanicScope } from "./mechanic-commands";
@@ -73,6 +74,7 @@ import type {
   Milestone,
   ProductivityView,
   ProjectId,
+  ProjectDocument,
   PrototypeDetail,
   SolveResult,
   RuntimeDiagnostic,
@@ -84,27 +86,11 @@ import type {
   ExternalInputId,
 } from "./types";
 
-// 会修改里程碑集合/可达性的项目动作（重拉有序里程碑用）。与后端
-// message_affects_accessibility 对齐。
-const MILESTONE_KEYS = new Set([
-  "add-milestone",
-  "set-milestone-unlocked",
-  "remove-milestone",
-  "set-default-milestones",
-  "set-all-accessible",
-  "set-context",
-]);
-// 会修改配方/采矿产能（自动推算 + 用户覆盖）的项目动作。
-const PRODUCTIVITY_KEYS = new Set([
-  "set-all-accessible",
-  "set-context",
-  "set-mining-productivity",
-  "set-ignore-productivity",
-  "set-recipe-productivity",
-  "remove-recipe-productivity",
-  "set-infinite-tech-level",
-  "remove-infinite-tech-level",
-]);
+function projectReadKeys(project: ProjectDocument | null) {
+  const settings = project?.settings;
+  const domain = JSON.stringify([project?.id, project?.context_id, settings?.all_accessible, settings?.milestones, settings?.quality_limit]);
+  return {domain, productivity: JSON.stringify([domain, settings?.mining_productivity, settings?.ignore_productivity, settings?.recipe_productivity, settings?.infinite_levels])};
+}
 
 const UI_FONT_FALLBACK = `"Inter", "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif`;
 const MONO_FONT_FALLBACK = `"JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace`;
@@ -158,6 +144,18 @@ class RuntimeStore {
   solveDiagnostic = $state<RuntimeDiagnostic | null>(null);
   /** 求解结果缓存：`${project}:${factory}` → 结果，切换项目/工厂时恢复。 */
   private solveCache = new Map<string, SolveResult>();
+  private factoryInputRevisions = new Map<string, number>();
+  private universeInputRevisions = new Map<string, number>();
+  private refreshGeneration = 0;
+  private refreshTask: Promise<void> | null = null;
+  private pendingSends = 0;
+  private implicitGeneration = 0;
+  private implicitScope = '';
+  private milestonesGeneration = 0;
+  private productivityGeneration = 0;
+  private accessibilityGeneration = 0;
+  private historyGeneration = 0;
+  private pathsGeneration = 0;
   revision = $state(0);
   busy = $state(false);
   openingProjectPath = $state<string | null>(null);
@@ -327,26 +325,33 @@ class RuntimeStore {
       else delete this.autoPlanProgressByFactory[key];
     });
     onUniverseSolveResult(async result=>{
-      if(result.revision!=null && result.revision<this.revision)return;
+      const key = `${result.project}:${result.universe}`;
+      if(result.revision!=null && result.revision<(this.universeInputRevisions.get(key)??0))return;
       this.revision=Math.max(this.revision,result.revision??0);
       await this.refresh();
-      if(result.revision!=null && result.revision<this.revision)return;
+      if(result.revision!=null && result.revision<(this.universeInputRevisions.get(key)??0))return;
       this.universeSolveCache.set(`${result.project}:${result.universe}`,result);
       if(this.selectedProjectId===result.project&&this.selectedUniverseId===result.universe){this.universeSolve=result;this.universeSolveError=null;this.universeSolveDiagnostic=null;this.universeSolving=false;}
     });
-    onUniverseSolveError(error=>{if(this.selectedProjectId===error.project&&this.selectedUniverseId===error.universe){this.universeSolveDiagnostic=diagnosticFrom(error.message);this.universeSolveError=this.universeSolveDiagnostic.message;this.universeSolving=false;}});
-    onSolveResult((result) => {
-      this.solve = result;
-      this.solveError = null;
-      this.solveDiagnostic = null;
-      this.solving = null;
-      // 缓存到当前工厂：切换回来时直接恢复，不重复求解。
-      const [project, factory] = this.currentFactoryKey();
-      if (project != null && factory != null) {
-        this.solveCache.set(`${project}:${factory}`, result);
+    onUniverseSolveError(error=>{if(this.selectedProjectId===error.project&&this.selectedUniverseId===error.universe&&(error.revision==null||error.revision>=(this.universeInputRevisions.get(`${error.project}:${error.universe}`)??0))){this.universeSolveDiagnostic=diagnosticFrom(error.message);this.universeSolveError=this.universeSolveDiagnostic.message;this.universeSolving=false;}});
+    onSolveResult(async (result) => {
+      const key = `${result.project}:${result.factory}`;
+      if (result.revision != null && result.revision < (this.factoryInputRevisions.get(key) ?? 0)) return;
+      await this.refresh();
+      if (result.revision != null && result.revision < (this.factoryInputRevisions.get(key) ?? 0)) return;
+      this.solveCache.set(key, result);
+      if (this.selectedUniverseId == null && this.selectedProjectId === result.project && this.selectedFactoryId === result.factory) {
+        this.solve = result;
+        this.solveError = null;
+        this.solveDiagnostic = null;
       }
+      if (this.solving?.project === result.project && this.solving?.factory === result.factory) this.solving = null;
     });
     onSolveError((message) => {
+      if (typeof message === 'object' && message !== null && 'project' in message) {
+        const scoped = message as RuntimeDiagnostic & {project: number; factory: number; revision?: number};
+        if (scoped.project !== this.selectedProjectId || scoped.factory !== this.selectedFactoryId || this.selectedUniverseId != null || (scoped.revision != null && scoped.revision < (this.factoryInputRevisions.get(`${scoped.project}:${scoped.factory}`)??0))) return;
+      }
       this.solveDiagnostic = diagnosticFrom(message);
       this.solveError = this.solveDiagnostic.message;
       this.solving = null;
@@ -404,31 +409,78 @@ class RuntimeStore {
     await this.consumeProjectOpenRequests();
   }
 
-  async refresh(): Promise<void> {
+  refresh(): Promise<void> {
+    this.refreshGeneration++;
+    if (!this.refreshTask) {
+      this.refreshTask = (async () => {
+        try {
+          let generation: number;
+          do {
+            generation = this.refreshGeneration;
+            await this.refreshSnapshot(generation);
+          } while (generation !== this.refreshGeneration);
+        } finally {
+          this.refreshTask = null;
+        }
+      })();
+    }
+    return this.refreshTask;
+  }
+
+  private async refreshSnapshot(generation: number): Promise<void> {
+    const document = await getDocument();
+    if (generation !== this.refreshGeneration) return;
+    // Events and dispatch completion can request the same snapshot. Preserve
+    // component identity/focus instead of redrawing an unchanged document.
+    if (JSON.stringify(document) === JSON.stringify(this.document)) return;
+    const beforeFactory = factorySolveSignatures(this.document);
+    const beforeImplicit = factoryImplicitSignature(this.document, this.selectedProjectId, this.selectedFactoryId);
+    const beforeReads = projectReadKeys(this.selectedProject);
     const beforeUniverse = universeSolveSignatures(this.document);
     const previousProject = this.selectedProjectId;
     const previousFactory = this.selectedFactoryId;
-    this.document = await getDocument();
+    this.document = document;
+    const afterFactory = factorySolveSignatures(this.document);
+    for (const key of new Set([...beforeFactory.keys(), ...afterFactory.keys()])) if (beforeFactory.get(key) !== afterFactory.get(key)) {
+      this.solveCache.delete(key);
+      if (afterFactory.has(key)) this.factoryInputRevisions.set(key, this.revision);
+      else this.factoryInputRevisions.delete(key);
+    }
+    const factoryChanged = beforeFactory.get(`${previousProject}:${previousFactory}`) !== afterFactory.get(`${previousProject}:${previousFactory}`);
+    if (factoryChanged) { this.solve = null; this.solveError = null; this.solveDiagnostic = null; }
     const afterUniverse = universeSolveSignatures(this.document);
-    for(const key of this.universeSolveCache.keys())if(beforeUniverse.get(key)!==afterUniverse.get(key))this.universeSolveCache.delete(key);
+    for(const key of new Set([...beforeUniverse.keys(), ...afterUniverse.keys()]))if(beforeUniverse.get(key)!==afterUniverse.get(key)){
+      this.universeSolveCache.delete(key);
+      if(afterUniverse.has(key))this.universeInputRevisions.set(key,this.revision);
+      else this.universeInputRevisions.delete(key);
+    }
     const selectedKey=`${this.selectedProjectId}:${this.selectedUniverseId}`;
     const universeChanged = beforeUniverse.get(selectedKey)!==afterUniverse.get(selectedKey);
     if (universeChanged) {
       this.universeSolveGeneration++;
       this.universeSolve = null; this.universeSolving = false;
+      this.universeSolveError = null; this.universeSolveDiagnostic = null;
     }
 
     // 保留有效选择；删除、导入或外部编辑后自动补全缺失选择。
     this.pruneSelection();
+    const afterReads = projectReadKeys(this.selectedProject);
+    if (beforeReads.domain !== afterReads.domain) {
+      this.accessibilityGeneration++;
+      this.accessibility = null;
+      this.refreshOrderedMilestones().catch(() => {});
+    }
+    if (beforeReads.productivity !== afterReads.productivity) this.refreshProductivity().catch(() => {});
     if (previousProject !== this.selectedProjectId || previousFactory !== this.selectedFactoryId) {
       this.restoreSolveForSelection();
       this.refreshImplicitSources().catch(() => {});
     }
     if (previousProject !== this.selectedProjectId) {
-      this.accessibility = null;
-      this.refreshOrderedMilestones().catch(() => {});
-      this.refreshProductivity().catch(() => {});
       this.syncEffectiveContext().catch(() => {});
+    }
+    if (beforeImplicit !== factoryImplicitSignature(this.document, this.selectedProjectId, this.selectedFactoryId)
+      && previousProject === this.selectedProjectId && previousFactory === this.selectedFactoryId) {
+      this.refreshImplicitSources().catch(() => {});
     }
     this.refreshProjectPaths().catch(() => {});
 
@@ -441,20 +493,20 @@ class RuntimeStore {
    */
   async send(message: AppMessage): Promise<DispatchResult> {
     this.universeOperationVersion++;
+    this.pendingSends++;
     this.busy = true;
     this.lastError = null;
     this.lastDiagnostic = null;
-    const prevProject = this.selectedProjectId;
     let result: DispatchResult;
     try {
       result = await dispatch(message);
+      if (result.revision >= this.revision) {
+        this.historyGeneration++;
+        this.history = result.history;
+      }
       this.revision = Math.max(this.revision,result.revision);
-      this.history = result.history;
-      // 任何交互都可能改变可达性（显式标记/里程碑/无视开关/换上下文），
-      // 整体失效缓存；选择器打开时按需重拉。
-      this.accessibility = null;
       await this.refresh();
-      if(result.universe_solve && (result.universe_solve.revision??result.revision)>=this.revision){
+      if(result.universe_solve && (result.universe_solve.revision??result.revision)>=(this.universeInputRevisions.get(`${result.universe_solve.project}:${result.universe_solve.universe}`)??0)){
         const solved=result.universe_solve;this.universeSolveCache.set(`${solved.project}:${solved.universe}`,solved);
         if(this.selectedProjectId===solved.project&&this.selectedUniverseId===solved.universe){this.universeSolve=solved;this.universeSolveError=null;this.universeSolveDiagnostic=null;this.universeSolving=false;}
       }
@@ -462,22 +514,8 @@ class RuntimeStore {
       this.setOperationError(error);
       throw error;
     } finally {
-      this.busy = false;
+      this.busy = --this.pendingSends > 0;
     }
-    // 只有会改动里程碑/产能的消息才重拉它们（py 下 milestonesOrdered 是
-    // 重 BFS ~1.8s，不应在每次无关键交互后都跑）；换选项目也要重拉。
-    const keys = RuntimeStore.innerActionKeys(message);
-    const domain =
-      keys.some((k) => MILESTONE_KEYS.has(k)) || prevProject !== this.selectedProjectId;
-    if (domain) this.refreshOrderedMilestones().catch(() => {});
-    if (
-      keys.some((k) => PRODUCTIVITY_KEYS.has(k)) ||
-      keys.some((k) => MILESTONE_KEYS.has(k)) ||
-      prevProject !== this.selectedProjectId
-    ) {
-      this.refreshProductivity().catch(() => {});
-    }
-    this.refreshImplicitSources().catch(() => {});
     // 项目上下文切换（设置上下文/换绑等）后同步目录与上下文列表，
     // 使后端 store 载入后「未载入」徽标消失。幂等：上下文未变时不处理。
     this.syncEffectiveContext().catch(() => {});
@@ -486,8 +524,10 @@ class RuntimeStore {
 
   /** 刷新撤销/重做可用性（启动时与外部改动后调用）。 */
   async refreshHistory(): Promise<void> {
+    const generation = ++this.historyGeneration;
     try {
-      this.history = await historyState();
+      const history = await historyState();
+      if (generation === this.historyGeneration) this.history = history;
     } catch {
       /* 后端不可用时保持原状态 */
     }
@@ -531,22 +571,6 @@ class RuntimeStore {
     if (first?.factories[0]) await this.selectFactory(first.factories[0].id);
   }
 
-  /** 提取 AppMessage 内层动作键（scope=project/factory 时在 action.action，
-   *  scope=application 时直接是 action）。用于判断是否需要重拉里程碑/产能。 */
-  private static innerActionKeys(message: AppMessage): string[] {
-    const action = (message as { action?: unknown }).action as
-      | { action?: Record<string, unknown> }
-      | Record<string, unknown>
-      | undefined;
-    if (!action || typeof action !== "object") return [];
-    const inner = (action as { action?: Record<string, unknown> | string }).action ?? action;
-    // 无载荷动作本身就是字符串（如 "set-default-milestones"）：直接把它当键。
-    // 之前 `Object.keys("set-default-milestones")` 返回的是字符下标
-    // ["0","1",...]，于是 MILESTONE_KEYS 永远匹配不上、里程碑列表不刷新。
-    if (typeof inner === "string") return [inner];
-    return Object.keys(inner);
-  }
-
   // ── 可达性（选择器过滤） ────────────────────────────────────────
 
   /**
@@ -557,13 +581,15 @@ class RuntimeStore {
   async ensureAccessibility(): Promise<Accessible[] | null> {
     if (this.accessibility != null) return this.accessibility;
     const project = this.selectedProjectId;
+    const generation = ++this.accessibilityGeneration;
     if (project == null) return null;
     try {
       const nodes = await accessibility(project);
+      if (generation !== this.accessibilityGeneration || project !== this.selectedProjectId) return null;
       this.accessibility = nodes;
       return nodes;
     } catch {
-      this.accessibility = null;
+      if (generation === this.accessibilityGeneration && project === this.selectedProjectId) this.accessibility = null;
       return null;
     }
   }
@@ -579,6 +605,9 @@ class RuntimeStore {
   implicitSourcesCache = $state<import("./types").DualVar[]>([]);
 
   async refreshImplicitSources(): Promise<void> {
+    const generation = ++this.implicitGeneration;
+    const scope = factoryImplicitSignature(this.document, this.selectedProjectId, this.selectedFactoryId);
+    if (scope !== this.implicitScope) { this.implicitScope = scope; this.implicitSourcesCache = []; }
     const project = this.selectedProjectId;
     const factory = this.selectedFactoryId;
     if (project == null || factory == null) {
@@ -586,9 +615,10 @@ class RuntimeStore {
       return;
     }
     try {
-      this.implicitSourcesCache = await implicitSources(project, factory);
+      const sources = await implicitSources(project, factory);
+      if (generation === this.implicitGeneration && project === this.selectedProjectId && factory === this.selectedFactoryId) this.implicitSourcesCache = sources;
     } catch {
-      this.implicitSourcesCache = [];
+      if (generation === this.implicitGeneration && project === this.selectedProjectId && factory === this.selectedFactoryId) this.implicitSourcesCache = [];
     }
   }
 
@@ -982,10 +1012,12 @@ class RuntimeStore {
 
   /** 刷新全部项目的保存路径缓存（保存/导入后调用）。 */
   async refreshProjectPaths(): Promise<void> {
+    const generation = ++this.pathsGeneration;
     const projects = this.document?.projects ?? [];
     const entries = await Promise.all(
       projects.map(async (project) => [project.id, await projectSavePath(project.id)] as const),
     );
+    if (generation !== this.pathsGeneration) return;
     this.projectPaths = new Map(
       entries.filter((entry): entry is readonly [ProjectId, string] => entry[1] != null),
     );
@@ -1036,6 +1068,7 @@ class RuntimeStore {
     this.selectedUniverseId = universe;
     this.selectedMechanic = null;
     this.universeSolveError = null;
+    this.universeSolveDiagnostic = null;
     if (universe != null) {
       this.selectedFactoryId = null;
       const key = `${this.selectedProjectId}:${universe}`;
@@ -1224,11 +1257,13 @@ class RuntimeStore {
     const projects = this.document?.projects ?? [];
     const next = projects.find((entry) => entry.id === project) ?? projects[0];
     const changed = this.selectedProjectId !== (next?.id ?? null);
+    if (!changed) return;
     this.selectedProjectId = next?.id ?? null;
     if (changed) this.selectedFactoryId = null;
     this.pruneSelection();
     this.selectedMechanic = null;
     this.accessibility = null;
+    this.accessibilityGeneration++;
     this.restoreSolveForSelection();
     if (changed) {
       // 选择态由前端驱动：换选项目后重拉其里程碑/产能/隐式输入。
@@ -1244,6 +1279,7 @@ class RuntimeStore {
     const factories = this.selectedProject?.factories ?? [];
     const next = factories.find((entry) => entry.id === factory) ?? factories[0];
     const changed = this.selectedFactoryId !== (next?.id ?? null);
+    if (!changed && this.selectedUniverseId == null) return;
     this.selectedFactoryId = next?.id ?? null;
     this.selectedUniverseId = null;
     this.selectedMechanic = null;
@@ -1275,8 +1311,12 @@ class RuntimeStore {
     if (cached) {
       this.solve = cached;
       this.solveError = null;
+      this.solveDiagnostic = null;
     } else {
       this.solve = null;
+      this.solveError = null;
+      this.solveDiagnostic = null;
+      if (this.solving?.project === project && this.solving?.factory === factory) return;
       this.recompute().catch(() => {});
     }
   }
@@ -1364,30 +1404,34 @@ class RuntimeStore {
   /** 里程碑节点按依赖拓扑排序（依赖在前）的当前结果；供里程碑列表按序展示。 */
   orderedMilestones = $state<Milestone[] | null>(null);
   async refreshOrderedMilestones(): Promise<void> {
+    const generation = ++this.milestonesGeneration;
     const project = this.selectedProjectId;
     if (project == null) {
       this.orderedMilestones = null;
       return;
     }
     try {
-      this.orderedMilestones = await milestonesOrdered(project);
+      const milestones = await milestonesOrdered(project);
+      if (generation === this.milestonesGeneration && project === this.selectedProjectId) this.orderedMilestones = milestones;
     } catch {
-      this.orderedMilestones = null;
+      if (generation === this.milestonesGeneration && project === this.selectedProjectId) this.orderedMilestones = null;
     }
   }
 
   /** 产能视图（自动 + 用户覆盖），供项目设置面板按来源区分展示。 */
   productivityInfo = $state<ProductivityView | null>(null);
   async refreshProductivity(): Promise<void> {
+    const generation = ++this.productivityGeneration;
     const project = this.selectedProjectId;
     if (project == null) {
       this.productivityInfo = null;
       return;
     }
     try {
-      this.productivityInfo = await productivity(project);
+      const info = await productivity(project);
+      if (generation === this.productivityGeneration && project === this.selectedProjectId) this.productivityInfo = info;
     } catch {
-      this.productivityInfo = null;
+      if (generation === this.productivityGeneration && project === this.selectedProjectId) this.productivityInfo = null;
     }
   }
 
@@ -2086,11 +2130,13 @@ class RuntimeStore {
         action: { project, factory, action: { solve: "recompute" } },
       });
     } catch (error) {
-      this.solving = null;
       // 求解失败：写入 solveError 让求解面板醒目显示
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
-      this.solveDiagnostic = diagnosticFrom(error);
-      this.solveError = this.solveDiagnostic.message;
+      if (this.solving?.project === project && this.solving?.factory === factory) this.solving = null;
+      if (project === this.selectedProjectId && factory === this.selectedFactoryId && this.selectedUniverseId == null) {
+        this.solveDiagnostic = diagnosticFrom(error);
+        this.solveError = this.solveDiagnostic.message;
+      }
       throw error;
     }
   }
@@ -2106,11 +2152,13 @@ class RuntimeStore {
         action: { project, factory, action: { solve: "auto-plan" } },
       });
     } catch (error) {
-      this.solving = null;
       // 自动规划失败：同时写入 solveError，让求解面板醒目显示
       // （后端失败会发 solve-error 事件覆盖；dispatch 校验失败走这里）。
-      this.solveDiagnostic = diagnosticFrom(error);
-      this.solveError = this.solveDiagnostic.message;
+      if (this.solving?.project === project && this.solving?.factory === factory) this.solving = null;
+      if (project === this.selectedProjectId && factory === this.selectedFactoryId && this.selectedUniverseId == null) {
+        this.solveDiagnostic = diagnosticFrom(error);
+        this.solveError = this.solveDiagnostic.message;
+      }
       throw error;
     } finally {
       this.autoPlanningLocally = false;

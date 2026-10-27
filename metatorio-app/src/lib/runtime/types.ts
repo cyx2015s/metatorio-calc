@@ -761,6 +761,7 @@ export interface HistoryStatus {
 // ── Solver output ─────────────────────────────────────────────────
 
 export interface SolveResult {
+  revision?: number;
   project: ProjectId;
   factory: FactoryId;
   status: SolveStatus;

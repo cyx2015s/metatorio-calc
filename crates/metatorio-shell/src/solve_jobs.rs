@@ -314,6 +314,7 @@ mod tests {
     /// 一个假的「求解」：只计数并返回固定结果，避免测试真的跑 LP。
     fn fake_result(project: ProjectId, factory: FactoryId, tag: f64) -> SolveResult {
         SolveResult {
+            revision: 0,
             project,
             factory,
             report: Default::default(),

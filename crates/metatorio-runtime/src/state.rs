@@ -692,7 +692,7 @@ impl RuntimeState {
                     &mut self.project_mut(project_id)?.settings.time_scale,
                     time_scale,
                 );
-                Ok(Outcome::solve_all_if(changed, project_id))
+                Ok(Outcome::meta_if(changed, project_id))
             }
             ProjectAction::SetAllAccessible { enabled } => {
                 let changed = replace(
@@ -3936,6 +3936,16 @@ mod tests {
             })
             .unwrap();
         assert_meta_only(outcome, "改名");
+
+        let outcome = state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::SetTimeScale {
+                    time_scale: crate::document::TimeScale::Minutes,
+                },
+            })
+            .unwrap();
+        assert_meta_only(outcome, "显示时间单位");
 
         let outcome = state
             .dispatch(AppMessage::Factory {

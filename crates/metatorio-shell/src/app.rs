@@ -3747,6 +3747,20 @@ where
     (solve, universe_solve, serialized, errors, diagnostics)
 }
 
+fn emit_factory_solve_error(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+    factory: FactoryId,
+    revision: u64,
+    error: impl Into<metatorio_runtime::Diagnostic>,
+) {
+    let mut payload = serde_json::to_value(error.into()).expect("diagnostic serialization");
+    payload["project"] = serde_json::json!(project);
+    payload["factory"] = serde_json::json!(factory);
+    payload["revision"] = serde_json::json!(revision);
+    emit(host, "solve-error", payload);
+}
+
 /// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
 /// emitting the usual Tauri events (so a live GUI stays in sync).
 ///
@@ -3760,6 +3774,7 @@ pub(crate) async fn execute_command(
     state: &AppState,
     command: &RuntimeCommand,
 ) -> CommandOutcome {
+    let command_revision = with_runtime(state, |runtime| Ok(runtime.state.revision)).unwrap_or(0);
     match command {
         RuntimeCommand::RecomputeUniverse { project, universe } => {
             match solve_universe_offlock(host, state, *project, *universe).await {
@@ -3773,7 +3788,7 @@ pub(crate) async fn execute_command(
                     emit(
                         host,
                         "universe-solve-error",
-                        serde_json::json!({"project":project,"universe":universe,"message":error}),
+                        serde_json::json!({"project":project,"universe":universe,"revision":command_revision,"message":error}),
                     );
                     CommandOutcome::failed(error)
                 }
@@ -3875,7 +3890,7 @@ pub(crate) async fn execute_command(
             let (project, factory) = (*project, *factory);
             // 先确保项目的上下文 store 在内存里（读盘在锁外完成）。
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
-                emit(host, "solve-error", error.clone());
+                emit_factory_solve_error(host, project, factory, command_revision, error.clone());
                 return CommandOutcome::failed(error);
             }
             // 锁外求解。
@@ -3885,7 +3900,13 @@ pub(crate) async fn execute_command(
                     CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(result)))
                 }
                 Err(error) => {
-                    emit(host, "solve-error", error.clone());
+                    emit_factory_solve_error(
+                        host,
+                        project,
+                        factory,
+                        command_revision,
+                        error.clone(),
+                    );
                     CommandOutcome::failed(error)
                 }
             }
@@ -3960,13 +3981,11 @@ pub(crate) async fn execute_command(
                     "项目 {} 尚无保存路径：请先用 save-project-as 指定路径",
                     project.0
                 );
-                emit(host, "solve-error", error.clone());
                 return CommandOutcome::failed(error);
             };
             match persist_project(state, project, path).await {
                 Ok(()) => CommandOutcome::default(),
                 Err(error) => {
-                    emit(host, "solve-error", error.clone());
                     CommandOutcome::failed(format!("保存项目 {} 失败: {error}", project.0))
                 }
             }
@@ -4056,14 +4075,20 @@ pub(crate) async fn execute_command(
         } => {
             let (project, factory, action) = (*project, *factory, *action);
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
-                emit(host, "solve-error", error.clone());
+                emit_factory_solve_error(host, project, factory, command_revision, error.clone());
                 return CommandOutcome::failed(error);
             }
             // 1) 锁外求解（清理规则基于求解结果）。
             let solved = match solve_factory_offlock(host, state, project, factory).await {
                 Ok(result) => result,
                 Err(error) => {
-                    emit(host, "solve-error", error.clone());
+                    emit_factory_solve_error(
+                        host,
+                        project,
+                        factory,
+                        command_revision,
+                        error.clone(),
+                    );
                     return CommandOutcome::failed(error);
                 }
             };
@@ -4071,7 +4096,7 @@ pub(crate) async fn execute_command(
             //    求解没成功时拒绝清理：没有"用没用"的信息，空表会把机制删光。
             let Some(used) = metatorio_runtime::solve::mechanic_usage(&solved) else {
                 let error = "当前求解未成功（NotSolved），拒绝清理机制".to_string();
-                emit(host, "solve-error", error.clone());
+                emit_factory_solve_error(host, project, factory, command_revision, error.clone());
                 return CommandOutcome::failed(error);
             };
             let commands = match with_runtime(state, |runtime| {
@@ -4083,7 +4108,13 @@ pub(crate) async fn execute_command(
             }) {
                 Ok(commands) => commands,
                 Err(error) => {
-                    emit(host, "solve-error", error.clone());
+                    emit_factory_solve_error(
+                        host,
+                        project,
+                        factory,
+                        command_revision,
+                        error.clone(),
+                    );
                     return CommandOutcome::failed(error);
                 }
             };
@@ -4101,7 +4132,7 @@ pub(crate) async fn execute_command(
                 crate::auto_plan_progress::PlanningProgress::start(host.clone(), project, factory);
             let observe_progress = progress.observer();
             if let Err(error) = ensure_context_for_project_offlock(state, project).await {
-                emit(host, "solve-error", error.clone());
+                emit_factory_solve_error(host, project, factory, command_revision, error.clone());
                 return CommandOutcome::failed(error);
             }
             // 1) 锁外枚举 + 求解（真实 dump 上可能数十秒，绝不持锁）。
@@ -4145,7 +4176,13 @@ pub(crate) async fn execute_command(
             let (snapshot, mechanics, auto_report) = match planned {
                 Ok(planned) => planned,
                 Err(error) => {
-                    emit(host, "solve-error", error.clone());
+                    emit_factory_solve_error(
+                        host,
+                        project,
+                        factory,
+                        command_revision,
+                        error.clone(),
+                    );
                     return CommandOutcome::failed(error);
                 }
             };
@@ -4171,7 +4208,13 @@ pub(crate) async fn execute_command(
             let written = match written {
                 Ok(written) => written,
                 Err(error) => {
-                    emit(host, "solve-error", error.clone());
+                    emit_factory_solve_error(
+                        host,
+                        project,
+                        factory,
+                        command_revision,
+                        error.clone(),
+                    );
                     return CommandOutcome::failed(error);
                 }
             };
@@ -4183,7 +4226,13 @@ pub(crate) async fn execute_command(
                         CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(result)))
                     }
                     Err(error) => {
-                        emit(host, "solve-error", error.clone());
+                        emit_factory_solve_error(
+                            host,
+                            project,
+                            factory,
+                            command_revision,
+                            error.clone(),
+                        );
                         CommandOutcome::failed(error)
                     }
                 };
@@ -4836,6 +4885,11 @@ pub async fn dispatch(
             .dispatch(message)
             .map_err(metatorio_runtime::Diagnostic::from)?
     };
+    // Publish the edited document before persistence/solving can block this IPC.
+    // The final reply still includes command failures and repaired/writeback state.
+    if outcome.changed {
+        emit(host, "document-changed", outcome.revision);
+    }
     // 与 MCP 的 `dispatch` 工具共用同一套汇总（`run_commands`）：求解产出、
     // 命令序列化、失败收集。求解/上下文类命令自己会 emit（`solve-error` /
     // `context-error`），其余（落盘、关闭项目…）只有回执——丢弃回执就等于
@@ -5010,6 +5064,7 @@ mod tests {
             ..Default::default()
         };
         let mut result = metatorio_runtime::SolveResult {
+            revision: 0,
             project: ProjectId(1),
             factory: FactoryId(2),
             report: metatorio_runtime::solve::SolveDiagnostics {
@@ -5078,6 +5133,79 @@ mod tests {
             name: format!("p{id}"),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn dispatch_publishes_document_before_running_persistence() {
+        struct ObservedHost {
+            file: Arc<FileHost>,
+            destination: PathBuf,
+            observations: Mutex<Vec<(String, serde_json::Value, bool)>>,
+        }
+        impl Host for ObservedHost {
+            fn state(&self) -> &AppState {
+                &self.file.state
+            }
+            fn app_data_dir(&self) -> PathBuf {
+                self.file.dir.clone()
+            }
+            fn emit(&self, event: &str, payload: serde_json::Value) {
+                self.observations.lock().unwrap().push((
+                    event.into(),
+                    payload,
+                    self.destination.exists(),
+                ));
+            }
+        }
+        let file = file_host();
+        let project = {
+            let mut runtime = file.state.runtime.lock().unwrap();
+            runtime
+                .state
+                .dispatch(AppMessage::Application(ApplicationAction::NewProject {
+                    name: "before".into(),
+                }))
+                .unwrap()
+                .created
+                .projects[0]
+        };
+        let destination = file.dir.join("saved.metatorio");
+        file.state
+            .project_paths
+            .lock()
+            .unwrap()
+            .insert(project, destination.to_string_lossy().into());
+        let observed = Arc::new(ObservedHost {
+            file: file.clone(),
+            destination: destination.clone(),
+            observations: Mutex::new(Vec::new()),
+        });
+        let host: Arc<dyn Host> = observed.clone();
+        let result = dispatch(
+            &host,
+            AppMessage::Project {
+                project,
+                action: ProjectAction::SetName {
+                    name: "after".into(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+        let observations = observed.observations.lock().unwrap();
+        let event = observations
+            .iter()
+            .find(|(name, _, _)| name == "document-changed")
+            .expect("edit must be published without waiting for side effects");
+        assert!(!event.2, "notification must precede persistence");
+        assert_eq!(event.1, serde_json::json!(result.revision));
+        assert!(destination.exists());
+        assert!(
+            std::fs::read_to_string(&destination)
+                .unwrap()
+                .contains("after")
+        );
+        std::fs::remove_dir_all(&file.dir).unwrap();
     }
 
     #[tokio::test]
@@ -6140,6 +6268,7 @@ mod tests {
                     } else {
                         CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(
                             metatorio_runtime::SolveResult {
+                                revision: 0,
                                 project: ProjectId(1),
                                 factory: FactoryId(2),
                                 report: Default::default(),

@@ -34,6 +34,9 @@ pub struct ExpandedVarId {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolveResult {
+    /// Document version used by this solve, for rejecting stale frontend events.
+    #[serde(default)]
+    pub revision: u64,
     pub project: ProjectId,
     pub factory: FactoryId,
     pub status: SolveStatus,
@@ -1352,14 +1355,16 @@ pub fn solve_snapshot_with(
     accessibility: &Accessibility,
 ) -> Result<SolveResult, RuntimeError> {
     check_solve_cancelled()?;
-    solve_document(
+    let mut result = solve_document(
         &snapshot.store,
         &snapshot.project_doc,
         &snapshot.factory_doc,
         snapshot.project,
         snapshot.factory,
         accessibility,
-    )
+    )?;
+    result.revision = snapshot.revision;
+    Ok(result)
 }
 
 /// Stages of auto-planning; dimensions become known after LP construction.
@@ -1916,6 +1921,7 @@ fn solve_document(
             report,
             ..
         } => SolveResult {
+            revision: 0,
             project: project_id,
             factory: factory_id,
             report: SolveDiagnostics::from_solver(report),
@@ -1955,6 +1961,7 @@ fn solve_document(
             no_consumer,
             description,
         } => SolveResult {
+            revision: 0,
             project: project_id,
             factory: factory_id,
             report: SolveDiagnostics::default(),
@@ -2500,6 +2507,7 @@ mod tests {
     #[test]
     fn mechanic_usage_is_none_when_not_solved() {
         let result = SolveResult {
+            revision: 0,
             project: ProjectId(1),
             factory: FactoryId(2),
             report: SolveDiagnostics::default(),
@@ -3946,6 +3954,10 @@ mod tests {
         assert!(
             snapshot.has_cached_accessibility(),
             "solve_factory 应回填可达性缓存"
+        );
+        assert_eq!(
+            solve_snapshot(&snapshot).unwrap().revision,
+            snapshot.revision
         );
         assert_eq!(snapshot.revision, runtime.state.revision);
         assert_eq!(
