@@ -1047,11 +1047,12 @@ pub fn plan_universe_with_progress(
     let store = &snapshot.store;
     let universe_doc = &snapshot.universe_doc;
     let universe_id = universe_doc.id;
-    // Enumerate the full candidate set: every planet's local mechanics,
+    // Enumerate the full candidate set: each unlocked planet's local mechanics,
     // plus Space mechanics and both cargo directions for every item quality at
     // each planet. One joint universe LP then chooses among all of them.
     let mut locations: Vec<Location> = store
         .group(PrototypeGroup::Planet)
+        .filter(|record| accessibility.is_accessible(&Accessible::Planet(record.name.clone())))
         .map(|record| Location::planet(record.name.clone()))
         .collect();
     locations.push(Location::Space);
