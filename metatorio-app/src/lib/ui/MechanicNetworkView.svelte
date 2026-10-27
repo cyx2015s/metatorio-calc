@@ -32,13 +32,15 @@
   const searchResultsId = $derived(`network-search-${project}-${factory}`);
   let ready = $state(false), busy = $state(false), error = $state('');
   let exporting = $state(false), exportCancelled = $state(false), exportStatus = $state(''), exportError = $state('');
-  let collapse = $state(untrack(() => viewState.collapse));
-  let showUtilities = $state(untrack(() => viewState.showUtilities));
-  let onlyEnabled = $state(untrack(() => viewState.onlyEnabled));
-  let query = $state(untrack(() => viewState.query));
-  let iconScale = $state(untrack(() => viewState.iconScale ?? 1));
-  let selected = $state<string | undefined>(untrack(() => viewState.selected));
-  let selectedMechanic = $state<number | null>(untrack(() => viewState.selectedMechanic ?? null));
+  // This renderer is keyed by scope; keep its state owner stable during teardown.
+  const ownerState = untrack(() => viewState);
+  let collapse = $state(untrack(() => ownerState.collapse));
+  let showUtilities = $state(untrack(() => ownerState.showUtilities));
+  let onlyEnabled = $state(untrack(() => ownerState.onlyEnabled));
+  let query = $state(untrack(() => ownerState.query));
+  let iconScale = $state(untrack(() => ownerState.iconScale ?? 1));
+  let selected = $state<string | undefined>(untrack(() => ownerState.selected));
+  let selectedMechanic = $state<number | null>(untrack(() => ownerState.selectedMechanic ?? null));
   let renderRevision = $state(0);
   let cy: Core | undefined;
   let elk: {layout: (graph: ElkNode) => Promise<ElkNode>; terminateWorker: () => void} | undefined;
@@ -75,6 +77,11 @@
   const selectedId = $derived(selectedNode?.id ?? (selectedMechanic === null ? selected : undefined));
   const selectedEdge = $derived(selectedMechanic === null ? model.edges.find(edge => edge.id === selected) : undefined);
   const editing = $derived(selectedNode?.entries.find(entry => entry.id === selectedMechanic) ?? selectedNode?.entries[0]);
+  // Persist while the component is live. Teardown must not evaluate parent
+  // derived props/model after the scope has already changed.
+  $effect(() => {
+    Object.assign(ownerState, {collapse, showUtilities, onlyEnabled, query, iconScale, selected: selectedId, selectedMechanic});
+  });
   const neighbours = $derived.by(() => {
     const ids = new Set<string>();
     for (const edge of model.edges) {
@@ -120,10 +127,10 @@
   }
   function saveViewport(savePositions = false) {
     if (!cy || cy.destroyed() || renderRevision === 0) return;
-    viewState.zoom = cy.zoom(); viewState.pan = {...cy.pan()};
+    ownerState.zoom = cy.zoom(); ownerState.pan = {...cy.pan()};
     if (savePositions) {
       for (const node of cy.nodes().filter(n=>!n.isParent())) {
-        viewState.positions.set(node.id(), {...node.position()});
+        ownerState.positions.set(node.id(), {...node.position()});
       }
     }
   }
@@ -157,6 +164,7 @@
     popupTop = Math.max(8, Math.min(point.y, container.clientHeight - height - 8));
   }
   function schedulePosition() {
+    if (!mounted) return;
     cancelAnimationFrame(positionFrame);
     positionFrame = requestAnimationFrame(positionPopup);
   }
@@ -193,8 +201,8 @@
       cy.on('position', 'node', schedulePosition);
       cy.on('dragfree', 'node', event => {
         const node = event.target;
-        if(node.isParent()) for(const child of node.descendants()) viewState.positions.set(child.id(), {...child.position()});
-        else viewState.positions.set(node.id(), {...node.position()});
+        if(node.isParent()) for(const child of node.descendants()) ownerState.positions.set(child.id(), {...child.position()});
+        else ownerState.positions.set(node.id(), {...node.position()});
       });
       ready = true;
     }).catch(reason => { if (mounted) error = `无法加载网络绘图库：${String(reason)}`; });
@@ -217,7 +225,6 @@
       cancelAnimationFrame(positionFrame);
       globalThis.document.removeEventListener('pointerdown', outsideSearch);
       window.removeEventListener('keydown', escape);
-      Object.assign(viewState, {collapse, showUtilities, onlyEnabled, query, iconScale, selected: selectedId, selectedMechanic});
       observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
     };
   });
@@ -253,14 +260,14 @@
   async function draw(snapshot: typeof model, revision: number, reset = false, grouping = groupLocations) {
     if (!cy || !elk || !mounted || revision !== generation) return;
     busy = true; error = '';
-    if(renderedGrouping !== grouping){reset=true;viewState.positions.clear();viewState.zoom=undefined;}
+    if(renderedGrouping !== grouping){reset=true;ownerState.positions.clear();ownerState.zoom=undefined;}
     if (!reset) {
       saveViewport(true);
       // A renamed group should stay where the user was editing it. Existing
       // destination groups retain their own position.
       const oldPosition = cy.$(':selected').nodes().first().position();
-      if (selectedId && oldPosition && !viewState.positions.has(selectedId)) {
-        viewState.positions.set(selectedId, {...oldPosition});
+      if (selectedId && oldPosition && !ownerState.positions.has(selectedId)) {
+        ownerState.positions.set(selectedId, {...oldPosition});
       }
     }
     const material = snapshot.nodes.filter(node => !node.utility);
@@ -283,22 +290,22 @@
       positions = clustered.positions;
       // A moved/new node must join its new location rather than stretch that
       // location's box back to a saved position in another cluster.
-      if(clustered.owner.size!==renderedOwners.size || [...clustered.owner].some(([id,owner])=>renderedOwners.get(id)!==owner)) viewState.positions.clear();
+      if(clustered.owner.size!==renderedOwners.size || [...clustered.owner].some(([id,owner])=>renderedOwners.get(id)!==owner)) ownerState.positions.clear();
       renderedOwners = clustered.owner;
     } else renderedOwners.clear();
     renderedGrouping = grouping;
-    const hadViewport = viewState.zoom !== undefined;
+    const hadViewport = ownerState.zoom !== undefined;
     const elements: ElementDefinition[] = snapshot.nodes.map(node => ({data: {id: node.id, label: node.label, kind: node.kind,
       ...(clustered?.owner.has(node.id)?{parent:clustered.owner.get(node.id)}:{}),
       ...(node.flow && typeof node.flow !== 'string' && 'Fluid' in node.flow ? {fluid: true} : {}),
       ...(node.utility ? {utility: true} : {}), ...(node.target ? {target: true} : {}),
       ...(node.implicit ? {implicit: true} : {}), ...(node.disabled ? {disabled: true} : {}), ...(node.unused ? {unused: true} : {})},
-      position: viewState.positions.get(node.id) ?? positions.get(node.id)}));
+      position: ownerState.positions.get(node.id) ?? positions.get(node.id)}));
     if(clustered) elements.unshift(...clustered.groups.map(group=>({data:{id:group.id,kind:'location',label:locationLabel(group.location,(k,n)=>runtime.localizedName(k,n))},selectable:false})));
     elements.push(...snapshot.edges.map(edge => ({data: {id: edge.id, source: edge.source, target: edge.target,
       label: edge.label, kind: edge.kind, ...(edge.utility ? {utility: true} : {})}})));
     cy.batch(() => { cy!.elements().remove(); cy!.add(elements); });
-    if (hadViewport) { cy.zoom(viewState.zoom!); cy.pan(viewState.pan ?? {x: 0, y: 0}); }
+    if (hadViewport) { cy.zoom(ownerState.zoom!); cy.pan(ownerState.pan ?? {x: 0, y: 0}); }
     else {
       cy.fit(undefined, 35);
       if (cy.zoom() < 0.4) {
@@ -340,7 +347,7 @@
     if (revision === generation && mounted) busy = false;
   }
   function relayout() {
-    viewState.positions.clear(); viewState.zoom = undefined;
+    ownerState.positions.clear(); ownerState.zoom = undefined;
     void draw(model, ++generation, true).catch(reason => { error = `网络布局失败：${String(reason)}`; busy = false; });
   }
   async function exportPng() {
