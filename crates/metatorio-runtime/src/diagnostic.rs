@@ -3,6 +3,7 @@
 use metatorio_core::DualVar;
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Diagnostic {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -161,7 +161,7 @@
                 <div class="flow-row" title={flowNotes(entry)}>
                   <Icon type={entry.kind} name={entry.name} size={22} />
                   <div class="flow-copy"><strong><RichText text={runtime.richName(entry.kind, entry.name)} /></strong>{#if flowNotes(entry)}<small>{flowNotes(entry)}</small>{/if}</div>
-                  <div class="quantity"><strong>{#if section.output}{compactNumber(entry.amount - entry.productivity)} + {compactNumber(entry.productivity)}{:else}{compactNumber(entry.amount)}{/if}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
+                  <div class="quantity"><strong>{#if section.output}{compactNumber((entry.amount ?? NaN) - (entry.productivity ?? NaN))} + {compactNumber(entry.productivity)}{:else}{compactNumber(entry.amount)}{/if}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
                 </div>
               {/each}
             </div>

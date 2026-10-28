@@ -1177,6 +1177,7 @@ fn expand_solar(mechanic: &SolarMechanic, ctx: &Context) -> Option<Flow> {
 ///   周期溢出总电量 = 21/125 × 峰值功率 × 周期秒 × (perf_day − perf_night)
 ///   即 0.168 × Δ。验证：60 kW × 420 s × 0.168 = 4.234 MJ ÷ 5 MJ ≈ 0.847，
 ///   与社区 25:21 ≈ 0.84 的配比吻合。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct SolarBalance {
     /// 轨道持续满日照，无需蓄电器。

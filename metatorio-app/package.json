@@ -37,7 +37,9 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "test:layout": "node tests/mechanic-layout.cjs"
+    "test:layout": "node tests/mechanic-layout.cjs",
+    "bindings": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib bindings::tests::export_frontend_bindings -- --exact --ignored",
+    "bindings:check": "cargo test --manifest-path src-tauri/Cargo.toml --no-default-features --lib bindings::tests::bindings_are_current -- --exact"
   },
   "license": "MIT",
   "dependencies": {

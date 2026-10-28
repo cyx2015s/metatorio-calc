@@ -571,6 +571,7 @@ mod tests {
 }
 
 /// Shared physical tile capabilities for UI filtering and command validation.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct TileCapabilities {
     pub fluid: Option<String>,

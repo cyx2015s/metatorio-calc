@@ -43,6 +43,7 @@ impl WeightConstants {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum WeightSource {
@@ -52,6 +53,7 @@ pub enum WeightSource {
     Default,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ItemWeight {
     pub weight: f64,

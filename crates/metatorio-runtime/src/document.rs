@@ -13,6 +13,7 @@ use crate::id::{
 pub const DOCUMENT_SCHEMA_VERSION: u32 = 2;
 
 /// 可序列化的应用文档。选中项、对话框、求解结果与文件路径**故意**不放进这个结构里。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppDocument {
@@ -49,6 +50,7 @@ impl AppDocument {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectDocument {
@@ -77,6 +79,7 @@ impl Default for ProjectDocument {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
@@ -139,6 +142,7 @@ impl Default for ProjectSettings {
 
 /// Project-level estimates; future editors can expose these without changing
 /// transport mechanics or the LP model. Weights in prototype data are grams.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct OrbitalTransportCosts {
@@ -175,6 +179,7 @@ impl OrbitalTransportCosts {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TimeScale {
@@ -184,6 +189,7 @@ pub enum TimeScale {
     Hours,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Milestone {
@@ -202,6 +208,7 @@ impl Default for Milestone {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RecipeProductivity {
@@ -210,6 +217,7 @@ pub struct RecipeProductivity {
 }
 
 /// 无限科技的研究次数覆盖（2.b）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct InfiniteTechLevel {
@@ -217,6 +225,7 @@ pub struct InfiniteTechLevel {
     pub level: u32,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FactoryDocument {
@@ -248,6 +257,7 @@ impl Default for FactoryDocument {
 }
 
 /// 稳定的宇宙工厂机制条目（顺序与 ID 属于应用层）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UniverseMechanicEntry {
@@ -267,6 +277,7 @@ impl Default for UniverseMechanicEntry {
 }
 
 /// 宇宙工厂的一个目标：目标流本身带地点。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocatedTarget {
@@ -276,6 +287,7 @@ pub struct LocatedTarget {
 }
 
 /// 宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct LocatedTargetExpression {
@@ -294,6 +306,7 @@ impl Default for LocatedTargetExpression {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct LocatedTargetTerm {
@@ -313,6 +326,7 @@ impl Default for LocatedTargetTerm {
 }
 
 /// 宇宙工厂的手动外部输入；成本覆盖同地点的隐式来源。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct LocatedExternalInput {
     pub id: ExternalInputId,
@@ -321,6 +335,7 @@ pub struct LocatedExternalInput {
 }
 
 /// 跨地点联合规划的宇宙工厂。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UniverseDocument {
@@ -349,6 +364,7 @@ impl Default for UniverseDocument {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FactorySettings {
@@ -365,6 +381,7 @@ pub struct FactorySettings {
     pub debug: bool,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct FlowTarget {
@@ -373,6 +390,7 @@ pub struct FlowTarget {
     pub amount: f64,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct TargetExpression {
@@ -391,6 +409,7 @@ impl Default for TargetExpression {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct TargetTerm {
@@ -409,6 +428,7 @@ impl Default for TargetTerm {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ExternalInput {
@@ -429,6 +449,7 @@ impl Default for ExternalInput {
 
 /// 一条有序的、面向用户的机制。core 里的枚举仍然只是「一个机制」；顺序与稳定身份
 /// 属于应用层。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MechanicEntry {
@@ -459,6 +480,7 @@ impl Default for MechanicEntry {
 
 /// 自动规划使用的项目级选项。它们不属于 core 机制、也不绑定任何单个机制——只描述
 /// 应用如何为项目里的每个机制枚举备选方案。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlanningPreferences {
@@ -486,12 +508,14 @@ impl Default for PlanningPreferences {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct AutoBeaconPlan {
     pub module_config: ModuleConfig,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicKind {

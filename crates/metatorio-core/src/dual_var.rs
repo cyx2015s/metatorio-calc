@@ -17,6 +17,7 @@ use crate::id::IdWithQuality;
 /// 流标识。
 ///
 /// `Flow<DualVar>` 中每个键代表一种流，值为流量。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Default, Clone, Hash, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[repr(u8)]
 #[non_exhaustive]

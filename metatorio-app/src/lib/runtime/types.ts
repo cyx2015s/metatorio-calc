@@ -1,45 +1,112 @@
-// Type mirrors of the serde JSON shapes produced by
-// crates/metatorio-runtime and crates/metatorio-core.
-//
-// Keep in sync with the Rust side: rename_all = "kebab-case" on messages,
-// internally tagged AppMessage (tag "scope", content "action"), PascalCase
-// externally tagged DualVar, internally tagged Mechanic (tag "type").
-//
-// Only the shapes the current UI uses are fully typed; grow this file as
-// more of the app lands.
-
-export type ProjectId = number;
-export type FactoryId = number;
-export type UniverseId = number;
-export type MechanicId = number;
-export type TargetId = number;
-export type ExternalInputId = number;
-export type TargetExpressionId = number;
-export type TargetTermId = number;
-
-export interface IdWithQuality {
-  id: string;
-  quality: string;
-}
-
-// DualVar: externally tagged; unit variants serialize as bare strings.
-export type DualVar =
-  | "Unknown"
-  | { Item: IdWithQuality }
-  | { VirtualScience: string }
-  | { Fluid: { name: string; temperature: [number, number] } }
-  | { Entity: IdWithQuality }
-  | "Heat"
-  | "Electricity"
-  | { FluidHeat: { filter: string } }
-  | { ItemFuel: { category: string[]; has_burnt_result?: boolean } }
-  | { ItemFuelSupply: { category: string[]; has_burnt_result?: boolean } }
-  | "RocketSlotCapacity"
-  | "RocketWeightCapacity"
-  | { Pollution: { name: string } }
-  | { Custom: { name: string } }
-  | { [key: string]: unknown };
-
+// Protocol types are generated from Rust. This file contains only UI projections and helpers.
+import type * as Wire from "./bindings";
+// Drop optional-never exclusivity markers so `in` narrows action variants.
+type Variant<T> = T extends readonly unknown[] ? { [K in keyof T]: Variant<T[K]> } : T extends object ? { [K in keyof T as undefined extends T[K] ? Exclude<T[K], undefined> extends never ? never : K : K]: Variant<T[K]> } : T;
+type UnionKeys<T> = T extends unknown ? keyof T : never;
+type UnionValue<T, K extends PropertyKey> = T extends unknown ? K extends keyof T ? T[K] : never : never;
+export type ProjectId = Wire.ProjectId;
+export type FactoryId = Wire.FactoryId;
+export type UniverseId = Wire.UniverseId;
+export type MechanicId = Wire.MechanicId;
+export type TargetId = Wire.TargetId;
+export type ExternalInputId = Wire.ExternalInputId;
+export type TargetExpressionId = Wire.TargetExpressionId;
+export type TargetTermId = Wire.TargetTermId;
+export type IdWithQuality = Wire.IdWithQuality;
+export type DualVar = Wire.DualVar_Serialize;
+export type ApplicationAction = Variant<Wire.ApplicationAction_Deserialize>;
+export type FactoryTemplate = Wire.FactoryTemplate;
+export type TimeScale = Wire.TimeScale;
+export type Accessible = Wire.Accessible;
+export type ProjectAction = Variant<Wire.ProjectAction_Deserialize>;
+export type MechanicKind = Wire.MechanicKind;
+export type MechanicListAction = Wire.MechanicListAction;
+export type RecipeMechanicAction = Variant<Wire.RecipeMechanicAction_Deserialize>;
+export type MiningMechanicAction = Variant<Wire.MiningMechanicAction_Deserialize>;
+export type SpoilMechanicAction = Wire.SpoilMechanicAction;
+export type PlantMechanicAction = Wire.PlantMechanicAction;
+export type ItemFuelMechanicAction = Wire.ItemFuelMechanicAction;
+export type ItemLaunchMechanicAction = Wire.ItemLaunchMechanicAction;
+export type GeneratorMechanicAction = Variant<Wire.GeneratorMechanicAction_Deserialize>;
+export type BoilerMechanicAction = Variant<Wire.BoilerMechanicAction_Deserialize>;
+export type ReactorMechanicAction = Variant<Wire.ReactorMechanicAction_Deserialize>;
+export type SolarMechanicAction = Wire.SolarMechanicAction;
+export type FluidFuelMechanicAction = Wire.FluidFuelMechanicAction;
+export type FluidHeatMechanicAction = Variant<Wire.FluidHeatMechanicAction_Deserialize>;
+export type TileExtractMechanicAction = Wire.TileExtractMechanicAction;
+export type TileDisposeMechanicAction = Wire.TileDisposeMechanicAction;
+export type MechanicAction = Variant<Wire.MechanicAction_Deserialize>;
+export type ModuleAction = Variant<Wire.ModuleAction_Deserialize>;
+export type PlanningAction = Variant<Wire.PlanningAction_Deserialize>;
+export type TargetAction = Variant<Wire.TargetAction_Deserialize>;
+export type TargetExpressionAction = Variant<Wire.TargetExpressionAction_Deserialize>;
+export type ExternalInputAction = Variant<Wire.ExternalInputAction_Deserialize>;
+export type FlowAction = Variant<Wire.FlowAction_Deserialize>;
+export type SolveAction = Wire.SolveAction;
+export type CleanupAction = Wire.CleanupAction;
+export type FactoryContextAction = Variant<Wire.FactoryContextAction_Deserialize>;
+export type FactoryAction = Variant<Wire.FactoryAction_Deserialize>;
+export type UniverseAction = Variant<Wire.UniverseAction_Deserialize>;
+export type AppMessage = Variant<Wire.AppMessage_Deserialize>;
+export type PlanningPreferences = Wire.PlanningPreferences_Serialize;
+export type AutoBeaconPlan = Wire.AutoBeaconPlan_Serialize;
+export type Milestone = Wire.Milestone_Serialize;
+export type RecipeProductivity = Wire.RecipeProductivity_Serialize;
+export type InfiniteTechLevel = Wire.InfiniteTechLevel_Serialize;
+export type ProductivityView = Wire.ProductivityView_Serialize;
+export type RecipeProductivityView = Wire.RecipeProductivityView;
+export type OrbitalTransportCosts = Wire.OrbitalTransportCosts_Serialize;
+export type ProjectSettings = Wire.ProjectSettings_Serialize;
+export type LpSolver = Wire.LpSolver_Serialize;
+export type Location = Wire.Location;
+export type LocatedDualVar = Wire.LocatedDualVar_Serialize;
+export type LocatedMechanic = Wire.LocatedMechanic_Serialize;
+export type UniverseMechanicEntry = Wire.UniverseMechanicEntry_Serialize;
+export type LocatedTarget = Wire.LocatedTarget_Serialize;
+export type LocatedTargetTerm = Wire.LocatedTargetTerm_Serialize;
+export type LocatedTargetExpression = Wire.LocatedTargetExpression_Serialize;
+export type UniverseDocument = Wire.UniverseDocument_Serialize;
+export type LocatedMechanicSolution = Wire.LocatedMechanicSolution_Serialize;
+export type LocatedFlow = Wire.LocatedFlow_Serialize;
+export type UniverseSolveResult = Wire.UniverseSolveResult_Serialize;
+export type FactorySettings = Wire.FactorySettings_Serialize;
+export type Suggestion = Wire.Suggestion;
+export type BeaconConfig = Wire.BeaconConfig_Serialize;
+export type ModuleConfig = Wire.ModuleConfig_Serialize;
+export type Fuel = Wire.Fuel_Deserialize;
+export type DispatchResult = Wire.DispatchResult_Serialize;
+export type HistoryFocus = Wire.HistoryFocus_Serialize;
+export type HistoryStatus = Wire.HistoryStatus_Serialize;
+export type SolveResult = Variant<Wire.SolveResult_Serialize>;
+export type RuntimeDiagnostic = Wire.Diagnostic_Serialize;
+export type SolveDiagnostics = Wire.SolveDiagnostics_Serialize;
+export type OptimizationReport = Wire.OptimizationReport_Serialize;
+export type PivotCostChange = Wire.PivotCostChange;
+export type SolveStatus = Wire.SolveStatus_Serialize;
+export type MechanicSolution = Wire.MechanicSolution;
+export type FlowBalance = Wire.FlowBalance_Serialize;
+export type SolarBalance = Wire.SolarBalance;
+export type ContextInfo = Wire.ContextInfo_Serialize;
+export type ContextList = Wire.ContextList_Serialize;
+export type TileCapabilities = Wire.TileCapabilities_Serialize;
+export type CalculationStat = Wire.CalculationStat;
+export type CalculationDetail = Wire.CalculationDetail_Serialize;
+export type IndexEntry = Wire.IndexEntry_Serialize;
+export type CatalogIndex = Wire.CatalogIndex_Serialize;
+export type FlowAmount = Wire.FlowAmount_Serialize;
+export type PrototypeDetail = Wire.PrototypeDetail_Serialize;
+export type AutoPlanProgress = Wire.AutoPlanProgressEvent_Serialize;
+export type Mechanic = { type: Wire.Mechanic_Serialize["type"] } & {
+  [K in Exclude<UnionKeys<Wire.Mechanic_Serialize>, "type">]?: UnionValue<Wire.Mechanic_Serialize, K>
+};
+export type MechanicEntry = Omit<Wire.MechanicEntry_Serialize, "mechanic"> & { mechanic: Mechanic } & { location?: Location; transport?: "rocket-export" | "orbital-drop" };
+export type FlowTarget = Wire.FlowTarget_Serialize & { location?: Location };
+export type TargetTerm = Wire.TargetTerm_Serialize & { location?: Location };
+export type ExternalInput = Wire.ExternalInput_Serialize & { location?: Location };
+export type TargetExpression = Omit<Wire.TargetExpression_Serialize, "terms"> & { terms: TargetTerm[] };
+export type FactoryDocument = Omit<Wire.FactoryDocument_Serialize, "mechanics" | "targets" | "target_expressions" | "external_inputs"> & { mechanics: MechanicEntry[]; targets: FlowTarget[]; target_expressions: TargetExpression[]; external_inputs: ExternalInput[] };
+export type ProjectDocument = Omit<Wire.ProjectDocument_Serialize, "factories"> & { factories: FactoryDocument[] };
+export type AppDocument = Omit<Wire.AppDocument_Serialize, "projects"> & { projects: ProjectDocument[] };
 export function itemOf(flow: DualVar): IdWithQuality | undefined {
   if (flow !== null && typeof flow === "object" && "Item" in flow) {
     return flow.Item as IdWithQuality;
@@ -61,43 +128,30 @@ export function flowQuality(flow: DualVar): string | null {
   return null;
 }
 
-// ── Messages ──────────────────────────────────────────────────────
 
-export type ApplicationAction =
-  | { "new-project": { name: string } }
-  | { "open-project": { path: string } }
-  | { "load-game-context": { executable_path: string; mod_path: string | null } }
-  | "load-cached-context"
-  | { "set-active-context": { context: string | null } }
-  | { "rename-context": { id: string; name: string } }
-  | { "delete-context": { id: string } }
-  | { "save-project": { project: ProjectId } }
-  | { "save-project-as": { project: ProjectId; path: string } }
-  | { "close-project": { project: ProjectId; decision: "cancel" | "discard" | "save" } }
-  | { "delete-project": { project: ProjectId; decision: "cancel" | "confirm" } }
-  | { "reorder-project": { project: ProjectId; position: number } }
-  // 自动更新：GUI 走 @tauri-apps/plugin-updater，这三条消息留给 MCP/其它适配层。
-  | "check-for-update"
-  | "install-update"
-  | "restart-after-update";
-
-export type FactoryTemplate = "empty" | "default-mechanics";
-
-export type TimeScale = "seconds" | "minutes" | "hours";
-
-// 可达性对象（镜像 metatorio-core::Accessible 的 serde 外部标签：
-// 结构变体 {"Tech":"..."}，单元变体裸字符串 "Electricity"/"Heat"）。
-export type Accessible =
-  | { Tech: string }
-  | { Recipe: string }
-  | { Quality: string }
-  | { Space: string }
-  | { Item: string }
-  | { Fluid: string }
-  | { Entity: string }
-  | { Planet: string }
-  | "Electricity"
-  | "Heat";
+export type CatalogKind =
+  | "item"
+  | "fluid"
+  | "recipe"
+  | "module"
+  | "machine"
+  | "mining-machine"
+  | "offshore-pump"
+  | "generator"
+  | "boiler"
+  | "reactor"
+  | "fusion-reactor"
+  | "fusion-generator"
+  | "solar-panel"
+  | "accumulator"
+  | "beacon"
+  | "resource"
+  | "entity"
+  | "technology"
+  | "planet"
+  | "surface"
+  | "quality"
+  | "tile";
 
 /** 可达性对象的目录 kind（与选择器 kind 对齐：technology/recipe/…）。 */
 export function accessibleKind(node: Accessible): string {
@@ -154,950 +208,4 @@ export function accessibleKindFor(kind: string): string | null {
     default:
       return null;
   }
-}
-
-export type ProjectAction =
-  | { "set-name": { name: string } }
-  | { "add-factory": { name: string; template: FactoryTemplate } }
-  | { "clone-factory": { factory: FactoryId } }
-  | { "remove-factory": { factory: FactoryId } }
-  | { "reorder-factory": { factory: FactoryId; position: number } }
-  | { "add-universe": { name: string } }
-  | { "clone-universe": { universe: UniverseId } }
-  | { "remove-universe": { universe: UniverseId } }
-  | { "reorder-universe": { universe: UniverseId; position: number } }
-  | { "rename-universe": { universe: UniverseId; name: string } }
-  | { "set-time-scale": { time_scale: TimeScale } }
-  | { "set-all-accessible": { enabled: boolean } }
-  | { "set-quality-limit": { quality: string | null } }
-  | { "set-major-quality": { quality: string } }
-  | { "set-solver": { solver: LpSolver } }
-  | { "set-reactor-neighbours": { estimates: Record<string,number> } }
-  | { "set-orbital-transport-costs": { costs: OrbitalTransportCosts } }
-  | { "set-mining-productivity": { productivity: number } }
-  | { "set-context": { context: string | null } }
-  | { "add-milestone": { node: Accessible; unlocked: boolean } }
-  | { "set-milestone-unlocked": { node: Accessible; unlocked: boolean } }
-  | { "remove-milestone": { node: Accessible } }
-  | "set-default-milestones"
-  | { "set-ignore-productivity": { ignore: boolean } }
-  | { "set-recipe-productivity": { productivity: RecipeProductivity } }
-  | { "remove-recipe-productivity": { recipe: string } }
-  | { "set-infinite-tech-level": { level: InfiniteTechLevel } }
-  | { "remove-infinite-tech-level": { tech: string } }
-  | { planning: PlanningAction };
-
-export type MechanicKind =
-  | "virtual-science"
-  | "recipe"
-  | "mining"
-  | "spoil"
-  | "plant"
-  | "item-fuel"
-  | "item-launch"
-  | "generator"
-  | "boiler"
-  | "reactor"
-  | "fusion-reactor"
-  | "fusion-generator"
-  | "solar"
-  | "fluid-fuel"
-  | "fluid-heat"
-  | "tile-extract"
-  | "tile-dispose"
-  | "unsupported";
-
-export type MechanicListAction =
-  | { add: { kind: MechanicKind } }
-  | { remove: { mechanic: MechanicId } }
-  | { clone: { mechanic: MechanicId } }
-  | { reorder: { mechanic: MechanicId; position: number } }
-  | { "set-enabled": { mechanic: MechanicId; enabled: boolean } };
-
-// MechanicAction is tagged by mechanic kind: each variant carries exactly
-// the operations that kind supports.  The reducer rejects a kind mismatch.
-export type RecipeMechanicAction =
-  | { "set-recipe": { recipe: IdWithQuality } }
-  | { "set-machine": { machine: IdWithQuality } }
-  | { "set-fuel": { fuel: Fuel | null } }
-  | { "set-fuel-temperature": { temperature: number | null } }
-  | { module: ModuleAction };
-
-export type MiningMechanicAction =
-  | { "set-resource": { resource: string } }
-  | { "set-machine": { machine: IdWithQuality } }
-  | { "set-fuel": { fuel: Fuel | null } }
-  | { "set-fuel-temperature": { temperature: number | null } }
-  | { module: ModuleAction };
-
-export type SpoilMechanicAction = { "set-item": { item: IdWithQuality } };
-export type PlantMechanicAction = { "set-seed": { seed: IdWithQuality } };
-export type ItemFuelMechanicAction = { "set-item": { item: IdWithQuality } };
-export type ItemLaunchMechanicAction =
-  | { "set-item": { item: IdWithQuality } }
-  | { "set-weight-mode": { weight_mode: boolean } };
-
-export type GeneratorMechanicAction =
-  | { "set-generator": { generator: IdWithQuality } }
-  | { "set-fluid": { fluid: string } }
-  | { "set-temperature": { temperature: number | null } };
-
-export type BoilerMechanicAction =
-  | { "set-boiler": { boiler: IdWithQuality } }
-  | { "set-fluid": { fluid: string } }
-  | { "set-temperature": { temperature: number | null } }
-  | { "set-output-temperature": { temperature: number | null } }
-  | { "set-fuel": { fuel: Fuel | null } }
-  | { "set-fuel-temperature": { temperature: number | null } };
-
-export type ReactorMechanicAction =
-  | { "set-reactor": { reactor: IdWithQuality } }
-  | { "set-fuel": { fuel: Fuel | null } }
-  | { "set-neighbours": { neighbours: number | null } };
-
-export type SolarMechanicAction =
-  | { "set-solar-panel": { solar_panel: IdWithQuality } }
-  | { "set-accumulator": { accumulator: IdWithQuality } };
-
-export type FluidFuelMechanicAction = { "set-fluid": { fluid: string } };
-
-export type FluidHeatMechanicAction =
-  | { "set-fluid": { fluid: string } }
-  | { "set-temperature": { temperature: number | null } };
-
-/** 地格抽取：地格决定产出哪种流体，机械决定速率。 */
-export type TileExtractMechanicAction =
-  | { "set-tile": { tile: string } }
-  | { "set-machine": { machine: IdWithQuality } };
-
-/** 地格销毁：地格必须带 destroys_dropped_items（后端校验）。 */
-export type TileDisposeMechanicAction =
-  | { "set-tile": { tile: string } }
-  | { "set-item": { item: IdWithQuality } };
-
-export type MechanicAction =
-  | { "virtual-science": ItemFuelMechanicAction }
-  | { recipe: RecipeMechanicAction }
-  | { mining: MiningMechanicAction }
-  | { spoil: SpoilMechanicAction }
-  | { plant: PlantMechanicAction }
-  | { "item-fuel": ItemFuelMechanicAction }
-  | { "item-launch": ItemLaunchMechanicAction }
-  | { generator: GeneratorMechanicAction }
-  | { boiler: BoilerMechanicAction }
-  | { reactor: ReactorMechanicAction }
-  | { "fusion-reactor": ReactorMechanicAction }
-  | { "fusion-generator": { "set-generator": {generator:IdWithQuality} } | { "set-temperature": {temperature:number|null} } }
-  | { solar: SolarMechanicAction }
-  | { "fluid-fuel": FluidFuelMechanicAction }
-  | { "fluid-heat": FluidHeatMechanicAction }
-  | { "tile-extract": TileExtractMechanicAction }
-  | { "tile-dispose": TileDisposeMechanicAction };
-
-// 注意：unit 变体（clear-modules）在 serde 外部标签下序列化为裸字符串。
-export type ModuleAction =
-  | { "set-module-slot": { slot: number; module: IdWithQuality | null } }
-  | "clear-modules"
-  | { "add-beacon": { beacon: IdWithQuality } }
-  | { "remove-beacon": { beacon: number } }
-  | { "set-beacon": { beacon: number; value: IdWithQuality } }
-  | { "set-beacon-count": { beacon: number; count: number } }
-  | { "set-beacon-share": { beacon: number; share: number } }
-  | { "add-beacon-module": { beacon: number; module: IdWithQuality } }
-  | { "remove-beacon-module": { beacon: number; module: number } }
-  | { "set-beacon-module": { beacon: number; module: number; value: IdWithQuality } }
-  | { "set-beacon-module-count": { beacon: number; module: number; count: number } }
-  | { "clamp-modules": { max: number } };
-
-// 项目级自动规划偏好（全局，不绑定到单个机制）。
-export type PlanningAction =
-  | { "set-preserve-existing-mechanics": { preserve: boolean } }
-  | { "set-alternative-count": { count: number } }
-  | { "add-machine-preference": { machine: IdWithQuality } }
-  | { "remove-machine-preference": { machine: IdWithQuality } }
-  | { "reorder-machine-preference": { machine: IdWithQuality; position: number } }
-  | { "add-enumerated-module": { module: IdWithQuality } }
-  | { "remove-enumerated-module": { module: IdWithQuality } }
-  // 项目级：用「每类别 tier 最高的插件」整体替换枚举列表。quality **必填**且不做
-  // 推断（解锁某品质 ≠ 能大规模量产该品质的插件），GUI 传当前工厂主品质；
-  // 不接收 factory/mechanic——它是项目级偏好。
-  | { "use-best-modules": { quality: string } }
-  | "add-enumerated-beacon"
-  | { "remove-enumerated-beacon": { beacon: number } }
-  | { "set-enumerated-beacon": { beacon: number; plan: AutoBeaconPlan } }
-  | { "enumerated-beacon-module": { beacon: number; action: ModuleAction } };
-
-export type TargetAction =
-  | { add: { target: FlowTarget } }
-  | { remove: { target: TargetId } }
-  | { "set-flow": { target: TargetId; flow: DualVar } }
-  | { "set-amount": { target: TargetId; amount: number } }
-  | { reorder: { target: TargetId; position: number } };
-
-export type TargetExpressionAction =
-  | { add: { expression: TargetExpression } }
-  | { remove: { expression: TargetExpressionId } }
-  | { "set-constant": { expression: TargetExpressionId; constant: number } }
-  | { "add-term": { expression: TargetExpressionId; term: TargetTerm } }
-  | { "remove-term": { expression: TargetExpressionId; term: TargetTermId } }
-  | { "set-term-flow": { expression: TargetExpressionId; term: TargetTermId; flow: DualVar } }
-  | {
-      "set-term-coefficient": {
-        expression: TargetExpressionId;
-        term: TargetTermId;
-        coefficient: number;
-      };
-    }
-  | { reorder: { expression: TargetExpressionId; position: number } }
-  | { "reorder-term": { expression: TargetExpressionId; term: TargetTermId; position: number } };
-
-// Rust 侧还有 `replace-from-location`，但它对应的 app 命令未实现（GUI 用只读的
-// implicit_sources + external-input 消息），因此这里**故意不镜像**——少一个
-// 「有类型、发出去必失败」的死路径。
-export type ExternalInputAction =
-  | { add: { input: ExternalInput } }
-  | { remove: { input: ExternalInputId } }
-  | { "set-flow": { input: ExternalInputId; flow: DualVar } }
-  | { "set-penalty": { input: ExternalInputId; penalty: number } }
-  | { reorder: { input: ExternalInputId; position: number } };
-
-// 同理，Rust 的 `request-suggestions` 未实现（GUI 用 suggest 命令 + mechanic-list
-// 消息），这里不镜像。
-export type FlowAction =
-  | { "add-to-target": { flow: DualVar; amount: number } }
-  | { "add-to-external-input": { flow: DualVar; penalty: number } };
-
-export type SolveAction = "recompute" | "auto-plan";
-
-export type CleanupAction = "remove-unused" | "remove-unsolvable" | "sort-by-solution-rate";
-
-export type FactoryContextAction =
-  | { "set-planet": { planet: string | null } }
-  | { "set-surface": { surface: string | null } };
-
-export type FactoryAction =
-  | { "set-name": { name: string } }
-  | { "set-strict-source": { strict: boolean } }
-  | { "set-strict-sink": { strict: boolean } }
-  | { context: FactoryContextAction }
-  | { cleanup: CleanupAction }
-  | { target: TargetAction }
-  | { "target-expression": TargetExpressionAction }
-  | { "mechanic-list": MechanicListAction }
-  | { mechanic: { mechanic: MechanicId; action: MechanicAction } }
-  | { flow: FlowAction }
-  | { solve: SolveAction }
-  | { "external-input": ExternalInputAction };
-
-// AppMessage is internally tagged (tag "scope", content "action").
-// serde wraps struct-variant fields under the content key:
-//   { scope: "project", action: { project: 1, action: {...} } }
-// (newtype variants like Application put the payload directly under
-// "action").  Keep in sync with crates/metatorio-runtime/src/message.rs.
-export type UniverseAction =
-  | {solve:"recompute"|"auto-plan"}
-  | {cleanup:CleanupAction}
-  | { 'add-external-input': {flow:LocatedDualVar;penalty:number} }
-  | { 'remove-external-input': {input:ExternalInputId} }
-  | { 'set-external-input-flow': {input:ExternalInputId;flow:LocatedDualVar} }
-  | { 'set-external-input-penalty': {input:ExternalInputId;penalty:number} }
-  | { 'reorder-external-input': {input:ExternalInputId;position:number} }
-  | { "reorder-target-expression": {expression: TargetExpressionId; position: number} }
-  | { "reorder-target-expression-term": {expression: TargetExpressionId; term: TargetTermId; position: number} }
-  | { "clone-mechanic": { mechanic: MechanicId } }
-  | { "set-transport-item": { mechanic: MechanicId; item: IdWithQuality } }
-  | { "add-local-mechanic": { location: Location; kind: MechanicKind } }
-  | { "add-rocket-export": { location: Location; item: IdWithQuality } }
-  | { "add-orbital-drop": { location: Location; item: IdWithQuality } }
-  | { "remove-mechanic": { mechanic: MechanicId } }
-  | { "reorder-mechanic": { mechanic: MechanicId; position: number } }
-  | { "set-mechanic-enabled": { mechanic: MechanicId; enabled: boolean } }
-  | { "set-strict-source": { strict: boolean } }
-  | { "set-strict-sink": { strict: boolean } }
-  | { "set-mechanic-location": { mechanic: MechanicId; location: Location } }
-  | { "set-local-mechanic": { mechanic: MechanicId; mechanic_json: string } }
-  | { mechanic: { mechanic: MechanicId; action: MechanicAction } }
-  | { "add-target": { flow: LocatedDualVar; amount: number } }
-  | { "remove-target": { target: TargetId } }
-  | { "set-target-flow": { target: TargetId; flow: LocatedDualVar } }
-  | { "set-target-amount": { target: TargetId; amount: number } }
-  | { "reorder-target": { target: TargetId; position: number } }
-  | "add-target-expression"
-  | { "remove-target-expression": { expression: TargetExpressionId } }
-  | { "set-target-expression-constant": { expression: TargetExpressionId; constant: number } }
-  | { "add-target-expression-term": { expression: TargetExpressionId; flow: LocatedDualVar } }
-  | { "remove-target-expression-term": { expression: TargetExpressionId; term: TargetTermId } }
-  | { "set-target-expression-term-flow": { expression: TargetExpressionId; term: TargetTermId; flow: LocatedDualVar } }
-  | { "set-target-expression-term-coefficient": { expression: TargetExpressionId; term: TargetTermId; coefficient: number } };
-
-export type AppMessage =
-  | { scope: "application"; action: ApplicationAction }
-  | { scope: "project"; action: { project: ProjectId; action: ProjectAction } }
-  | {
-      scope: "factory";
-      action: { project: ProjectId; factory: FactoryId; action: FactoryAction };
-    }
-  | {
-      scope: "universe";
-      action: { project: ProjectId; universe: UniverseId; action: UniverseAction };
-    }
-  // 撤销/重做与普通编辑走同一条 dispatch 管线（GUI/MCP 统一）。
-  | { scope: "history"; action: "undo" | "redo" };
-
-// ── Document snapshot ─────────────────────────────────────────────
-
-export interface AppDocument {
-  schema_version: number;
-  projects: ProjectDocument[];
-}
-
-export interface ProjectDocument {
-  id: ProjectId;
-  name: string;
-  settings: ProjectSettings;
-  planning: PlanningPreferences;
-  /** 项目绑定的游戏上下文（缓存 id）；null = 跟随应用当前激活的上下文。 */
-  context_id: string | null;
-  factories: FactoryDocument[];
-  universes: UniverseDocument[];
-}
-
-export interface PlanningPreferences {
-  preserve_existing_mechanics: boolean;
-  alternative_count: number;
-  machine_preferences: IdWithQuality[];
-  enumerate_modules: IdWithQuality[];
-  enumerate_beacons: AutoBeaconPlan[];
-}
-
-export interface AutoBeaconPlan {
-  module_config: ModuleConfig;
-}
-
-export interface Milestone {
-  /** 里程碑节点（默认是科技瓶物品；也支持科技/配方等可达性对象）。 */
-  node: Accessible;
-  /** true = 已解锁；false = 未解锁（剪枝自身并阻断依赖它的对象）。 */
-  unlocked: boolean;
-}
-
-export interface RecipeProductivity {
-  recipe: string;
-  productivity: number;
-}
-
-/** 无限科技的研究次数覆盖（2.b）。 */
-export interface InfiniteTechLevel {
-  tech: string;
-  level: number;
-}
-
-/** 面向前端的产能视图：区分自动推算与用户指定（用户值有虚线边框）。 */
-export interface ProductivityView {
-  /** 每个配方产能项：source = "auto"（自动推算）| "user"（用户指定）。 */
-  recipes: RecipeProductivityView[];
-  /** 自动推算的采矿产出加成。 */
-  auto_mining: number;
-  /** 最终采矿产出加成（用户覆盖后）。 */
-  mining: number;
-  /** 用户对无限科技的研究次数覆盖（2.b）。 */
-  infinite_levels: InfiniteTechLevel[];
-  /** 是否忽略自动推算（2.c）。 */
-  ignore: boolean;
-}
-
-/** 单个配方产能项。 */
-export interface RecipeProductivityView {
-  recipe: string;
-  value: number;
-  source: "auto" | "user";
-}
-
-export interface OrbitalTransportCosts {
-  rocket_export_per_kg: number;
-  orbital_drop_per_stack: number;
-  orbital_drop_spoil_penalty: number;
-}
-
-export interface ProjectSettings {
-  reactor_neighbours?: Record<string,number>;
-  orbital_transport_costs: OrbitalTransportCosts;
-  time_scale: TimeScale;
-  /** 里程碑（可达性节点级；unlocked 是强制覆盖——false 强制不可达并阻断依赖，true 强制可达）。 */
-  milestones: Milestone[];
-  /** 用户手动固定的配方产能（2.a，替换自动值）。 */
-  recipe_productivity: RecipeProductivity[];
-  /** 用户对无限科技的研究次数覆盖（2.b）。 */
-  infinite_levels: InfiniteTechLevel[];
-  /** 忽略产能加成（2.c：丢弃自动推算，保留用户值）。 */
-  ignore_productivity: boolean;
-  /** 用户手动固定的采矿产出加成（替换自动值）。 */
-  mining_productivity: number;
-  all_accessible: boolean;
-  quality_limit: string | null;
-  /** 项目级主品质：所有工厂/宇宙工厂共享。 */
-  major_quality: string;
-  /** 项目级 LP 后端。旧文档缺省为 Rust based（序列化 id 仍为 rust-certified）。 */
-  solver: LpSolver;
-}
-
-export type LpSolver = "clarabel" | "highs" | "microlp" | "soplex" | "rust-certified";
-
-export type Location = { kind: "planet"; name: string } | { kind: "space" };
-
-export interface LocatedDualVar {
-  location: Location;
-  flow: DualVar;
-}
-
-export type LocatedMechanic =
-  | { type: "local"; location: Location; mechanic: Mechanic }
-  | { type: "rocket-export" | "orbital-drop"; location: Location; item: IdWithQuality };
-
-export interface UniverseMechanicEntry {
-  id: MechanicId;
-  enabled: boolean;
-  mechanic: LocatedMechanic;
-}
-
-export interface LocatedTarget {
-  id: TargetId;
-  flow: LocatedDualVar;
-  amount: number;
-}
-
-export interface LocatedTargetTerm {
-  id: TargetTermId;
-  flow: LocatedDualVar;
-  coefficient: number;
-}
-
-export interface LocatedTargetExpression {
-  id: TargetExpressionId;
-  constant: number;
-  terms: LocatedTargetTerm[];
-}
-
-export interface UniverseDocument {
-  id: UniverseId;
-  name: string;
-  mechanics: UniverseMechanicEntry[];
-  targets: LocatedTarget[];
-  target_expressions: LocatedTargetExpression[];
-  external_inputs: {id:ExternalInputId;flow:LocatedDualVar;penalty:number}[];
-  strict_source: boolean;
-  strict_sink: boolean;
-}
-
-export interface LocatedMechanicSolution {
-  scale?:number;
-  mechanic: MechanicId;
-  location: Location;
-  amount: number;
-  rate: number;
-  cost: number;
-}
-
-export interface LocatedFlow {
-  scale?:number;
-  flow: LocatedDualVar;
-  amount: number;
-  rate: number;
-}
-
-export interface UniverseSolveResult {
-  revision?:number;
-  project: ProjectId;
-  universe: UniverseId;
-  status:
-    | { status: "solved"; cost: number; flows: LocatedFlow[]; mechanics: LocatedMechanicSolution[] }
-    | { status: "not-solved"; description: string; no_provider: LocatedDualVar[]; no_consumer: LocatedDualVar[] };
-  report: SolveDiagnostics;
-}
-
-export interface FactoryDocument {
-  id: FactoryId;
-  name: string;
-  settings: FactorySettings;
-  targets: FlowTarget[];
-  target_expressions: TargetExpression[];
-  external_inputs: ExternalInput[];
-  mechanics: MechanicEntry[];
-  strict_source: boolean;
-  strict_sink: boolean;
-}
-
-export interface FactorySettings {
-  planet: string | null;
-  surface: string | null;
-  /** 遗留字段：只由旧版 egui 工程写入，当前无读取方；不镜像 `set-debug` 动作。 */
-  debug: boolean;
-}
-
-export interface FlowTarget {
-  location?: Location;
-  id: TargetId;
-  flow: DualVar;
-  amount: number;
-}
-
-export interface TargetTerm {
-  location?: Location;
-  id: TargetTermId;
-  flow: DualVar;
-  coefficient: number;
-}
-
-export interface TargetExpression {
-  id: TargetExpressionId;
-  constant: number;
-  terms: TargetTerm[];
-}
-
-export interface ExternalInput {
-  location?: Location;
-  id: ExternalInputId;
-  flow: DualVar;
-  penalty: number;
-}
-
-/** 建议候选：kind ∈ recipe | resource | item-fuel | generator；role 区分生产/消耗。 */
-export interface Suggestion {
-  kind: string;
-  name: string;
-  role?: "producer" | "consumer";
-}
-
-export interface MechanicEntry {
-  location?: Location;
-  transport?: "rocket-export" | "orbital-drop";
-  id: MechanicId;
-  enabled: boolean;
-  mechanic: Mechanic;
-}
-
-export interface BeaconConfig {
-  modules: [IdWithQuality, number][];
-  beacon: IdWithQuality;
-  count: number;
-  share: number;
-}
-
-export interface ModuleConfig {
-  modules: IdWithQuality[];
-  beacons: BeaconConfig[];
-}
-
-// Mechanic is internally tagged with "type" (kebab-case kind).
-export interface Mechanic {
-  type: MechanicKind;
-  recipe?: IdWithQuality;
-  machine?: IdWithQuality;
-  resource?: string;
-  /** 地格名（tile-extract 决定产出哪种流体；tile-dispose 决定去哪销毁）。 */
-  tile?: string;
-  item?: IdWithQuality;
-  seed?: IdWithQuality;
-  generator?: IdWithQuality;
-  boiler?: IdWithQuality;
-  reactor?: IdWithQuality;
-  solar_panel?: IdWithQuality;
-  accumulator?: IdWithQuality;
-  fluid?: string;
-  temperature?: number | null;
-  /** boiler 的 heat-fluid-inside 模式输出温度（null = 流体最高温度）。 */
-  output_temperature?: number | null;
-  fuel?: Fuel | null;
-  neighbours?: number | null;
-  weight_mode?: boolean;
-  module_config?: ModuleConfig;
-  [key: string]: unknown;
-}
-
-/** 明确燃料：语义上直接区分物品燃料（带品质）与流体燃料（名称 + 温度）。 */
-export type Fuel =
-  | { kind: "item"; item: IdWithQuality }
-  | { kind: "fluid"; fluid: string; temperature?: number | null };
-
-// ── Runtime replies ───────────────────────────────────────────────
-
-export interface DispatchResult {
-  universe_solve?:UniverseSolveResult;
-  revision: number;
-  changed: boolean;
-  commands: unknown[];
-  /** 本次 dispatch 新建的对象 id（按创建顺序）；空数组表示没有新建。 */
-  created: {
-    projects: ProjectId[];
-    factories: FactoryId[];
-    universes: UniverseId[];
-    mechanics: MechanicId[];
-    targets: TargetId[];
-    target_expressions: number[];
-    target_terms: number[];
-    external_inputs: ExternalInputId[];
-  };
-  /** 撤销/重做可用性；撤销/重做时还带受影响对象的聚焦提示。 */
-  history: HistoryStatus;
-}
-
-/** 撤销/重做后前端应聚焦的对象。 */
-export interface HistoryFocus {
-  universe?:UniverseId|null;
-  project: ProjectId | null;
-  factory: FactoryId | null;
-}
-
-export interface HistoryStatus {
-  can_undo: boolean;
-  can_redo: boolean;
-  /** 下一步撤销/重做的动作标签；无可用步骤时为 null。 */
-  undo_label: string | null;
-  redo_label: string | null;
-  /** 本次若是撤销/重做，受影响的对象；其余为 null/undefined。 */
-  focus?: HistoryFocus;
-}
-
-// ── Solver output ─────────────────────────────────────────────────
-
-export interface SolveResult {
-  revision?: number;
-  project: ProjectId;
-  factory: FactoryId;
-  status: SolveStatus;
-  /** 求解/自动规划的诊断（支撑集大小、回写过滤）。见 SolveDiagnostics。 */
-  report?: SolveDiagnostics;
-}
-
-/** Structured domain failures keep flow identities intact across IPC/events. */
-export interface RuntimeDiagnostic {
-  located_no_provider?:LocatedDualVar[];
-  located_no_consumer?:LocatedDualVar[];
-  code: string;
-  message: string;
-  no_provider: DualVar[];
-  no_consumer: DualVar[];
-  flows: DualVar[];
-}
-
-/**
- * 求解/自动规划的诊断记录。
- *
- * HiGHS 单后端不做剪枝；这些字段用于判断「回写少了一条关键机制」是候选过滤
- * 阈值造成的，还是根本没有候选 / 真的不可解。
- */
-export interface SolveDiagnostics {
-  variables_before: number;
-  variables_after: number;
-  /** 本次求解实际使用的后端。 */
-  solver?: LpSolver;
-  /** 以下证书描述回写后的工厂 LP。容差可行不代表精确最优。 */
-  exact_primal_verified?: boolean;
-  exact_optimality_verified?: boolean;
-  /** 回写后的工厂 LP 的优化结果。 */
-  optimization?: OptimizationReport | null;
-  /** 回写前完整候选 LP 的优化结果；自动规划优先显示此报告。 */
-  planning_optimization?: OptimizationReport | null;
-  certified_relative_gap?: number | null;
-  relative_primal_verified?: boolean;
-  maximum_relative_balance_error?: number | null;
-  balance_tolerance?: number | null;
-  /** 容差点成本与精确对偶下界的相对差，用于停止搜索。 */
-  relative_duality_gap?: number | null;
-  /** 自动规划回写候选的过滤阈值与数量。 */
-  writeback_cutoff: number;
-  candidates_total: number;
-  candidates_considered: number;
-  candidates_used: number;
-}
-
-export interface OptimizationReport {
-  optimality_proven: boolean;
-  termination_reason: "optimal" | "time-limit" | "search-stopped";
-  elapsed_seconds: number;
-  time_limit_seconds: number;
-  /** 浮点目标搜索和可行性路线搜索的换基数；旧报告可能没有计数。 */
-  floating_search_pivots?: number | null;
-  /** 原模型可行解上完成认证的精确优化换基数。 */
-  optimization_pivots?: number | null;
-  /** 精确优化换基中成本严格下降的次数。 */
-  improving_pivots?: number | null;
-  /** 精确优化阶段耗时，可能尚未完成一次换基。 */
-  optimization_elapsed_seconds?: number | null;
-  /** 首次获得已验证可行解所耗时间。 */
-  first_feasible_seconds?: number | null;
-  recent_pivot_cost_changes: PivotCostChange[];
-}
-
-export interface PivotCostChange {
-  pivot: number;
-  cost_before: number;
-  cost_after: number;
-  decrease: number;
-}
-
-export type SolveStatus =
-  | {
-      solved: {
-        cost: number;
-        mechanics: MechanicSolution[];
-        flows: FlowBalance[];
-      };
-    }
-  | {
-      "not-solved": {
-        no_provider: DualVar[];
-        no_consumer: DualVar[];
-        description: string;
-      };
-    };
-
-export interface MechanicSolution {
-  mechanic: MechanicId;
-  amount: number;
-  /** `amount / scale`：剔除 Ruiz 缩放后的可比量（判断「几乎没用到」用它）。 */
-  rate: number;
-  /** 单台实例成本（机器碰撞箱面积）。 */
-  cost: number;
-  /** Ruiz 均衡缩放系数（`rate = amount / scale`）。 */
-  scale: number;
-  /** 展开阶段引入的转换流辅助变量（`mechanic` 为 u64::MAX，不对应文档机制）。 */
-  is_virtual: boolean;
-}
-
-export interface FlowBalance {
-  flow: DualVar;
-  amount: number;
-  /** `amount / scale`：内部可比量（判断接近 0 用它）。 */
-  rate: number;
-  /** 该物品平衡约束的 Ruiz 缩放系数。 */
-  scale: number;
-}
-
-// ── Solar 配平信息（solar_balance 命令）──────────────────────────
-
-export interface SolarBalance {
-  /** 恒定满日照，无昼夜储能需求。 */
-  continuous_daylight?: boolean;
-  /** 满日照峰值功率（J/s，含星球太阳能系数与品质倍率）。 */
-  peak_power: number;
-  /** 周期平均稳定出力（J/s）。 */
-  average_power: number;
-  /** 一个昼夜周期的秒数。 */
-  cycle_seconds: number;
-  /** 一个周期溢出的总电量（J）——蓄电器需要储存的能量。 */
-  surplus_per_cycle: number;
-  /** 蓄电器容量（J）。 */
-  accumulator_capacity: number;
-  /** 推荐蓄电器数量（每块面板）。 */
-  recommended_accumulators: number;
-}
-
-// ── Game context & catalog ────────────────────────────────────────
-
-export interface ContextInfo {
-  id: string;
-  name: string;
-  created_at: number;
-  /** 导出时的游戏版本（拿不到 → null，例如内嵌示例 / 用户自备 dump）。 */
-  game_version: string | null;
-  /** 导出时启用的 mod（不含 base）；老缓存没有记录 → 空表。 */
-  mods: { name: string; version: string }[];
-  loaded: boolean;
-  groups: { name: string; count: number }[];
-  icon_root: string | null;
-  active: boolean;
-}
-
-export interface ContextList {
-  active: string | null;
-  contexts: ContextInfo[];
-}
-
-export interface TileCapabilities { fluid: string | null; destroys_dropped_items: boolean; }
-
-export interface CalculationStat { key: string; value: number; unit: "number" | "seconds" | "watts" | "joules" | "joules-per-degree" | "percent" | "multiplier" | "per-second" | "grams"; }
-export interface CalculationDetail { item_weight?: { weight: number; source: "explicit" | "cursor" | "recipe" | "default"; recipe?: string; fallback?: string }; surface_properties?: Record<string, number>; research?: {units: number | null; unit_seconds: number; ingredients: {name: string; per_unit: number; total: number | null}[]; prerequisites: string[]}; stats: CalculationStat[]; qualities: { quality: string; stats: CalculationStat[] }[]; tile?: TileCapabilities; }
-
-export interface IndexEntry {
-  supports_fluid_input?: boolean;
-  tile?: TileCapabilities;
-  kind: string;
-  name: string;
-  /** 本地化显示名（`--dump-prototype-locale`；无翻译时为空串）。 */
-  /** Raw Factorio rich text. Use RichText for rendering, richTextPlain for attributes/search. */
-  localized_name: string;
-  group: string;
-  subgroup: string;
-  icon_type: string;
-  module_slots: number | null;
-  /** 兼容性类别：machine→crafting_categories、recipe→categories、mining-machine→resource_categories、resource→category。 */
-  categories: string[];
-  /** 物品燃料类别（可多个；非燃料物品为空数组）。 */
-  fuel_categories: string[];
-  /** 物品/流体燃料热值（焦耳；非燃料为 null）。 */
-  fuel_value_j: number | null;
-  /** 科技等级上限：`(number)` = 有限上限，`null` = 无限科技。
-   *  仅 technology 条目填充；其余为 null。前端据此筛选"可多次研究"的科技。 */
-  technology_max_level: number | null;
-  /** 科技最低等级（名字 `-<number>` 后缀；无后缀为 0）。仅 technology 条目填充。
-   *  max_level 与 base 共同决定该科技是否可配置（max > base 或无限）。 */
-  technology_base_level: number;
-}
-
-export interface CatalogIndex {
-  context_id: string;
-  /** 可用品质（normal 起）。 */
-  qualities: string[];
-  /** 辅助原型名：分组、类别、表面属性等，`"<section>/<name>" → 原始本地化文本`。 */
-  names: Record<string, string>;
-  entries: IndexEntry[];
-}
-
-export interface FlowAmount {
-  base_rate?: number | null;
-  kind: "item" | "fluid";
-  name: string;
-  /** 单次期望量（概率已折算）。 */
-  amount: number;
-  /** 产出概率（0..1；常规产物为 1）。 */
-  probability: number;
-  /** 有概率时的原始量区间（amount_min/amount_max）。 */
-  amount_min: number | null;
-  amount_max: number | null;
-  /** 产能加成作用的期望产量基数（仅产物），不是已结算额外产量。 */
-  productivity: number;
-  /** 流体温度。 */
-  temperature: number | null;
-  min_temperature: number | null;
-  max_temperature: number | null;
-  /** 产物品质下限/上限（如 "uncommon"）。 */
-  quality_min: string | null;
-  quality_max: string | null;
-  /** 品质偏移（品质等级偏移量，0 不显示）。 */
-  quality_change: number | null;
-}
-
-/** 悬停详情（按需拉取 + 前端缓存）。 */
-export interface PrototypeDetail {
-  calculation?: CalculationDetail;
-  name: string;
-  /** 本地化显示名（无翻译时为空串）。 */
-  /** Raw Factorio rich text; never HTML. */
-  localized_name: string;
-  kind: string;
-  subgroup: string | null;
-  order: string;
-  hidden: boolean;
-  stack_size: number | null;
-  /** 燃料能量（焦耳）。 */
-  fuel_value_j: number | null;
-  /** 燃料类别（可多个，如 ["chemical"]）。 */
-  fuel_categories: string[];
-  /** 燃烧产物。 */
-  burnt_result: string;
-  /** 变质产物。 */
-  spoil_result: string;
-  /** 变质时间（刻）。 */
-  spoil_ticks: number | null;
-  /** 种植产物（种子 → 实体）。 */
-  plant_result: string;
-  /** 是否可火箭发射。 */
-  launchable: boolean;
-  /** 火箭发射产物物品名列表（如 satellite）。 */
-  rocket_launch_products: string[];
-  category: string | null;
-  categories: string[];
-  energy_required: number | null;
-  /** 配方最大产能加成（默认 3.0）。 */
-  maximum_productivity: number | null;
-  /** 配方表面条件（如 "gravity: 1"）。 */
-  surface_conditions: string[];
-  ingredients: FlowAmount[];
-  results: FlowAmount[];
-  crafting_speed: number | null;
-  module_slots: number | null;
-  /** 机器/插件塔允许的插件类别（空 = 不限制）。 */
-  allowed_module_categories: string[];
-  /** 机器是否接受插件塔效果；null/undefined = 未声明（按 true 处理）。 */
-  uses_beacon_effects: boolean | null;
-  /** 机器是否接受自身插件效果；null/undefined = 未声明（按 true 处理）。 */
-  uses_module_effects: boolean | null;
-  /** 焦耳/刻（功率）；前端换算为 W。 */
-  energy_usage_j: number | null;
-  /** 机器能量源类型（electric/burner/fluid/heat/void）；burner 才显示燃料配置。 */
-  machine_energy_source: string | null;
-  /** burner 机器可接受的燃料类别（electric/fluid 为空）。 */
-  burner_fuel_categories: string[];
-  // generator / boiler / reactor
-  /** 发电效率。 */
-  effectivity: number | null;
-  /** 最大出力（焦耳/刻）。 */
-  max_power_output_j: number | null;
-  /** 最高/目标温度。 */
-  maximum_temperature: number | null;
-  /** 发电机是否燃烧流体。 */
-  burns_fluid: boolean | null;
-  /** 发电机流体用量（单位/刻）。 */
-  fluid_usage_per_tick: number | null;
-  /** 锅炉能耗（焦耳/刻）。 */
-  energy_consumption_j: number | null;
-  /** 锅炉目标温度。 */
-  target_temperature: number | null;
-  /** 锅炉工作模式（"heat-fluid-inside" / "output-to-separate-pipe"）。 */
-  boiler_mode: string | null;
-  /** 反应堆相邻加成。 */
-  neighbour_bonus: number | null;
-  /** 反应堆加热半径。 */
-  heating_radius: number | null;
-  /** 反应堆热输出（焦耳/刻）。 */
-  heat_output_j: number | null;
-  /** 流体箱过滤（如 "steam"）。 */
-  fluid_filter: string | null;
-  output_fluid_filter?: string | null;
-  fusion_fuel_power_j?: number | null;
-  beacon_module_slots: number | null;
-  default_temperature: number | null;
-  // quality（kind = "quality"）
-  quality_level: number | null;
-  quality_next: string | null;
-  quality_next_probability: number | null;
-  quality_crafting_speed: number | null;
-  quality_module_speed: number | null;
-  quality_module_productivity: number | null;
-}
-
-export type CatalogKind =
-  | "item"
-  | "fluid"
-  | "recipe"
-  | "module"
-  | "machine"
-  | "mining-machine"
-  | "offshore-pump"
-  | "generator"
-  | "boiler"
-  | "reactor"
-  | "fusion-reactor"
-  | "fusion-generator"
-  | "solar-panel"
-  | "accumulator"
-  | "beacon"
-  | "resource"
-  | "entity"
-  | "technology"
-  | "planet"
-  | "surface"
-  | "quality"
-  | "tile";
-/** Complete LP dimensions for one auto-plan run; null until model construction. */
-export interface AutoPlanProgress {
-  universe?:UniverseId|null;
-  project: ProjectId;
-  factory: FactoryId;
-  run_id: number;
-  running: boolean;
-  stage: "preparing" | "enumerating" | "building" | "solving";
-  variables: number | null;
-  constraints: number | null;
 }

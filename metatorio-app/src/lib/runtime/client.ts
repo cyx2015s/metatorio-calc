@@ -1,271 +1,73 @@
-// Thin IPC client for the Tauri backend.
-//
-// Every call goes through `invoke` on the Rust commands registered in
-// src-tauri/src/lib.rs; solve outcomes arrive as `solve-result` /
-// `solve-error` events, context changes as `contexts-changed`.
+// Rust owns the wire contract. Only browser guards and UI argument adapters live here.
+import { commands as generatedCommands, events } from "./bindings.ts";
+import type { AutoPlanProgress, ContextList, DualVar, RuntimeDiagnostic, SolveResult, UniverseSolveResult } from "./types";
+export type { UniversePreview_Serialize as UniversePreview, ProjectFileOpen, ExportInfo as NetworkPngExport } from "./bindings.ts";
 
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import type {
-  Accessible,
-  AutoPlanProgress,
-  AppDocument,
-  AppMessage,
-  CatalogIndex,
-  CatalogKind,
-  ContextInfo,
-  ContextList,
-  DispatchResult,
-  HistoryStatus,
-  Milestone,
-  PrototypeDetail,
-  SolveResult,
-  UniverseSolveResult,
-  UniverseId,
-  RuntimeDiagnostic,
-} from "./types";
+const commands = new Proxy(generatedCommands, {
+  get(target, key, receiver) {
+    const command = Reflect.get(target, key, receiver);
+    if (typeof command !== "function") return command;
+    return (...args: unknown[]) => {
+      if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+        return Promise.reject(new Error("不在 Tauri 环境中：请用 `pnpm tauri dev` 启动（纯浏览器没有 invoke）。"));
+      }
+      return Reflect.apply(command, undefined, args);
+    };
+  },
+});
 
-function inTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
+export const dispatch = commands.dispatch;
+export const getDocument = commands.getDocument;
+export const universePreview = commands.universePreview;
+export const solveUniverse = commands.solveUniverse;
+export const autoPlanUniverse = commands.autoPlanUniverse;
+export const beginNetworkPng = commands.beginNetworkPng;
+export const finishNetworkPng = commands.finishNetworkPng;
+export const abortNetworkPng = commands.abortNetworkPng;
+export const historyState = commands.historyState;
+export const accessibility = commands.accessibility;
+export const milestonesOrdered = commands.milestonesOrdered;
+export const productivity = commands.productivity;
+export const loadBundledDump = commands.loadBundledDump;
+export const loadDump = commands.loadDump;
+export const listContexts = commands.listContexts;
+export const pickGameExecutable = commands.pickGameExecutable;
+export const pickDumpFile = commands.pickDumpFile;
+export const pickModDir = commands.pickModDir;
+export const catalogIndex = commands.catalogIndex;
+export const implicitSources = commands.implicitSources;
+export const mechanicFlow = commands.mechanicFlow;
+export const solarBalance = commands.solarBalance;
+export const openProjectFile = commands.openProjectFile;
+export const takeProjectOpenRequests = commands.takeProjectOpenRequests;
+export const pickProjectFile = commands.pickProjectFile;
+export const pickProjectSavePath = commands.pickProjectSavePath;
+export const projectSavePath = commands.projectSavePath;
+export const loadIcon = commands.icon;
 
-function notInTauri(): string {
-  return "不在 Tauri 环境中：请用 `pnpm tauri dev` 启动（纯浏览器没有 invoke）。";
-}
+// These adapters retain the existing UI's parameter order and optional mod directory.
+export const loadGameContext = (executablePath: string, modDir?: string | null) => commands.loadGameContext(executablePath, modDir ?? null);
+export const prototypeDetail = (kind: string, name: string, contextId: string) => commands.prototypeDetail(contextId, kind, name);
+export const suggest = (flow: DualVar, contextId: string) => commands.suggest(contextId, flow);
+export const allowedModules = (machineKind: string, machine: string, recipe: string | null, contextId: string) => commands.allowedModules(contextId, machineKind, machine, recipe);
 
-async function call<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  if (!inTauri()) throw new Error(notInTauri());
-  return invoke<T>(command, args);
-}
-
-export async function dispatch(message: AppMessage): Promise<DispatchResult> {
-  return call("dispatch", { message });
-}
-
-export async function getDocument(): Promise<AppDocument> {
-  return call("get_document");
-}
-
-export interface UniversePreview { mechanics: { id: number; flows: import('./types').LocatedFlow[]; error: string | null; solar_balance?: import('./types').SolarBalance | null }[]; sources: import('./types').LocatedDualVar[] }
-export function universePreview(project: number, universe: number): Promise<UniversePreview> { return call('universe_preview', {project, universe}); }
-
-export async function solveUniverse(project: number, universe: UniverseId): Promise<UniverseSolveResult> {
-  return call("solve_universe", { project, universe });
-}
-
-export async function autoPlanUniverse(project: number, universe: UniverseId): Promise<UniverseSolveResult> {
-  return call("auto_plan_universe", { project, universe });
-}
-
-export interface NetworkPngExport {id:number;width:number;height:number;tile_width:number;tile_height:number}
-/** Select a destination before doing any rendering. Null means cancelled. */
-export function beginNetworkPng(fileName:string,width:number,height:number):Promise<NetworkPngExport|null>{
-  return call("begin_network_png",{fileName,width,height});
-}
-export async function writeNetworkPngTile(exportId:number,x:number,y:number,png:Blob):Promise<void>{
-  const imageBase64=await new Promise<string>((resolve,reject)=>{
-    const reader=new FileReader();reader.onload=()=>resolve((reader.result as string).split(',')[1]);
-    reader.onerror=()=>reject(reader.error);reader.readAsDataURL(png);
+export async function writeNetworkPngTile(exportId: number, x: number, y: number, png: Blob): Promise<void> {
+  const imageBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(",")[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(png);
   });
-  return call("write_network_png_tile",{exportId,x,y,imageBase64});
-}
-export function finishNetworkPng(exportId:number):Promise<string>{return call("finish_network_png",{exportId});}
-export function abortNetworkPng(exportId:number):Promise<void>{return call("abort_network_png",{exportId});}
-
-/** 撤销/重做可用性（启动时初始化按钮态；之后每次 dispatch 的回执里也带）。 */
-export async function historyState(): Promise<HistoryStatus> {
-  return call("history_state");
+  await commands.writeNetworkPngTile(exportId, x, y, imageBase64);
 }
 
-/** 项目可达性快照（选择器过滤用）：当前可达对象集合。 */
-export async function accessibility(project: number): Promise<Accessible[]> {
-  return call("accessibility", { project });
-}
-
-/** 里程碑节点按依赖拓扑排序（依赖在前），供 UI 按序展示。 */
-export async function milestonesOrdered(project: number): Promise<Milestone[]> {
-  return call("milestones_ordered", { project });
-}
-
-/** 产能视图：自动推算 + 用户覆盖，按来源区分。 */
-export async function productivity(project: number): Promise<import("./types").ProductivityView> {
-  return call("productivity", { project });
-}
-
-// ── Game contexts ─────────────────────────────────────────────────
-
-export async function loadBundledDump(): Promise<ContextInfo> {
-  return call("load_bundled_dump");
-}
-
-export async function loadGameContext(
-  executablePath: string,
-  modDir?: string | null,
-): Promise<ContextInfo> {
-  return call("load_game_context", { executablePath, modDir: modDir ?? null });
-}
-
-export async function loadDump(path: string): Promise<ContextInfo> {
-  return call("load_dump", { path });
-}
-
-export async function listContexts(): Promise<ContextList> {
-  return call("list_contexts");
-}
-
-// 上下文的切换/重命名/删除已收敛为 AppMessage（见 store.setActiveContext 等）：
-// 它们改的是 app 层注册表，只有 app 层的命令执行器能碰，因此走 dispatch 后
-// MCP agent 与 GUI 共享同一条路径（app 层 `activate_context` 等单一实现）。
-
-export async function pickGameExecutable(): Promise<string | null> {
-  return call("pick_game_executable");
-}
-
-export async function pickDumpFile(): Promise<string | null> {
-  return call("pick_dump_file");
-}
-
-export async function pickModDir(): Promise<string | null> {
-  return call("pick_mod_dir");
-}
-
-// ── Catalog & icons ───────────────────────────────────────────────
-
-export async function loadIcon(
-  type: string,
-  name: string,
-  contextId: string,
-): Promise<number[] | null> {
-  return call("icon", { ty: type, name, contextId: contextId });
-}
-
-export async function catalogIndex(contextId: string): Promise<CatalogIndex> {
-  return call("catalog_index", { contextId: contextId });
-}
-
-export async function prototypeDetail(
-  kind: string,
-  name: string,
-  contextId: string,
-): Promise<PrototypeDetail | null> {
-  return call("prototype_detail", { contextId: contextId, kind, name });
-}
-
-/** 建议系统：为一条流生成候选机制（配方/矿点/燃料/发电机）。 */
-export async function suggest(
-  flow: import("./types").DualVar,
-  contextId: string,
-): Promise<import("./types").Suggestion[]> {
-  return call("suggest", { contextId: contextId, flow });
-}
-
-/** 星球隐式可用输入（严格供给下也免费；被外部输入覆盖的不返回）。 */
-export async function implicitSources(
-  project: number,
-  factory: number,
-): Promise<import("./types").DualVar[]> {
-  return call("implicit_sources", { project, factory });
-}
-
-/** 单个机制的展开流（系数 1 时每秒产/耗）；正值产出、负值消耗。 */
-export async function mechanicFlow(
-  project: number,
-  factory: number,
-  mechanic: number,
-): Promise<[import("./types").DualVar, number][]> {
-  return call("mechanic_flow", { project, factory, mechanic });
-}
-
-/** 太阳能机制的配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）。 */
-export async function solarBalance(
-  project: number,
-  factory: number,
-  mechanic: number,
-): Promise<import("./types").SolarBalance | null> {
-  return call("solar_balance", { project, factory, mechanic });
-}
-
-/**
- * 指定机器/插件塔允许的插件名列表（机制卡手动插件选择鉴权）。
- * machineKind: "machine" | "mining-machine" | "beacon"。
- * recipe: 可选配方名（recipe 机制传入；采矿/插件塔为 null）。
- */
-export async function allowedModules(
-  machineKind: string,
-  machine: string,
-  recipe: string | null,
-  contextId: string,
-): Promise<string[]> {
-  return call("allowed_modules", { contextId: contextId, machineKind, machine, recipe });
-}
-
-// ── Persistence ───────────────────────────────────────────────────
-//
-// GUI open returns explicit imported/reused IDs. Its shell implementation is
-// shared with AppMessage::OpenProject; saving retains the message path.
-
-export interface ProjectFileOpen { path: string; projects: number[]; reused: boolean }
-export function openProjectFile(path: string): Promise<ProjectFileOpen> {
-  return call("open_project_file", {path});
-}
-export function takeProjectOpenRequests(): Promise<string[]> {
-  return call("take_project_open_requests");
-}
-export function onProjectOpenRequested(handler: () => void): Promise<() => void> {
-  return listen("project-open-requested", handler);
-}
-
-export async function pickProjectFile(): Promise<string | null> {
-  return call("pick_project_file");
-}
-
-export async function pickProjectSavePath(): Promise<string | null> {
-  return call("pick_project_save_path");
-}
-
-export async function projectSavePath(project: number): Promise<string | null> {
-  return call("project_save_path", { project });
-}
-
-// ── Events ────────────────────────────────────────────────────────
-
-export function onAutoPlanProgress(handler: (progress: AutoPlanProgress) => void): Promise<() => void> {
-  return listen<AutoPlanProgress>("auto-plan-progress", (event) => handler(event.payload));
-}
-
-export function onSolveResult(handler: (result: SolveResult) => void): Promise<() => void> {
-  return listen<SolveResult>("solve-result", (event) => handler(event.payload));
-}
-
-export function onSolveError(handler: (message: string | RuntimeDiagnostic) => void): Promise<() => void> {
-  return listen<string | RuntimeDiagnostic>("solve-error", (event) => handler(event.payload));
-}
-
-export function onContextsChanged(handler: (list: ContextList) => void): Promise<() => void> {
-  return listen<ContextList>("contexts-changed", (event) => handler(event.payload));
-}
-
-export function onContextError(handler: (message: string) => void): Promise<() => void> {
-  return listen<string>("context-error", (event) => handler(event.payload));
-}
-
-/**
- * 后端文档被外部修改（如 MCP 的 `dispatch` 工具）后广播，通知 GUI 重新拉取
- * 文档快照，实现「外部 agent + 用户在同一个界面上实时并存操作」。
- */
-export function onDocumentChanged(handler: (revision: number) => void): Promise<() => void> {
-  return listen<number>("document-changed", (event) => handler(event.payload));
-}
-
-/**
- * 命令阶段失败（dispatch 产生的副作用命令）。
- *
- * 求解/上下文类命令自己会发 `solve-error` / `context-error`；落盘（自动保存）、
- * 关闭项目等没有专属事件——没有这个广播，它们的失败在界面上完全不可见。
- */
-export function onCommandError(handler: (errors: (string | RuntimeDiagnostic)[]) => void): Promise<() => void> {
-  return listen<(string | RuntimeDiagnostic)[]>("command-error", (event) => handler(event.payload));
-}
-
-export function onUniverseSolveResult(handler:(result:import('./types').UniverseSolveResult)=>void):Promise<()=>void>{return listen<import('./types').UniverseSolveResult>('universe-solve-result',e=>handler(e.payload));}
-export function onUniverseSolveError(handler:(error:{project:number;universe:number;revision?:number;message:string|RuntimeDiagnostic})=>void):Promise<()=>void>{return listen<{project:number;universe:number;revision?:number;message:string|RuntimeDiagnostic}>('universe-solve-error',e=>handler(e.payload));}
+export const onProjectOpenRequested = (handler: () => void) => events.projectOpenRequested.listen(handler);
+export const onAutoPlanProgress = (handler: (progress: AutoPlanProgress) => void) => events.autoPlanProgress.listen(event => handler(event.payload));
+export const onSolveResult = (handler: (result: SolveResult) => void) => events.solveResult.listen(event => handler(event.payload));
+export const onSolveError = (handler: (message: string | RuntimeDiagnostic) => void) => events.solveError.listen(event => handler(event.payload));
+export const onContextsChanged = (handler: (list: ContextList) => void) => events.contextsChanged.listen(event => handler(event.payload));
+export const onContextError = (handler: (message: string) => void) => events.contextError.listen(event => handler(event.payload));
+export const onDocumentChanged = (handler: (revision: number | null) => void) => events.documentChanged.listen(event => handler(event.payload));
+export const onCommandError = (handler: (errors: (string | RuntimeDiagnostic)[]) => void) => events.commandError.listen(event => handler(event.payload));
+export const onUniverseSolveResult = (handler: (result: UniverseSolveResult) => void) => events.universeSolveResult.listen(event => handler(event.payload));
+export const onUniverseSolveError = (handler: (error: import("./bindings").UniverseSolveError) => void) => events.universeSolveError.listen(event => handler(event.payload));

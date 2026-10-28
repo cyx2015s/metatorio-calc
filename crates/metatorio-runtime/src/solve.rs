@@ -22,6 +22,7 @@ use crate::message::{
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
 /// Real mechanisms have one variable each; conversion flows have independent IDs.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExpandedVarId {
     Mechanic(MechanicId),
@@ -37,6 +38,7 @@ impl ExpandedVarId {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolveResult {
     /// Document version used by this solve, for rejecting stale frontend events.
@@ -56,6 +58,7 @@ pub struct SolveResult {
 }
 
 /// 见 [`SolveResult::report`]。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SolveDiagnostics {
     /// 求解变量数 / 解里非零的变量数（顶点解下就是支撑集大小）。
@@ -120,6 +123,7 @@ impl SolveDiagnostics {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SolveStatus {
@@ -135,6 +139,7 @@ pub enum SolveStatus {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MechanicSolution {
     pub mechanic: MechanicId,
@@ -153,6 +158,7 @@ pub struct MechanicSolution {
     pub is_virtual: bool,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FlowBalance {
     pub flow: DualVar,
@@ -179,6 +185,7 @@ pub enum CommandEffect {
 }
 
 /// 面向前端的产能视图：区分**自动推算**与**用户指定**（用户值有虚线边框）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProductivityView {
     /// 每个配方产能项：source = "auto"（自动推算）| "user"（用户指定）。
@@ -194,6 +201,7 @@ pub struct ProductivityView {
 }
 
 /// 单个配方产能项。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecipeProductivityView {
     pub recipe: String,
@@ -1367,6 +1375,7 @@ pub fn solve_snapshot_with(
 }
 
 /// Stages of auto-planning; dimensions become known after LP construction.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum AutoPlanStage {
@@ -1376,6 +1385,7 @@ pub enum AutoPlanStage {
     Solving,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AutoPlanProgress {
     pub stage: AutoPlanStage,

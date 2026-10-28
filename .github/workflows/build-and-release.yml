@@ -98,6 +98,9 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: metatorio-app/pnpm-lock.yaml
 
+      - name: Check generated IPC bindings
+        run: cargo test -p metatorio-app --no-default-features --lib bindings::tests::bindings_are_current -- --exact
+
       - name: Install frontend dependencies
         working-directory: metatorio-app
         run: pnpm install --frozen-lockfile

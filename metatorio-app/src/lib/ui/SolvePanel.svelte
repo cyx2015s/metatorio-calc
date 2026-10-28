@@ -14,8 +14,8 @@
   const located=$derived(universeSolve?.status.status==='solved'?universeSolve.status:null);
   const failed=$derived(universeSolve?.status.status==='not-solved'?universeSolve.status:null);
   const rows=$derived.by(()=>{
-    if(located) return located.flows.filter(f=>Math.abs(f.amount)/Math.max(f.scale??1,1e-12)>1e-9).map(f=>({flow:f.flow.flow,location:f.flow.location,amount:f.amount}));
-    return (status?.flows ?? []).filter(f=>Math.abs(f.amount)/Math.max(f.scale??1,1e-12)>1e-9).map(f=>({flow:f.flow,location:undefined as Location|undefined,amount:f.amount}));
+    if(located) return located.flows.filter(f=>Math.abs(f.amount ?? NaN)/Math.max(f.scale??1,1e-12)>1e-9).map(f=>({flow:f.flow.flow,location:f.flow.location,amount:f.amount ?? NaN}));
+    return (status?.flows ?? []).filter(f=>Math.abs(f.amount ?? NaN)/Math.max(f.scale??1,1e-12)>1e-9).map(f=>({flow:f.flow,location:undefined as Location|undefined,amount:f.amount ?? NaN}));
   });
   const ordinaryFailure=$derived(solve && 'not-solved' in solve.status ? solve.status['not-solved'] : null);
   const solved=$derived(!!status||!!located);

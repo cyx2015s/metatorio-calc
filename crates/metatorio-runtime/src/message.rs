@@ -12,6 +12,7 @@ use crate::id::{
 };
 
 /// 与框架无关的「用户意图」。渲染层应当发出这些消息，而不是直接改项目文档。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "scope", content = "action", rename_all = "kebab-case")]
 pub enum AppMessage {
@@ -39,6 +40,7 @@ pub enum AppMessage {
 pub type RuntimeMessage = AppMessage;
 
 /// 撤销/重做动作（scope = "history"）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum HistoryAction {
@@ -47,6 +49,7 @@ pub enum HistoryAction {
 }
 
 /// 文件、游戏数据上下文、更新与进程级操作。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ApplicationAction {
@@ -106,6 +109,7 @@ pub enum ApplicationAction {
     RestartAfterUpdate,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CloseDecision {
@@ -114,6 +118,7 @@ pub enum CloseDecision {
     Save,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum DeleteDecision {
@@ -122,6 +127,7 @@ pub enum DeleteDecision {
 }
 
 /// 项目级的持久改动（原先由 ProjectContext 承担）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProjectAction {
@@ -226,6 +232,7 @@ pub enum ProjectAction {
     Planning(PlanningAction),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryTemplate {
@@ -234,6 +241,7 @@ pub enum FactoryTemplate {
 }
 
 /// 对某个工厂文档的改动。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryAction {
@@ -261,6 +269,7 @@ pub enum FactoryAction {
 }
 
 /// 宇宙工厂的动作。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum UniverseAction {
@@ -394,6 +403,7 @@ pub enum UniverseAction {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FactoryContextAction {
@@ -402,6 +412,7 @@ pub enum FactoryContextAction {
     SetDebug { enabled: bool },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TargetAction {
@@ -412,6 +423,7 @@ pub enum TargetAction {
     Reorder { target: TargetId, position: usize },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TargetExpressionAction {
@@ -454,6 +466,7 @@ pub enum TargetExpressionAction {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExternalInputAction {
@@ -483,6 +496,7 @@ pub enum ExternalInputAction {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ExternalLocation {
@@ -490,6 +504,7 @@ pub enum ExternalLocation {
     Surface(String),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicListAction {
@@ -517,6 +532,7 @@ pub enum MechanicListAction {
 /// 每个变体只带该种类支持的操作（与 core 里对应的 `Mechanic` 结构字段集一致）：
 /// 配方机制不可能收到采矿操作，反之亦然——种类不匹配时 reducer 直接报错，
 /// 不动文档。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MechanicAction {
@@ -539,6 +555,7 @@ pub enum MechanicAction {
     TileDispose(TileDisposeMechanicAction),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RecipeMechanicAction {
@@ -549,6 +566,7 @@ pub enum RecipeMechanicAction {
     Module(ModuleAction),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum MiningMechanicAction {
@@ -559,6 +577,7 @@ pub enum MiningMechanicAction {
     Module(ModuleAction),
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SpoilMechanicAction {
@@ -566,6 +585,7 @@ pub enum SpoilMechanicAction {
 }
 
 /// 地格抽取：换地格（决定产出哪种流体）或换机械（决定速率）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TileExtractMechanicAction {
@@ -574,6 +594,7 @@ pub enum TileExtractMechanicAction {
 }
 
 /// 地格销毁：换地格（必须带 `destroys_dropped_items`）或换被销毁的物品。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum TileDisposeMechanicAction {
@@ -581,18 +602,21 @@ pub enum TileDisposeMechanicAction {
     SetItem { item: IdWithQuality },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlantMechanicAction {
     SetSeed { seed: IdWithQuality },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemFuelMechanicAction {
     SetItem { item: IdWithQuality },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ItemLaunchMechanicAction {
@@ -600,6 +624,7 @@ pub enum ItemLaunchMechanicAction {
     SetWeightMode { weight_mode: bool },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum GeneratorMechanicAction {
@@ -608,6 +633,7 @@ pub enum GeneratorMechanicAction {
     SetTemperature { temperature: Option<i32> },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum BoilerMechanicAction {
@@ -633,6 +659,7 @@ pub enum BoilerMechanicAction {
     // SetMode（工作模式）已移除：锅炉 mode 只读，运行/展开时从原型读取。
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ReactorMechanicAction {
@@ -641,6 +668,7 @@ pub enum ReactorMechanicAction {
     SetNeighbours { neighbours: Option<u8> },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SolarMechanicAction {
@@ -648,12 +676,14 @@ pub enum SolarMechanicAction {
     SetAccumulator { accumulator: IdWithQuality },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FluidFuelMechanicAction {
     SetFluid { fluid: String },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FluidHeatMechanicAction {
@@ -662,6 +692,7 @@ pub enum FluidHeatMechanicAction {
 }
 
 /// 插件配置操作：用「槽位 + 稳定列表下标」表达，而不是旧 ModuleConfigEditor 的鼠标按钮。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ModuleAction {
@@ -715,6 +746,7 @@ pub enum ModuleAction {
 }
 
 /// 项目级的自动规划偏好：描述规划器如何枚举备选方案，**故意**不绑定任何单个机制。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanningAction {
@@ -774,6 +806,7 @@ pub enum PlanningAction {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FlowAction {
@@ -794,6 +827,7 @@ pub enum FlowAction {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CleanupAction {
@@ -805,6 +839,7 @@ pub enum CleanupAction {
     SortBySolutionRate,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum SolveAction {
@@ -823,6 +858,7 @@ pub enum SolveAction {
 
 /// reducer 应用完一条 AppMessage 后请求执行的副作用。把它们显式列出来，
 /// Tauri 适配层才能保持又薄又可测。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeCommand {
@@ -983,6 +1019,7 @@ mod tests {
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum FusionGeneratorMechanicAction {

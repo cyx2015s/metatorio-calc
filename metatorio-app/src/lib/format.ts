@@ -20,7 +20,8 @@ function formatWithUnit(value: number, unit: string): string {
 }
 
 /** 数量 → 紧凑文本（复刻 egui compact_number）。 */
-export function compactNumber(num: number): string {
+export function compactNumber(num: number | null): string {
+  if (num == null || !Number.isFinite(num)) return "—";
   const abs = Math.abs(num);
   if (abs < 1e-15) return "0";
   if (abs < 1e-9) return formatWithUnit(num * 1e12, "p");

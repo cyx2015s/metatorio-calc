@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 macro_rules! id_type {
     ($name:ident) => {
+        #[cfg_attr(feature = "specta", derive(specta::Type))]
         #[derive(
             Debug,
             Clone,

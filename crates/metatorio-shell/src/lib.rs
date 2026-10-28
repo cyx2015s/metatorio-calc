@@ -20,3 +20,5 @@ pub mod update;
 
 pub use host::Host;
 pub use options::{DEFAULT_MCP_BIND, DEFAULT_MCP_PORT, MCP_PATH, Options};
+
+pub mod events;

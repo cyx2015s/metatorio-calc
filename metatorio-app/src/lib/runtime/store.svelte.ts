@@ -928,7 +928,7 @@ class RuntimeStore {
     const hash = JSON.stringify([mechanic, document?.settings, environment]);
     return this.mechanicFlowCache.get(key, hash, async () => {
       const flows = await mechanicFlow(project, factory, mechanicId);
-      return flows.map(([flow, amount]) => ({flow, amount}));
+      return flows.map(([flow, amount]) => ({flow, amount: amount ?? NaN}));
     });
   }
 

@@ -23,12 +23,14 @@ use crate::solve::{
     SolveDiagnostics, apply_environment_to_game_state, make_game_state_with_accessibility,
 };
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct UniverseVarId(pub u64);
 fn identity_scale() -> f64 {
     1.0
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LocatedMechanicSolution {
     pub mechanic: MechanicId,
@@ -40,6 +42,7 @@ pub struct LocatedMechanicSolution {
     pub cost: f64,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LocatedFlow {
     pub flow: LocatedDualVar,
@@ -49,6 +52,7 @@ pub struct LocatedFlow {
     pub scale: f64,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
 pub enum UniverseSolveStatus {
@@ -64,6 +68,7 @@ pub enum UniverseSolveStatus {
     },
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UniverseSolveResult {
     #[serde(default)]
@@ -315,6 +320,7 @@ pub fn expand_located_mechanic_with_costs(
     }
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Serialize)]
 pub struct UniversePreviewEntry {
     pub id: MechanicId,
@@ -322,6 +328,7 @@ pub struct UniversePreviewEntry {
     pub error: Option<String>,
     pub solar_balance: Option<metatorio_core::SolarBalance>,
 }
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Serialize)]
 pub struct UniversePreview {
     pub mechanics: Vec<UniversePreviewEntry>,

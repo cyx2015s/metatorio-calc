@@ -37,3 +37,6 @@ opt-level = 3
 
 [profile.dev.package.num-traits]
 opt-level = 3
+
+[workspace.dependencies]
+specta = { version = "=2.0.0-rc.26", features = ["derive", "serde_json", "indexmap"] }

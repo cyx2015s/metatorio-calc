@@ -134,3 +134,5 @@ Windows 若遇到 CMake 不支持 `Visual Studio 18 2026` 生成器，可更新 
 # 许可
 
 见 LICENSE。
+
+开发时的 Rust / TypeScript 合约生成与检查见 [类型化 IPC](docs/typed-ipc.md)。

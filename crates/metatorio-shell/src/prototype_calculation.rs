@@ -14,6 +14,7 @@ use metatorio_data::{
 };
 use serde::Serialize;
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StatUnit {
@@ -27,17 +28,20 @@ pub enum StatUnit {
     PerSecond,
     Grams,
 }
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct CalculationStat {
     pub key: &'static str,
     pub value: f64,
     pub unit: StatUnit,
 }
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct QualityCalculation {
     pub quality: String,
     pub stats: Vec<CalculationStat>,
 }
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct CalculationDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -51,6 +55,7 @@ pub struct CalculationDetail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tile: Option<TileCapabilities>,
 }
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ResearchCalculation {
     pub units: Option<u64>,
@@ -58,6 +63,7 @@ pub struct ResearchCalculation {
     pub ingredients: Vec<ResearchIngredient>,
     pub prerequisites: Vec<String>,
 }
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ResearchIngredient {
     pub name: String,

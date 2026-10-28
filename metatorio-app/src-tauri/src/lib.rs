@@ -24,6 +24,7 @@ use metatorio_shell::host::Host;
 
 pub use metatorio_shell::Options;
 pub use metatorio_shell::mcp;
+mod bindings;
 pub mod launch;
 mod project_files;
 
@@ -69,11 +70,13 @@ fn host_of(state: &HostState<'_>) -> Arc<dyn Host> {
 // ── 命令薄包装（原逻辑在 metatorio-shell::app）──────────────────────
 
 #[tauri::command]
+#[specta::specta]
 async fn load_bundled_dump(host: HostState<'_>) -> Result<ContextInfo, String> {
     metatorio_shell::app::load_bundled_dump(&host_of(&host)).await
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn load_game_context(
     host: HostState<'_>,
     executable_path: String,
@@ -83,28 +86,33 @@ async fn load_game_context(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn load_dump(host: HostState<'_>, path: String) -> Result<ContextInfo, String> {
     metatorio_shell::app::load_dump(&host_of(&host), path).await
 }
 
 #[tauri::command]
+#[specta::specta]
 fn list_contexts(host: HostState<'_>) -> ContextList {
     let host = host_of(&host);
     metatorio_shell::app::list_contexts(host.state())
 }
 
 #[tauri::command]
+#[specta::specta]
 fn icon(host: HostState<'_>, ty: String, name: String, context_id: String) -> Option<Vec<u8>> {
     let host = host_of(&host);
     metatorio_shell::app::icon(host.state(), ty, name, context_id)
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn catalog_index(host: HostState<'_>, context_id: String) -> Result<CatalogIndex, String> {
     metatorio_shell::app::catalog_index(&host_of(&host), context_id).await
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn implicit_sources(
     host: HostState<'_>,
     project: ProjectId,
@@ -114,6 +122,7 @@ async fn implicit_sources(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn suggest(
     host: HostState<'_>,
     context_id: String,
@@ -123,6 +132,7 @@ async fn suggest(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn mechanic_flow(
     host: HostState<'_>,
     project: ProjectId,
@@ -133,6 +143,7 @@ async fn mechanic_flow(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn solar_balance(
     host: HostState<'_>,
     project: ProjectId,
@@ -143,6 +154,7 @@ async fn solar_balance(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn allowed_modules(
     host: HostState<'_>,
     context_id: String,
@@ -161,6 +173,7 @@ async fn allowed_modules(
 }
 
 #[tauri::command]
+#[specta::specta]
 fn prototype_detail(
     host: HostState<'_>,
     context_id: String,
@@ -172,6 +185,7 @@ fn prototype_detail(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn dispatch(
     host: HostState<'_>,
     message: AppMessage,
@@ -180,6 +194,7 @@ async fn dispatch(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn solve_universe(
     host: HostState<'_>,
     project: ProjectId,
@@ -191,6 +206,7 @@ async fn solve_universe(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn universe_preview(
     host: HostState<'_>,
     project: ProjectId,
@@ -200,6 +216,7 @@ async fn universe_preview(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn auto_plan_universe(
     host: HostState<'_>,
     project: ProjectId,
@@ -211,21 +228,25 @@ async fn auto_plan_universe(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn get_document(host: HostState<'_>) -> Result<AppDocument, String> {
     metatorio_shell::app::get_document(&host_of(&host)).await
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn history_state(host: HostState<'_>) -> Result<metatorio_runtime::HistoryStatus, String> {
     metatorio_shell::app::history_state(&host_of(&host)).await
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn accessibility(host: HostState<'_>, project: ProjectId) -> Result<Vec<Accessible>, String> {
     metatorio_shell::app::accessibility(&host_of(&host), project).await
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn milestones_ordered(
     host: HostState<'_>,
     project: ProjectId,
@@ -234,6 +255,7 @@ async fn milestones_ordered(
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn productivity(
     host: HostState<'_>,
     project: ProjectId,
@@ -243,6 +265,7 @@ async fn productivity(
 
 /// 项目记忆的保存路径（未保存过返回 null），供界面显示"保存位置"。
 #[tauri::command]
+#[specta::specta]
 fn project_save_path(host: HostState<'_>, project: ProjectId) -> Option<String> {
     let host = host_of(&host);
     metatorio_shell::app::project_save_path(host.state(), project)
@@ -252,6 +275,7 @@ fn project_save_path(host: HostState<'_>, project: ProjectId) -> Option<String> 
 
 /// OS file dialog for the Factorio executable (game-context loading).
 #[tauri::command]
+#[specta::specta]
 async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         #[cfg(windows)]
@@ -272,6 +296,7 @@ async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> 
 
 /// OS file dialog for a pre-generated `data-raw-dump.json`.
 #[tauri::command]
+#[specta::specta]
 async fn pick_dump_file(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let picked = app
@@ -289,6 +314,7 @@ async fn pick_dump_file(app: AppHandle) -> Result<Option<String>, String> {
 
 /// OS folder dialog for a Factorio mod directory.
 #[tauri::command]
+#[specta::specta]
 async fn pick_mod_dir(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let picked = app.dialog().file().blocking_pick_folder();
@@ -304,6 +330,7 @@ async fn pick_mod_dir(app: AppHandle) -> Result<Option<String>, String> {
 /// `ApplicationAction::OpenProject` 消息（`RuntimeCommand::LoadProject`），
 /// 这样 GUI 与 MCP agent 共用同一条导入路径。
 #[tauri::command]
+#[specta::specta]
 async fn pick_project_file(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let picked = app
@@ -322,6 +349,7 @@ async fn pick_project_file(app: AppHandle) -> Result<Option<String>, String> {
 /// OS 文件对话框：选「另存为」的路径。写盘走
 /// `ApplicationAction::SaveProjectAs` 消息（`RuntimeCommand::Persist`）。
 #[tauri::command]
+#[specta::specta]
 async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let picked = app
@@ -341,6 +369,7 @@ async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String
 
 /// The dialog is shown once; subsequent tiles stream into a native PNG encoder.
 #[tauri::command]
+#[specta::specta]
 async fn begin_network_png(
     app: AppHandle,
     file_name: String,
@@ -366,6 +395,7 @@ async fn begin_network_png(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+#[specta::specta]
 async fn write_network_png_tile(
     app: AppHandle,
     export_id: u64,
@@ -381,6 +411,7 @@ async fn write_network_png_tile(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+#[specta::specta]
 async fn finish_network_png(app: AppHandle, export_id: u64) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<metatorio_shell::network_png::NetworkPngExports>()
@@ -390,6 +421,7 @@ async fn finish_network_png(app: AppHandle, export_id: u64) -> Result<String, St
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+#[specta::specta]
 async fn abort_network_png(app: AppHandle, export_id: u64) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<metatorio_shell::network_png::NetworkPngExports>()
@@ -400,11 +432,13 @@ async fn abort_network_png(app: AppHandle, export_id: u64) -> Result<(), String>
 }
 
 #[tauri::command]
+#[specta::specta]
 fn take_project_open_requests(app: AppHandle) -> Result<Vec<String>, String> {
     app.state::<project_files::OpenRequests>().take()
 }
 
 #[tauri::command]
+#[specta::specta]
 async fn open_project_file(
     host: HostState<'_>,
     path: String,
@@ -452,6 +486,8 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             cwd.join(path)
         }
     }));
+    let ipc = bindings::builder();
+    let setup_ipc = ipc.clone();
     let mut builder = tauri::Builder::default()
         .manage(requests)
         .manage(metatorio_shell::network_png::NetworkPngExports::default());
@@ -483,6 +519,7 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             }
         })
         .setup(move |app| {
+            setup_ipc.mount_events(app);
             let state = Arc::new(AppState::with_options(&builder_options));
             let host: Arc<TauriHost> =
                 Arc::new(TauriHost::new(app.handle().clone(), state.clone()));
@@ -497,41 +534,7 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
             metatorio_shell::app::restore_contexts(&shell_host);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            load_bundled_dump,
-            load_game_context,
-            load_dump,
-            list_contexts,
-            pick_game_executable,
-            pick_dump_file,
-            pick_mod_dir,
-            icon,
-            catalog_index,
-            prototype_detail,
-            suggest,
-            implicit_sources,
-            mechanic_flow,
-            solar_balance,
-            allowed_modules,
-            dispatch,
-            solve_universe,
-            auto_plan_universe,
-            universe_preview,
-            get_document,
-            history_state,
-            accessibility,
-            milestones_ordered,
-            productivity,
-            pick_project_file,
-            pick_project_save_path,
-            begin_network_png,
-            write_network_png_tile,
-            finish_network_png,
-            abort_network_png,
-            project_save_path,
-            open_project_file,
-            take_project_open_requests,
-        ])
+        .invoke_handler(ipc.invoke_handler())
         .run(context)
         .expect("error while running tauri application");
 }

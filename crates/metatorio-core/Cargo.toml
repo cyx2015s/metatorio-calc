@@ -3,7 +3,11 @@ name = "metatorio-core"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+specta = ["dep:specta"]
+
 [dependencies]
+specta = { workspace = true, optional = true }
 ahash = "0.8"
 indexmap = "2"
 metatorio-data = { path = "../metatorio-data" }

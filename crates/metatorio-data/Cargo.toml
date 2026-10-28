@@ -5,7 +5,11 @@ edition = "2024"
 description = "Factorio 原型数据：从游戏 dump 反序列化为组件化原型仓库（忠实层 + 语义层）"
 license = "MIT"
 
+[features]
+specta = ["dep:specta"]
+
 [dependencies]
+specta = { workspace = true, optional = true }
 ahash = { version = "0.8", features = ["serde"] }
 indexmap = { version = "2", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }

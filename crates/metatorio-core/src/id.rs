@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// 品质用**字符串名**（如 `"normal"`/`"uncommon"`），而非 u8 索引——
 /// 跨模组迁移时自定义品质名无法映射到固定索引，故弃用 `(String, u8)` 形态。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct IdWithQuality {
     pub id: String,

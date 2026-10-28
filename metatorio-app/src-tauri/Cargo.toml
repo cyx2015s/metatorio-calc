@@ -27,10 +27,14 @@ soplex = ["metatorio-runtime/soplex", "metatorio-shell/soplex"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+specta = { workspace = true }
+specta-typescript = "=0.0.13"
+tauri-specta = { version = "=2.0.0-rc.26", features = ["derive", "typescript"] }
+serde = { version = "1", features = ["derive"] }
 # 业务逻辑全在 metatorio-shell（GUI 无关）；这里只留 Tauri 外壳真正用到的东西。
-metatorio-core = { path = "../../crates/metatorio-core" }
-metatorio-runtime = { path = "../../crates/metatorio-runtime", default-features = false }
-metatorio-shell = { path = "../../crates/metatorio-shell", default-features = false }
+metatorio-core = { path = "../../crates/metatorio-core", features = ["specta"] }
+metatorio-runtime = { path = "../../crates/metatorio-runtime", default-features = false, features = ["specta"] }
+metatorio-shell = { path = "../../crates/metatorio-shell", default-features = false, features = ["specta"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

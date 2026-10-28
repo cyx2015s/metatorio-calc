@@ -32,6 +32,7 @@ pub struct SolveReport {
     pub optimization: Option<OptimizationReport>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum OptimizationTermination {
@@ -41,6 +42,7 @@ pub enum OptimizationTermination {
     SearchStopped,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PivotCostChange {
     pub pivot: usize,
@@ -50,6 +52,7 @@ pub struct PivotCostChange {
 }
 
 /// Evidence for the model searched, before any planner subset is written back.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OptimizationReport {
     pub optimality_proven: bool,

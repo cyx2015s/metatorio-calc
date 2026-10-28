@@ -15,6 +15,7 @@ use crate::id::IdWithQuality;
 // ── 插件配置（ModuleConfig 体系，纯数据）─────────────────────────
 
 /// 一个机器实例的插件/插件塔配置。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ModuleConfig {
@@ -233,6 +234,7 @@ impl ModuleConfig {
 }
 
 /// 太阳能发电组件：用太阳能板 + 蓄电器按昼夜周期提供稳定平均电力。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SolarMechanic {
@@ -246,6 +248,7 @@ pub struct SolarMechanic {
 ///
 /// **只看热值，与温度无关**：输入是"任意温度的该流体"，用覆盖整个可行温度
 /// 区间的变量表达，具体温度交给辅助的温度转换去挑——所以没有温度字段。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FluidFuelMechanic {
@@ -254,6 +257,7 @@ pub struct FluidFuelMechanic {
 
 /// 流体热量机制：把高于默认温度的流体提取为"流体热量"抽象能量流。
 /// 复刻原版 FluidHeatMechanic（fluid.rs）；温度不高于默认温度时不产热。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FluidHeatMechanic {
@@ -263,6 +267,7 @@ pub struct FluidHeatMechanic {
 }
 
 /// 单个插件塔（插件塔）的配置。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct BeaconConfig {
@@ -300,6 +305,7 @@ impl Default for BeaconConfig {
 /// 替代旧的 `fuel: Option<String>` + `fuel_temperature: Option<i32>` 二字段——
 /// 旧形态把"物品燃料的品质"与"流体燃料的温度"挤在一个 i32 里，靠上下文（仓库
 /// 里是流体还是物品）猜测；现在由枚举显式表达，无需猜。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Fuel {
@@ -317,6 +323,7 @@ pub enum Fuel {
 }
 
 #[non_exhaustive]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum Mechanic {
@@ -340,6 +347,7 @@ pub enum Mechanic {
 }
 
 /// 将带品质的科研包兑换为同名、不带品质的科研价值。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VirtualScienceMechanic {
@@ -352,6 +360,7 @@ pub struct VirtualScienceMechanic {
 /// 机械决定产出多少（`OffshorePumpComponent.pumping_speed`）。原版里
 /// offshore-pump 的 `fluid_box` 没有 filter——抽什么由地格决定——所以这两件事
 /// 必须分开配置。原版 offshore-pump 的 `energy_source` 是 `void`（不耗电）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TileExtractMechanic {
@@ -365,6 +374,7 @@ pub struct TileExtractMechanic {
 ///
 /// 判据是地格的 `TileComponent.destroys_dropped_items`——不是所有地格都能销毁，
 /// 所以地格必须显式指定。任何物品都可以扔进去。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TileDisposeMechanic {
@@ -377,6 +387,7 @@ pub struct TileDisposeMechanic {
 // ── 组件配置 struct（迁移自 metatorio-egui 的 XxxInstance，单例语义）──
 
 /// 配方组件：在机器中按插件配置生产指定配方。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RecipeMechanic {
@@ -389,6 +400,7 @@ pub struct RecipeMechanic {
 }
 
 /// 采矿组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MiningMechanic {
@@ -400,6 +412,7 @@ pub struct MiningMechanic {
 }
 
 /// 变质组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpoilMechanic {
@@ -407,6 +420,7 @@ pub struct SpoilMechanic {
 }
 
 /// 种植组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlantMechanic {
@@ -414,6 +428,7 @@ pub struct PlantMechanic {
 }
 
 /// 物品燃料组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ItemFuelMechanic {
@@ -421,6 +436,7 @@ pub struct ItemFuelMechanic {
 }
 
 /// 物品发射（火箭运力）组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ItemLaunchMechanic {
@@ -430,6 +446,7 @@ pub struct ItemLaunchMechanic {
 }
 
 /// 发电机组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GeneratorMechanic {
@@ -440,6 +457,7 @@ pub struct GeneratorMechanic {
 }
 
 /// 锅炉组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BoilerMechanic {
@@ -458,6 +476,7 @@ pub struct BoilerMechanic {
 }
 
 /// 反应堆组件。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReactorMechanic {
@@ -605,6 +624,7 @@ mod tests {
 
 /// Fusion reactors share reactor identity, fuel and neighbour editing semantics.
 pub type FusionReactorMechanic = ReactorMechanic;
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FusionGeneratorMechanic {

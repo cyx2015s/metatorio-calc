@@ -6,6 +6,7 @@ description = "Metatorio 求解器内核：线性规划求解与组合枚举，�
 license = "MIT"
 
 [features]
+specta = ["dep:specta"]
 default = ["all-lp"]
 all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["dep:good_lp", "good_lp/clarabel"]
@@ -17,6 +18,7 @@ rational-lp = ["dep:metatorio-lp"]
 lp-experiments = ["highs", "rust-lp"]
 
 [dependencies]
+specta = { workspace = true, optional = true }
 ahash = { version = "0.8", features = ["serde"] }
 good_lp = { version = "1.15", default-features = false, optional = true }
 indexmap = { version = "2", features = ["rayon", "serde"] }

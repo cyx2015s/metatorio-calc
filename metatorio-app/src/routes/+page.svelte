@@ -527,8 +527,8 @@
   }
   let solve = $derived(universe ? null : runtime.solve);
   let solveMap = $derived(new Map(
-    universe && runtime.universeSolve?.status.status === "solved" ? runtime.universeSolve.status.mechanics.map(m => [m.mechanic,{amount:m.amount,cost:m.cost}] as const)
-    : solve && "solved" in solve.status ? solve.status.solved.mechanics.map(m => [m.mechanic,{amount:m.amount,cost:m.cost}] as const) : []
+    universe && runtime.universeSolve?.status.status === "solved" ? runtime.universeSolve.status.mechanics.map(m => [m.mechanic,{amount:m.amount ?? NaN,cost:m.cost ?? NaN}] as const)
+    : solve && "solved" in solve.status ? solve.status.solved.mechanics.map(m => [m.mechanic,{amount:m.amount ?? NaN,cost:m.cost ?? NaN}] as const) : []
   ));
   let solved = $derived(universe ? runtime.universeSolve?.status.status === "solved" : solve != null && "solved" in solve.status);
   let notSolved = $derived(solve != null && "not-solved" in solve.status);
@@ -1216,8 +1216,8 @@
                   title={`外部输入成本：获得 1 个「${flowLabel(input.flow)}」的代价（按项目时间刻度）`}
                   aria-label={`外部输入成本：${flowLabel(input.flow)}`}
                   value={isEnergyFlow(input.flow)
-                    ? String(Number((input.penalty * 1e6).toFixed(6)))
-                    : String(Number((input.penalty / currentTimeFactor()).toFixed(6)))}
+                    ? String(Number(((input.penalty ?? NaN) * 1e6).toFixed(6)))
+                    : String(Number(((input.penalty ?? NaN) / currentTimeFactor()).toFixed(6)))}
                   onchange={(event) => {
                     const raw = (event.currentTarget as HTMLInputElement).value;
                     const value = Number(raw);
@@ -1492,7 +1492,7 @@
                   aria-label="采矿产能加成百分比"
                   value={String(100 * (
                     project.settings.mining_productivity !== 0
-                      ? project.settings.mining_productivity
+                      ? (project.settings.mining_productivity ?? NaN)
                       : (runtime.productivityInfo?.auto_mining ?? 0)
                   ))}
                   onchange={(event) => {
@@ -1518,7 +1518,7 @@
                     min="0"
                     title={`配方产能加成：${runtime.localizedName("recipe", entry.recipe)}（%）`}
                     aria-label={`配方产能加成：${runtime.localizedName("recipe", entry.recipe)}`}
-                    value={String(entry.value * 100)}
+                    value={String((entry.value ?? NaN) * 100)}
                     onchange={(event) => {
                       const value = Number((event.currentTarget as HTMLInputElement).value);
                       if (Number.isFinite(value)) {

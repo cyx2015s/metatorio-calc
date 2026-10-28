@@ -17,6 +17,7 @@ const TILE_WIDTH: u32 = 2048;
 const MAX_BAND_HEIGHT: u32 = 512;
 const BAND_BYTES: usize = 32 * 1024 * 1024;
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportInfo {
     pub id: u64,

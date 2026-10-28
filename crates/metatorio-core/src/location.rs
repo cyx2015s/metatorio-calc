@@ -16,6 +16,7 @@ use crate::mechanic::Mechanic;
 /// `Planet(name)` uses `name` both as the planet prototype and as its surface:
 /// current Factorio data does not expose multiple surfaces per planet. `Space`
 /// is the orbital/space-platform environment.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
 )]
@@ -56,6 +57,7 @@ impl std::fmt::Display for Location {
 }
 
 /// A flow coordinate qualified by its location.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct LocatedDualVar {
@@ -79,6 +81,7 @@ impl LocatedDualVar {
 }
 
 /// A normal mechanic placed at one universe location.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalLocatedMechanic {
@@ -99,6 +102,7 @@ impl Default for LocalLocatedMechanic {
 ///
 /// `location` is the planet: the origin of RocketExport, or destination of OrbitalDrop.
 /// Both directions preserve the item identity, including quality.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OrbitalCargoMechanic {
@@ -116,6 +120,7 @@ impl Default for OrbitalCargoMechanic {
 }
 
 /// Local production and both explicit directions of orbital cargo transport.
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum LocatedMechanic {

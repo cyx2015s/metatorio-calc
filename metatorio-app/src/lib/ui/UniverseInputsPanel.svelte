@@ -59,7 +59,7 @@
         <FlowRef flow={input.flow.flow} grow size={24} showBadge={!(typeof input.flow.flow==='object'&&'Fluid' in input.flow.flow)} onClick={()=>choose(input)} />
         <FlowRangeEditor flow={input.flow.flow} onChange={flow=>setFlow(input,flow)} />
         {#if input.penalty===1e12}<span class="muted">已禁用</span>{/if}
-        <input class="num" type="number" min="0" step="any" aria-label={`外部输入成本：${label(input.flow.flow)}`} title={isEnergyFlow(input.flow.flow)?'每 MW 成本':'当前时间单位下的外部输入成本'} value={displayed(input.flow.flow,input.penalty)} onchange={e=>{const value=Number(e.currentTarget.value);if(e.currentTarget.value.trim()&&Number.isFinite(value)&&value>=0)writer()({'set-external-input-penalty':{input:input.id,penalty:internal(input.flow.flow,value)}}).catch(()=>{});}} />
+        <input class="num" type="number" min="0" step="any" aria-label={`外部输入成本：${label(input.flow.flow)}`} title={isEnergyFlow(input.flow.flow)?'每 MW 成本':'当前时间单位下的外部输入成本'} value={displayed(input.flow.flow,input.penalty ?? NaN)} onchange={e=>{const value=Number(e.currentTarget.value);if(e.currentTarget.value.trim()&&Number.isFinite(value)&&value>=0)writer()({'set-external-input-penalty':{input:input.id,penalty:internal(input.flow.flow,value)}}).catch(()=>{});}} />
         <button class="icon-btn danger" aria-label="移除外部输入" title="移除覆盖；若环境提供该资源，将恢复免费输入" onclick={()=>writer()({'remove-external-input':{input:input.id}}).catch(()=>{})}>×</button>
       </div>
     {:else}<div class="muted hint">还没有外部输入</div>{/each}

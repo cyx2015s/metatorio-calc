@@ -19,7 +19,7 @@ export const statLabels: Record<string, string> = {
 };
 export function formatStat(stat: CalculationStat): string {
   const {value, unit} = stat;
-  if (!Number.isFinite(value)) return "—";
+  if (value == null || !Number.isFinite(value)) return "—";
   if (unit === "grams") {
     const scale = Math.abs(value) >= 1e6 ? 1e6 : Math.abs(value) >= 1e3 ? 1e3 : 1;
     return `${compactNumber(value / scale)} ${scale === 1e6 ? "t" : scale === 1e3 ? "kg" : "g"}`;

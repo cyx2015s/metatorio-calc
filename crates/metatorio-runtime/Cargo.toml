@@ -6,6 +6,7 @@ description = "Metatorio application document model and framework-independent me
 license = "MIT"
 
 [features]
+specta = ["dep:specta", "metatorio-core/specta", "metatorio-solver/specta"]
 default = ["all-lp"]
 all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["metatorio-solver/clarabel"]
@@ -15,6 +16,7 @@ rust-lp = ["metatorio-solver/rust-lp"]
 soplex = ["metatorio-solver/soplex"]
 
 [dependencies]
+specta = { workspace = true, optional = true }
 metatorio-data = { path = "../metatorio-data" }
 metatorio-core = { path = "../metatorio-core" }
 metatorio-solver = { path = "../metatorio-solver", default-features = false }

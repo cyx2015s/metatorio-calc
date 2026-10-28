@@ -381,7 +381,7 @@
                     {:else}
                       平均 {compactNumber(solarBalanceInfo.average_power)} W
                       · 储能 {compactNumber(solarBalanceInfo.surplus_per_cycle)} J
-                      · 建议 {solarBalanceInfo.recommended_accumulators.toFixed(2)} 蓄电器/面板
+                      · 建议 {solarBalanceInfo.recommended_accumulators?.toFixed(2) ?? "—"} 蓄电器/面板
                     {/if}
                   </span>
                 {/if}

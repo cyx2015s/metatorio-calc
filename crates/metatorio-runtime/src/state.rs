@@ -2197,6 +2197,7 @@ fn project_ids(project: &ProjectDocument) -> impl Iterator<Item = u64> + '_ {
         }))
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DispatchResult {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2213,6 +2214,7 @@ pub struct DispatchResult {
 }
 
 /// 撤销/重做可用性（随每次 DispatchResult 回传）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct HistoryStatus {
@@ -2227,6 +2229,7 @@ pub struct HistoryStatus {
 }
 
 /// 撤销/重做后前端应聚焦的对象。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct HistoryFocus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2423,6 +2426,7 @@ fn message_label(message: &AppMessage) -> &'static str {
 }
 
 /// 一次 dispatch 新建的对象 id。空表示没有新建任何对象。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CreatedIds {

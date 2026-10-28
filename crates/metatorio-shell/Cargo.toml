@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
+specta = ["dep:specta", "metatorio-runtime/specta", "metatorio-core/specta", "metatorio-data/specta"]
 default = ["all-lp"]
 all-lp = ["clarabel", "highs", "microlp", "rust-lp", "soplex"]
 clarabel = ["metatorio-solver/clarabel", "metatorio-runtime/clarabel"]
@@ -18,6 +19,7 @@ lp-experiments = ["highs", "rust-lp", "metatorio-solver/lp-experiments"]
 # 前端复用，也能被真正的 headless 二进制复用。
 
 [dependencies]
+specta = { workspace = true, optional = true }
 metatorio-core = { path = "../metatorio-core" }
 metatorio-data = { path = "../metatorio-data" }
 metatorio-icons = { path = "../metatorio-icons" }

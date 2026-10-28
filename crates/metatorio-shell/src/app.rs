@@ -458,6 +458,7 @@ pub(crate) struct ContextRegistry {
 ///
 /// 只记「启用了哪些 mod、什么版本」——**不记 mod 目录与可执行文件路径**：那些只在导出那一刻
 /// 有意义（导出时就用它们渲染图标），存进上下文只会在换机器/改 mod 目录后变成误导。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModEntry {
     pub name: String,
@@ -465,6 +466,7 @@ pub struct ModEntry {
     pub version: String,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContextMeta {
     id: String,
@@ -478,6 +480,7 @@ pub(crate) struct ContextMeta {
     mods: Vec<ModEntry>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextInfo {
     pub id: String,
@@ -493,12 +496,14 @@ pub struct ContextInfo {
     pub active: bool,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ContextList {
     pub active: Option<String>,
     pub contexts: Vec<ContextInfo>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct GroupCount {
     pub name: String,
@@ -506,6 +511,7 @@ pub struct GroupCount {
 }
 
 /// 目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct IndexEntry {
     /// Recipe fluid input capability, independent of fluid fuel.
@@ -535,6 +541,7 @@ pub struct IndexEntry {
     pub technology_base_level: u32,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct CatalogIndex {
     pub context_id: String,
@@ -551,6 +558,7 @@ pub struct CatalogIndex {
 /// `matched_by` 说明命中方式，便于调用方区分「就是它」和「只是像」：
 /// `name-exact` / `localized-exact` / `localized-prefix` / `name-prefix` /
 /// `localized-contains` / `name-contains` / `typo`。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ResolvedName {
     pub kind: String,
@@ -564,6 +572,7 @@ pub struct ResolvedName {
 }
 
 /// 配方原料/产物条目（含概率/产能/品质修饰）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FlowAmount {
     /// Expected units per second at speed 1; absent when cycle time is unknown.
@@ -590,6 +599,7 @@ pub struct FlowAmount {
     pub quality_change: Option<i32>,
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PrototypeDetail {
     pub calculation: crate::prototype_calculation::CalculationDetail,
@@ -1825,6 +1835,7 @@ pub(crate) fn typo_distance(left: &[char], right: &[char]) -> usize {
 ///
 /// `partial_matched` 是模糊命中的**总数**（截断前），因此
 /// `partial_matched > partial.len()` 即表示结果被截断。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct ResolvedQuery {
     pub exact: Vec<ResolvedName>,
@@ -2155,6 +2166,7 @@ pub(crate) async fn suggest_for(
 }
 
 /// 建议候选：给定一条流，列出能产出/消耗它的机制（配方/矿点/燃料/发电机）。
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct Suggestion {
     /// "recipe" | "resource" | "item-fuel" | "generator"
@@ -3273,6 +3285,7 @@ pub(crate) async fn factory_snapshot(
     })
 }
 
+#[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 pub struct ProjectFileOpen {
     pub path: String,
@@ -3736,11 +3749,16 @@ fn emit_factory_solve_error(
     revision: u64,
     error: impl Into<metatorio_runtime::Diagnostic>,
 ) {
-    let mut payload = serde_json::to_value(error.into()).expect("diagnostic serialization");
-    payload["project"] = serde_json::json!(project);
-    payload["factory"] = serde_json::json!(factory);
-    payload["revision"] = serde_json::json!(revision);
-    emit(host, "solve-error", payload);
+    emit(
+        host,
+        "solve-error",
+        crate::events::FactorySolveError {
+            project,
+            factory,
+            revision,
+            diagnostic: error.into(),
+        },
+    );
 }
 
 /// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
@@ -3770,7 +3788,12 @@ pub(crate) async fn execute_command(
                     emit(
                         host,
                         "universe-solve-error",
-                        serde_json::json!({"project":project,"universe":universe,"revision":command_revision,"message":error}),
+                        crate::events::UniverseSolveError {
+                            project: *project,
+                            universe: *universe,
+                            revision: command_revision,
+                            message: error.clone(),
+                        },
                     );
                     CommandOutcome::failed(error)
                 }

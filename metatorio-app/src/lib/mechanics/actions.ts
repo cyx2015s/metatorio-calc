@@ -504,7 +504,7 @@ export function createMechanicActions(runtime: typeof Runtime, scope: MechanicSc
     const preview = await runtime.loadUniversePreview(scope.project, scope.factory);
     const entry = preview.mechanics.find(e => e.id === id);
     if (entry?.error) throw new Error(entry.error);
-    return (entry?.flows ?? []).map(f => ({flow: f.flow.flow, location: f.flow.location, amount: f.amount}));
+    return (entry?.flows ?? []).map(f => ({flow: f.flow.flow, location: f.flow.location, amount: f.amount ?? NaN}));
   }
   const setLocation = (id: number, location: import('../runtime/types').Location) => runtime.dispatchUniverse(scope.project, scope.factory, {'set-mechanic-location': {mechanic: id, location}});
   return {commands, pick, pickFuel, addBeacon, loadFlow, setLocation};

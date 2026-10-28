@@ -64,7 +64,7 @@
           <FlowRef flow={target.flow} title="左键更改流 · 右键查看建议" grow showQualifiers={false} showBadge={!(typeof target.flow==='object' && 'Fluid' in target.flow)} size={26} onClick={()=>editTarget(target)} onContextMenu={()=>onSuggest?.(target.flow,target.location)} />
           <FlowRangeEditor flow={target.flow} onChange={flow=>setTarget(target,flow)} />
           <span class="target-value">
-          <input class="num" type="text" inputmode="decimal" aria-label="目标数量" value={isEnergyFlow(target.flow)?networkRate(target.flow,target.amount,"seconds"):target.amount*factor} onchange={e=>{
+          <input class="num" type="text" inputmode="decimal" aria-label="目标数量" value={isEnergyFlow(target.flow)?networkRate(target.flow,target.amount ?? NaN,"seconds"):(target.amount ?? NaN)*factor} onchange={e=>{
             const raw=e.currentTarget.value.replace(/\s|W$/g,""); const parsed=Number.isFinite(Number(raw))?Number(raw):parseCompactNumber(raw); const amount=parsed == null ? NaN : parsed/(isEnergyFlow(target.flow)?1:factor); if(Number.isFinite(amount)) writer()({target:{'set-amount':{target:target.id,amount}}},{'set-target-amount':{target:target.id,amount}});
           }} />
           <button class="icon-btn danger" title="移除目标" onclick={()=>writer()({target:{remove:{target:target.id}}},{'remove-target':{target:target.id}})}>×</button>

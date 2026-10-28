@@ -17,6 +17,6 @@ export function optimizationLabel(report: OptimizationReport): string {
 export function recentPivots(report: OptimizationReport): PivotCostChange[] {
   return report.recent_pivot_cost_changes.filter(change =>
     Number.isFinite(change.cost_before) && Number.isFinite(change.cost_after) &&
-    Number.isFinite(change.decrease) && change.decrease >= 0,
+    change.decrease != null && Number.isFinite(change.decrease) && change.decrease >= 0,
   );
 }

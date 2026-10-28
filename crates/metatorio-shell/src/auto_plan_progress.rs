@@ -34,11 +34,15 @@ fn send(
 ) {
     host.emit(
         "auto-plan-progress",
-        serde_json::json!({
-            "project": project, "factory": factory, "universe":universe, "run_id": run_id,
-            "running": state.active, "stage": state.progress.stage,
-            "variables": state.progress.variables, "constraints": state.progress.constraints,
-        }),
+        serde_json::to_value(crate::events::AutoPlanProgressEvent {
+            project,
+            factory,
+            universe,
+            run_id,
+            running: state.active,
+            progress: state.progress,
+        })
+        .expect("progress event serialization"),
     );
 }
 

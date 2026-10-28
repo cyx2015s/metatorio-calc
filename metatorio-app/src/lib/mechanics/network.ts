@@ -56,7 +56,7 @@ export interface NetworkSource {
   targets: DualVar[];
   locatedTargets?: LocatedDualVar[];
   locatedImplicitInputs?: LocatedDualVar[];
-  locatedExternalInputs?: {id:number;flow:LocatedDualVar;penalty:number}[];
+  locatedExternalInputs?: {id:number;flow:LocatedDualVar;penalty:number|null}[];
   externalInputs: ExternalInput[];
   implicitInputs: DualVar[];
   localize: Localize;
@@ -112,8 +112,8 @@ export function networkCompatible(from: DualVar, to: DualVar): boolean {
   }
   for (const kind of ['FluidHeat', 'FluidFuel'] as const) {
     if (kind in from && kind in to) {
-      const a = (from as Record<string, {filter: string}>)[kind].filter;
-      const b = (to as Record<string, {filter: string}>)[kind].filter;
+      const a = from[kind]?.filter;
+      const b = to[kind]?.filter;
       return !!a && !b;
     }
   }
