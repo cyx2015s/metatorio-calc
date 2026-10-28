@@ -75,17 +75,10 @@ pub struct UniverseSolveResult {
 }
 
 #[derive(Debug, Clone)]
-enum VarOrigin {
-    Local {
-        mechanic: MechanicId,
-        location: Location,
-        cost: f64,
-    },
-    Transport {
-        mechanic: MechanicId,
-        location: Location,
-        cost: f64,
-    },
+struct VarOrigin {
+    mechanic: MechanicId,
+    location: Location,
+    cost: f64,
 }
 
 pub(crate) fn environment_for(location: &Location) -> (Option<&str>, Option<&str>) {
@@ -185,10 +178,7 @@ fn add_located_conversion_flows(
             }
             if !local.is_empty() {
                 local_flows.insert(
-                    crate::solve::ExpandedVarId {
-                        mechanic: MechanicId(synthetic),
-                        variant: 0,
-                    },
+                    crate::solve::ExpandedVarId::Mechanic(MechanicId(synthetic)),
                     (local, *cost),
                 );
                 synthetic += 1;
@@ -209,7 +199,7 @@ fn add_located_conversion_flows(
         let aux: Vec<Flow> = local_flows
             .iter()
             .skip(before)
-            .filter(|(id, _)| id.mechanic == MechanicId(u64::MAX))
+            .filter(|(id, _)| matches!(id, crate::solve::ExpandedVarId::Conversion(_)))
             .map(|(_, (flow, _))| flow.clone())
             .collect();
         for flow in aux {
@@ -451,18 +441,15 @@ pub fn solve_universe_with_progress(
             let id = UniverseVarId(next_id);
             next_id += 1;
             flows.insert(id, (flow, cost));
-            let origin = match &entry.mechanic {
-                LocatedMechanic::Local(local) => VarOrigin::Local {
-                    mechanic: entry.id,
-                    location: local.location.clone(),
-                    cost,
+            let origin = VarOrigin {
+                mechanic: entry.id,
+                location: match &entry.mechanic {
+                    LocatedMechanic::Local(local) => local.location.clone(),
+                    LocatedMechanic::RocketExport(cargo) | LocatedMechanic::OrbitalDrop(cargo) => {
+                        cargo.location.clone()
+                    }
                 },
-                LocatedMechanic::RocketExport(transfer)
-                | LocatedMechanic::OrbitalDrop(transfer) => VarOrigin::Transport {
-                    mechanic: entry.id,
-                    location: transfer.location.clone(),
-                    cost,
-                },
+                cost,
             };
             origins.insert(id, origin);
         }
@@ -587,30 +574,11 @@ pub fn solve_universe_with_progress(
             *flow_totals.entry((*flow).clone()).or_insert(0.0) += *coefficient * value;
         }
         if let Some(origin) = origins.get(id) {
-            match origin {
-                VarOrigin::Local {
-                    mechanic,
-                    location,
-                    cost,
-                } => {
-                    let entry = mechanic_amounts
-                        .entry(*mechanic)
-                        .or_insert_with(|| (location.clone(), 0.0, 0.0, *cost));
-                    entry.1 += value;
-                    entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
-                }
-                VarOrigin::Transport {
-                    mechanic,
-                    location,
-                    cost,
-                } => {
-                    let entry = mechanic_amounts
-                        .entry(*mechanic)
-                        .or_insert_with(|| (location.clone(), 0.0, 0.0, *cost));
-                    entry.1 += value;
-                    entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
-                }
-            }
+            let entry = mechanic_amounts
+                .entry(origin.mechanic)
+                .or_insert_with(|| (origin.location.clone(), 0.0, 0.0, origin.cost));
+            entry.1 += value;
+            entry.2 += value / prim_scale.get(id).copied().unwrap_or(1.0).max(1e-12);
         }
     }
 

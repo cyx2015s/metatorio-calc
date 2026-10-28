@@ -506,7 +506,7 @@ pub struct GroupCount {
 }
 
 /// 目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct IndexEntry {
     /// Recipe fluid input capability, independent of fluid fuel.
     pub supports_fluid_input: bool,
@@ -2454,20 +2454,18 @@ pub(crate) fn catalog_index_from_store(
                         0
                     };
                     out.push(IndexEntry {
-                        supports_fluid_input: false,
-                        tile: None,
                         kind: kind.to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, kind, name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: icon_type.to_string(),
-                        module_slots: None,
                         categories,
                         fuel_categories,
                         fuel_value_j,
                         technology_max_level,
                         technology_base_level,
+                        ..Default::default()
                     });
                 }
             }
@@ -2528,7 +2526,6 @@ pub(crate) fn catalog_index_from_store(
                         supports_fluid_input: record
                             .component::<CraftingMachineComponent>()
                             .is_some_and(CraftingMachineComponent::supports_fluid_input),
-                        tile: None,
                         kind: kind.to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, kind, name),
@@ -2537,10 +2534,7 @@ pub(crate) fn catalog_index_from_store(
                         icon_type: "entity".to_string(),
                         module_slots: slots,
                         categories,
-                        fuel_categories: Vec::new(),
-                        fuel_value_j: None,
-                        technology_max_level: None,
-                        technology_base_level: 0,
+                        ..Default::default()
                     });
                 }
             }
@@ -2551,20 +2545,12 @@ pub(crate) fn catalog_index_from_store(
     // 能力随索引一起下发；前端按用途过滤，不为每块地格发送详情请求。
     for record in store.group(PrototypeGroup::Tile) {
         out.push(IndexEntry {
-            supports_fluid_input: false,
             tile: metatorio_core::planet::tile_capabilities(store, &record.name),
             kind: "tile".to_string(),
             name: record.name.clone(),
             localized_name: localized_name(locale, "tile", &record.name),
-            group: String::new(),
-            subgroup: String::new(),
             icon_type: "tile".to_string(),
-            module_slots: None,
-            categories: Vec::new(),
-            fuel_categories: Vec::new(),
-            fuel_value_j: None,
-            technology_max_level: None,
-            technology_base_level: 0,
+            ..Default::default()
         });
     }
 
@@ -2580,24 +2566,18 @@ pub(crate) fn catalog_index_from_store(
                         continue;
                     };
                     out.push(IndexEntry {
-                        supports_fluid_input: false,
-                        tile: None,
                         kind: "module".to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, "module", name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: "item".to_string(),
-                        module_slots: None,
                         categories: if module.category.is_empty() {
                             Vec::new()
                         } else {
                             vec![module.category.clone()]
                         },
-                        fuel_categories: Vec::new(),
-                        fuel_value_j: None,
-                        technology_max_level: None,
-                        technology_base_level: 0,
+                        ..Default::default()
                     });
                 }
             }
@@ -2620,20 +2600,14 @@ pub(crate) fn catalog_index_from_store(
                         .map(|resource| vec![effective_resource_category(resource)])
                         .unwrap_or_default();
                     out.push(IndexEntry {
-                        supports_fluid_input: false,
-                        tile: None,
                         kind: "resource".to_string(),
                         name: name.clone(),
                         localized_name: localized_name(locale, "resource", name),
                         group: big.clone(),
                         subgroup: sub.clone(),
                         icon_type: "entity".to_string(),
-                        module_slots: None,
                         categories,
-                        fuel_categories: Vec::new(),
-                        fuel_value_j: None,
-                        technology_max_level: None,
-                        technology_base_level: 0,
+                        ..Default::default()
                     });
                 }
             }
@@ -2643,20 +2617,12 @@ pub(crate) fn catalog_index_from_store(
     // quality
     for name in store.quality_order() {
         out.push(IndexEntry {
-            supports_fluid_input: false,
-            tile: None,
             kind: "quality".to_string(),
             name: name.clone(),
             localized_name: localized_name(locale, "quality", name),
             group: "quality".to_string(),
-            subgroup: String::new(),
             icon_type: "quality".to_string(),
-            module_slots: None,
-            categories: Vec::new(),
-            fuel_categories: Vec::new(),
-            fuel_value_j: None,
-            technology_max_level: None,
-            technology_base_level: 0,
+            ..Default::default()
         });
     }
 
@@ -2784,9 +2750,8 @@ pub(crate) fn clamp_modules_scoped(
     };
     ensure_context_loaded(state, runtime, &context_id)?;
     let store = runtime
-        .context_store_by_id(&context_id)
-        .ok_or_else(|| "上下文未载入".to_string())?
-        .clone();
+        .context_arc_by_id(&context_id)
+        .ok_or_else(|| "上下文未载入".to_string())?;
 
     let mechanism = if let Some(universe) = universe {
         let e = runtime
@@ -3119,9 +3084,8 @@ pub(crate) fn ensure_machine_compat_scoped(
     };
     ensure_context_loaded(state, runtime, &context_id)?;
     let store = runtime
-        .context_store_by_id(&context_id)
-        .ok_or_else(|| "上下文未载入".to_string())?
-        .clone();
+        .context_arc_by_id(&context_id)
+        .ok_or_else(|| "上下文未载入".to_string())?;
     let prefs = runtime
         .state
         .project(project)
@@ -4499,7 +4463,7 @@ pub async fn implicit_sources(
             implicit.shift_remove(&input.flow);
         }
         let mut keys: Vec<DualVar> = implicit.keys().cloned().collect();
-        keys.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        keys.sort_by_cached_key(|flow| format!("{flow:?}"));
         keys
     })
     .await
@@ -5884,20 +5848,10 @@ mod tests {
     #[test]
     fn index_entry_filter_matches_kind_and_name() {
         let entry = |kind: &str, name: &str, localized: &str| IndexEntry {
-            supports_fluid_input: false,
-            tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
             localized_name: localized.to_string(),
-            group: String::new(),
-            subgroup: String::new(),
-            icon_type: String::new(),
-            module_slots: None,
-            categories: Vec::new(),
-            fuel_categories: Vec::new(),
-            fuel_value_j: None,
-            technology_max_level: None,
-            technology_base_level: 0,
+            ..Default::default()
         };
         let entries = vec![
             entry("item", "iron-plate", "铁板"),
@@ -5944,20 +5898,10 @@ mod tests {
     /// 测试用目录条目（只填与匹配相关的字段）。
     fn index_entry(kind: &str, name: &str, localized: &str) -> IndexEntry {
         IndexEntry {
-            supports_fluid_input: false,
-            tile: None,
             kind: kind.to_string(),
             name: name.to_string(),
             localized_name: localized.to_string(),
-            group: String::new(),
-            subgroup: String::new(),
-            icon_type: String::new(),
-            module_slots: None,
-            categories: Vec::new(),
-            fuel_categories: Vec::new(),
-            fuel_value_j: None,
-            technology_max_level: None,
-            technology_base_level: 0,
+            ..Default::default()
         }
     }
 

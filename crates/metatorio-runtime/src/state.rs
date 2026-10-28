@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeSet, HashMap, HashSet},
     fmt,
 };
 
@@ -174,33 +174,16 @@ impl RuntimeState {
             outcome.commands.push(RuntimeCommand::EnsureQualityLimit {
                 project: project.id,
             });
-            match previous {
-                // 新增项目或项目级设置变化：重解全部工厂。
-                None => {
-                    for factory in &project.factories {
-                        outcome.commands.push(RuntimeCommand::Recompute {
-                            project: project.id,
-                            factory: factory.id,
-                        });
-                    }
-                }
-                Some(previous) if previous.settings != project.settings => {
-                    for factory in &project.factories {
-                        outcome.commands.push(RuntimeCommand::Recompute {
-                            project: project.id,
-                            factory: factory.id,
-                        });
-                    }
-                }
-                Some(previous) => {
-                    for factory in &project.factories {
-                        if previous.factories.iter().find(|f| f.id == factory.id) != Some(factory) {
-                            outcome.commands.push(RuntimeCommand::Recompute {
-                                project: project.id,
-                                factory: factory.id,
-                            });
-                        }
-                    }
+            for factory in &project.factories {
+                // New projects or changed project settings invalidate every factory.
+                if previous.is_none_or(|previous| {
+                    previous.settings != project.settings
+                        || previous.factories.iter().find(|f| f.id == factory.id) != Some(factory)
+                }) {
+                    outcome.commands.push(RuntimeCommand::Recompute {
+                        project: project.id,
+                        factory: factory.id,
+                    });
                 }
             }
         }
@@ -1086,23 +1069,6 @@ impl RuntimeState {
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::SetMechanicLocation { mechanic, location } => {
-                if matches!(location, Location::Space) {
-                    if let Some(entry) = self
-                        .universe_mut(project_id, universe_id)?
-                        .mechanics
-                        .iter_mut()
-                        .find(|entry| entry.id == mechanic)
-                    {
-                        if matches!(
-                            entry.mechanic,
-                            LocatedMechanic::RocketExport(_) | LocatedMechanic::OrbitalDrop(_)
-                        ) {
-                            return Err(RuntimeError::InvalidValue(
-                                "轨道货运的地点必须是星球".to_string(),
-                            ));
-                        }
-                    }
-                }
                 let universe = self.universe_mut(project_id, universe_id)?;
                 let entry = universe
                     .mechanics
@@ -1113,6 +1079,16 @@ impl RuntimeState {
                         universe: universe_id,
                         mechanic,
                     })?;
+                if matches!(location, Location::Space)
+                    && matches!(
+                        entry.mechanic,
+                        LocatedMechanic::RocketExport(_) | LocatedMechanic::OrbitalDrop(_)
+                    )
+                {
+                    return Err(RuntimeError::InvalidValue(
+                        "轨道货运的地点必须是星球".to_string(),
+                    ));
+                }
                 let changed = match &mut entry.mechanic {
                     LocatedMechanic::Local(local) => replace(&mut local.location, location),
                     LocatedMechanic::RocketExport(transfer)
@@ -2086,47 +2062,18 @@ impl RuntimeState {
     pub fn import_projects(&mut self, imported: &AppDocument) {
         // Reserve ids above both documents. Otherwise a freshly allocated id can
         // collide with another imported object that has not been pushed yet.
-        let mut imported_max = 0u64;
-        let mut take = |id: u64| imported_max = imported_max.max(id);
-        for project in &imported.projects {
-            take(project.id.0);
-            for factory in &project.factories {
-                take(factory.id.0);
-                for target in &factory.targets {
-                    take(target.id.0);
-                }
-                for expression in &factory.target_expressions {
-                    take(expression.id.0);
-                    for term in &expression.terms {
-                        take(term.id.0);
-                    }
-                }
-                for input in &factory.external_inputs {
-                    take(input.id.0);
-                }
-                for mechanic in &factory.mechanics {
-                    take(mechanic.id.0);
-                }
-            }
-            for universe in &project.universes {
-                take(universe.id.0);
-                for input in &universe.external_inputs {
-                    take(input.id.0);
-                }
-                for mechanic in &universe.mechanics {
-                    take(mechanic.id.0);
-                }
-                for target in &universe.targets {
-                    take(target.id.0);
-                }
-                for expression in &universe.target_expressions {
-                    take(expression.id.0);
-                    for term in &expression.terms {
-                        take(term.id.0);
-                    }
-                }
-            }
-        }
+        let imported_max = imported
+            .projects
+            .iter()
+            .flat_map(project_ids)
+            .max()
+            .unwrap_or(0);
+        let mut occupied: HashSet<u64> = self
+            .document
+            .projects
+            .iter()
+            .flat_map(project_ids)
+            .collect();
         self.next_id = self.next_id.max(imported_max.saturating_add(1));
         for project in &imported.projects {
             let mut project = project.clone();
@@ -2137,7 +2084,6 @@ impl RuntimeState {
             if remap_all {
                 project.id = self.allocate_id();
             }
-            let mut factory_ids: HashMap<FactoryId, FactoryId> = HashMap::new();
             for factory in &mut project.factories {
                 if remap_all
                     || self
@@ -2146,68 +2092,67 @@ impl RuntimeState {
                         .iter()
                         .any(|p| p.factories.iter().any(|f| f.id == factory.id))
                 {
-                    let new_id = self.allocate_id();
-                    factory_ids.insert(factory.id, new_id);
-                    factory.id = new_id;
+                    factory.id = self.allocate_id();
                 }
             }
             for factory in &mut project.factories {
                 for target in &mut factory.targets {
-                    if remap_all || self.project_contains_id(target.id.0) {
+                    if remap_all || occupied.contains(&target.id.0) {
                         target.id = self.allocate_id();
                     }
                 }
                 for expression in &mut factory.target_expressions {
-                    if remap_all || self.project_contains_id(expression.id.0) {
+                    if remap_all || occupied.contains(&expression.id.0) {
                         expression.id = self.allocate_id();
                     }
                     for term in &mut expression.terms {
-                        if remap_all || self.project_contains_id(term.id.0) {
+                        if remap_all || occupied.contains(&term.id.0) {
                             term.id = self.allocate_id();
                         }
                     }
                 }
                 for input in &mut factory.external_inputs {
-                    if remap_all || self.project_contains_id(input.id.0) {
+                    if remap_all || occupied.contains(&input.id.0) {
                         input.id = self.allocate_id();
                     }
                 }
                 for mechanic in &mut factory.mechanics {
-                    if remap_all || self.project_contains_id(mechanic.id.0) {
+                    if remap_all || occupied.contains(&mechanic.id.0) {
                         mechanic.id = self.allocate_id();
                     }
                 }
             }
             for universe in &mut project.universes {
-                if remap_all || self.project_contains_id(universe.id.0) {
+                if remap_all || occupied.contains(&universe.id.0) {
                     universe.id = self.allocate_id();
                 }
                 for input in &mut universe.external_inputs {
-                    if remap_all || self.project_contains_id(input.id.0) {
+                    if remap_all || occupied.contains(&input.id.0) {
                         input.id = self.allocate_id();
                     }
                 }
                 for expression in &mut universe.target_expressions {
-                    if remap_all || self.project_contains_id(expression.id.0) {
+                    if remap_all || occupied.contains(&expression.id.0) {
                         expression.id = self.allocate_id();
                     }
                     for term in &mut expression.terms {
-                        if remap_all || self.project_contains_id(term.id.0) {
+                        if remap_all || occupied.contains(&term.id.0) {
                             term.id = self.allocate_id();
                         }
                     }
                 }
                 for mechanic in &mut universe.mechanics {
-                    if remap_all || self.project_contains_id(mechanic.id.0) {
+                    if remap_all || occupied.contains(&mechanic.id.0) {
                         mechanic.id = self.allocate_id();
                     }
                 }
                 for target in &mut universe.targets {
-                    if remap_all || self.project_contains_id(target.id.0) {
+                    if remap_all || occupied.contains(&target.id.0) {
                         target.id = self.allocate_id();
                     }
                 }
             }
+            occupied.extend(project_ids(&project));
             self.document.projects.push(project);
         }
         self.refresh_next_id();
@@ -2215,74 +2160,41 @@ impl RuntimeState {
         self.history.record(&self.document, "导入项目");
     }
 
-    /// 当前文档任意项目是否已使用该 id（跨项目全局检查）。
-    fn project_contains_id(&self, id: u64) -> bool {
-        self.document.projects.iter().any(|p| {
-            p.id.0 == id
-                || p.factories.iter().any(|f| {
-                    f.id.0 == id
-                        || f.targets.iter().any(|t| t.id.0 == id)
-                        || f.target_expressions
-                            .iter()
-                            .any(|e| e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id))
-                        || f.external_inputs.iter().any(|i| i.id.0 == id)
-                        || f.mechanics.iter().any(|m| m.id.0 == id)
-                })
-                || p.universes.iter().any(|u| {
-                    u.id.0 == id
-                        || u.external_inputs.iter().any(|i| i.id.0 == id)
-                        || u.mechanics.iter().any(|m| m.id.0 == id)
-                        || u.targets.iter().any(|t| t.id.0 == id)
-                        || u.target_expressions
-                            .iter()
-                            .any(|e| e.id.0 == id || e.terms.iter().any(|t| t.id.0 == id))
-                })
-        })
-    }
-
     fn refresh_next_id(&mut self) {
-        let mut max_id = 0;
-        for project in &self.document.projects {
-            max_id = max_id.max(project.id.0);
-            for factory in &project.factories {
-                max_id = max_id.max(factory.id.0);
-                for target in &factory.targets {
-                    max_id = max_id.max(target.id.0);
-                }
-                for expression in &factory.target_expressions {
-                    max_id = max_id.max(expression.id.0);
-                    for term in &expression.terms {
-                        max_id = max_id.max(term.id.0);
-                    }
-                }
-                for input in &factory.external_inputs {
-                    max_id = max_id.max(input.id.0);
-                }
-                for mechanic in &factory.mechanics {
-                    max_id = max_id.max(mechanic.id.0);
-                }
-            }
-            for universe in &project.universes {
-                max_id = max_id.max(universe.id.0);
-                for input in &universe.external_inputs {
-                    max_id = max_id.max(input.id.0);
-                }
-                for mechanic in &universe.mechanics {
-                    max_id = max_id.max(mechanic.id.0);
-                }
-                for target in &universe.targets {
-                    max_id = max_id.max(target.id.0);
-                }
-                for expression in &universe.target_expressions {
-                    max_id = max_id.max(expression.id.0);
-                    for term in &expression.terms {
-                        max_id = max_id.max(term.id.0);
-                    }
-                }
-            }
-        }
+        let max_id = self
+            .document
+            .projects
+            .iter()
+            .flat_map(project_ids)
+            .max()
+            .unwrap_or(0);
         self.next_id = max_id.saturating_add(1).max(1);
     }
+}
+
+/// One inventory for import collision checks and allocator high-water marks.
+fn project_ids(project: &ProjectDocument) -> impl Iterator<Item = u64> + '_ {
+    std::iter::once(project.id.0)
+        .chain(project.factories.iter().flat_map(|factory| {
+            std::iter::once(factory.id.0)
+                .chain(factory.targets.iter().map(|entry| entry.id.0))
+                .chain(factory.external_inputs.iter().map(|entry| entry.id.0))
+                .chain(factory.mechanics.iter().map(|entry| entry.id.0))
+                .chain(factory.target_expressions.iter().flat_map(|expression| {
+                    std::iter::once(expression.id.0)
+                        .chain(expression.terms.iter().map(|term| term.id.0))
+                }))
+        }))
+        .chain(project.universes.iter().flat_map(|universe| {
+            std::iter::once(universe.id.0)
+                .chain(universe.targets.iter().map(|entry| entry.id.0))
+                .chain(universe.external_inputs.iter().map(|entry| entry.id.0))
+                .chain(universe.mechanics.iter().map(|entry| entry.id.0))
+                .chain(universe.target_expressions.iter().flat_map(|expression| {
+                    std::iter::once(expression.id.0)
+                        .chain(expression.terms.iter().map(|term| term.id.0))
+                }))
+        }))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -2781,75 +2693,79 @@ fn apply_mechanic_action(
     mechanic: &mut Mechanic,
     action: MechanicAction,
 ) -> Result<bool, RuntimeError> {
-    // Each MechanicAction variant names its mechanic kind explicitly; the
-    // dispatch validates that the target mechanic matches before touching it.
-    match action {
-        MechanicAction::Recipe(action) => {
-            let Mechanic::Recipe(mechanic) = mechanic else {
-                return Err(kind_mismatch("recipe"));
-            };
-            apply_recipe_action(mechanic, action)
-        }
-        MechanicAction::VirtualScience(action) => {
-            let Mechanic::VirtualScience(mechanic) = mechanic else {
-                return Err(kind_mismatch("virtual-science"));
-            };
+    match (action, mechanic) {
+        (MechanicAction::Recipe(action), Mechanic::Recipe(mechanic)) => match action {
+            RecipeMechanicAction::SetRecipe { recipe } => Ok(replace(&mut mechanic.recipe, recipe)),
+            RecipeMechanicAction::SetMachine { machine } => {
+                Ok(replace(&mut mechanic.machine, machine))
+            }
+            RecipeMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+            RecipeMechanicAction::SetFuelTemperature { temperature } => {
+                Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
+            }
+            RecipeMechanicAction::Module(action) => {
+                apply_module_action(&mut mechanic.module_config, action)
+            }
+        },
+        (MechanicAction::VirtualScience(action), Mechanic::VirtualScience(mechanic)) => {
             match action {
                 ItemFuelMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
             }
         }
-        MechanicAction::Mining(action) => {
-            let Mechanic::Mining(mechanic) = mechanic else {
-                return Err(kind_mismatch("mining"));
-            };
-            apply_mining_action(mechanic, action)
-        }
-        MechanicAction::Spoil(action) => {
-            let Mechanic::Spoil(mechanic) = mechanic else {
-                return Err(kind_mismatch("spoil"));
-            };
-            apply_spoil_action(mechanic, action)
-        }
-        MechanicAction::Plant(action) => {
-            let Mechanic::Plant(mechanic) = mechanic else {
-                return Err(kind_mismatch("plant"));
-            };
-            apply_plant_action(mechanic, action)
-        }
-        MechanicAction::ItemFuel(action) => {
-            let Mechanic::ItemFuel(mechanic) = mechanic else {
-                return Err(kind_mismatch("item-fuel"));
-            };
-            apply_item_fuel_action(mechanic, action)
-        }
-        MechanicAction::ItemLaunch(action) => {
-            let Mechanic::ItemLaunch(mechanic) = mechanic else {
-                return Err(kind_mismatch("item-launch"));
-            };
-            apply_item_launch_action(mechanic, action)
-        }
-        MechanicAction::Generator(action) => {
-            let Mechanic::Generator(mechanic) = mechanic else {
-                return Err(kind_mismatch("generator"));
-            };
-            apply_generator_action(mechanic, action)
-        }
-        MechanicAction::Boiler(action) => {
-            let Mechanic::Boiler(mechanic) = mechanic else {
-                return Err(kind_mismatch("boiler"));
-            };
-            apply_boiler_action(mechanic, action)
-        }
-        MechanicAction::FusionReactor(action) => {
-            let Mechanic::FusionReactor(mechanic) = mechanic else {
-                return Err(kind_mismatch("fusion-reactor"));
-            };
-            apply_reactor_action(mechanic, action)
-        }
-        MechanicAction::FusionGenerator(action) => {
-            let Mechanic::FusionGenerator(mechanic) = mechanic else {
-                return Err(kind_mismatch("fusion-generator"));
-            };
+        (MechanicAction::Mining(action), Mechanic::Mining(mechanic)) => match action {
+            MiningMechanicAction::SetResource { resource } => {
+                Ok(replace(&mut mechanic.resource, resource))
+            }
+            MiningMechanicAction::SetMachine { machine } => {
+                Ok(replace(&mut mechanic.machine, machine))
+            }
+            MiningMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+            MiningMechanicAction::SetFuelTemperature { temperature } => {
+                Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
+            }
+            MiningMechanicAction::Module(action) => {
+                apply_module_action(&mut mechanic.module_config, action)
+            }
+        },
+        (MechanicAction::Spoil(action), Mechanic::Spoil(mechanic)) => match action {
+            SpoilMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+        },
+        (MechanicAction::Plant(action), Mechanic::Plant(mechanic)) => match action {
+            PlantMechanicAction::SetSeed { seed } => Ok(replace(&mut mechanic.seed, seed)),
+        },
+        (MechanicAction::ItemFuel(action), Mechanic::ItemFuel(mechanic)) => match action {
+            ItemFuelMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+        },
+        (MechanicAction::ItemLaunch(action), Mechanic::ItemLaunch(mechanic)) => match action {
+            ItemLaunchMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+            ItemLaunchMechanicAction::SetWeightMode { weight_mode } => {
+                Ok(replace(&mut mechanic.weight_mode, weight_mode))
+            }
+        },
+        (MechanicAction::Generator(action), Mechanic::Generator(mechanic)) => match action {
+            GeneratorMechanicAction::SetGenerator { generator } => {
+                Ok(replace(&mut mechanic.generator, generator))
+            }
+            GeneratorMechanicAction::SetFluid { fluid } => Ok(replace(&mut mechanic.fluid, fluid)),
+            GeneratorMechanicAction::SetTemperature { temperature } => {
+                Ok(replace(&mut mechanic.temperature, temperature))
+            }
+        },
+        (MechanicAction::Boiler(action), Mechanic::Boiler(mechanic)) => match action {
+            BoilerMechanicAction::SetBoiler { boiler } => Ok(replace(&mut mechanic.boiler, boiler)),
+            BoilerMechanicAction::SetFluid { fluid } => Ok(replace(&mut mechanic.fluid, fluid)),
+            BoilerMechanicAction::SetTemperature { temperature } => {
+                Ok(replace(&mut mechanic.temperature, temperature))
+            }
+            BoilerMechanicAction::SetOutputTemperature { temperature } => {
+                Ok(replace(&mut mechanic.output_temperature, temperature))
+            }
+            BoilerMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+            BoilerMechanicAction::SetFuelTemperature { temperature } => {
+                Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
+            }
+        },
+        (MechanicAction::FusionGenerator(action), Mechanic::FusionGenerator(mechanic)) => {
             match action {
                 crate::message::FusionGeneratorMechanicAction::SetGenerator { generator } => {
                     Ok(replace(&mut mechanic.generator, generator))
@@ -2859,257 +2775,74 @@ fn apply_mechanic_action(
                 }
             }
         }
-        MechanicAction::Reactor(action) => {
-            let Mechanic::Reactor(mechanic) = mechanic else {
-                return Err(kind_mismatch("reactor"));
-            };
-            apply_reactor_action(mechanic, action)
-        }
-        MechanicAction::Solar(action) => {
-            let Mechanic::Solar(mechanic) = mechanic else {
-                return Err(kind_mismatch("solar"));
-            };
-            apply_solar_action(mechanic, action)
-        }
-        MechanicAction::FluidFuel(action) => {
-            let Mechanic::FluidFuel(mechanic) = mechanic else {
-                return Err(kind_mismatch("fluid-fuel"));
-            };
-            apply_fluid_fuel_action(mechanic, action)
-        }
-        MechanicAction::FluidHeat(action) => {
-            let Mechanic::FluidHeat(mechanic) = mechanic else {
-                return Err(kind_mismatch("fluid-heat"));
-            };
-            apply_fluid_heat_action(mechanic, action)
-        }
-        MechanicAction::TileExtract(action) => {
-            let Mechanic::TileExtract(mechanic) = mechanic else {
-                return Err(kind_mismatch("tile-extract"));
-            };
-            apply_tile_extract_action(mechanic, action)
-        }
-        MechanicAction::TileDispose(action) => {
-            let Mechanic::TileDispose(mechanic) = mechanic else {
-                return Err(kind_mismatch("tile-dispose"));
-            };
-            apply_tile_dispose_action(mechanic, action)
-        }
-    }
-}
-
-fn apply_tile_extract_action(
-    mechanic: &mut metatorio_core::TileExtractMechanic,
-    action: TileExtractMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        TileExtractMechanicAction::SetTile { tile } => Ok(replace(&mut mechanic.tile, tile)),
-        TileExtractMechanicAction::SetMachine { machine } => {
-            Ok(replace(&mut mechanic.machine, machine))
-        }
-    }
-}
-
-fn apply_tile_dispose_action(
-    mechanic: &mut metatorio_core::TileDisposeMechanic,
-    action: TileDisposeMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        TileDisposeMechanicAction::SetTile { tile } => Ok(replace(&mut mechanic.tile, tile)),
-        TileDisposeMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
-    }
-}
-
-fn kind_mismatch(kind: &'static str) -> RuntimeError {
-    let message: &'static str = match kind {
-        "recipe" => "该机制不是 recipe 类型",
-        "mining" => "该机制不是 mining 类型",
-        "spoil" => "该机制不是 spoil 类型",
-        "plant" => "该机制不是 plant 类型",
-        "item-fuel" => "该机制不是 item-fuel 类型",
-        "item-launch" => "该机制不是 item-launch 类型",
-        "generator" => "该机制不是 generator 类型",
-        "boiler" => "该机制不是 boiler 类型",
-        "reactor" => "该机制不是 reactor 类型",
-        "fusion-reactor" => "该机制不是 fusion-reactor 类型",
-        "fusion-generator" => "该机制不是 fusion-generator 类型",
-        "solar" => "该机制不是 solar 类型",
-        "fluid-fuel" => "该机制不是 fluid-fuel 类型",
-        "fluid-heat" => "该机制不是 fluid-heat 类型",
-        "tile-extract" => "该机制不是 tile-extract 类型",
-        "tile-dispose" => "该机制不是 tile-dispose 类型",
-        _ => "机制类型不匹配",
-    };
-    RuntimeError::InvalidOperation(message)
-}
-
-fn apply_recipe_action(
-    mechanic: &mut metatorio_core::RecipeMechanic,
-    action: RecipeMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        RecipeMechanicAction::SetRecipe { recipe } => Ok(replace(&mut mechanic.recipe, recipe)),
-        RecipeMechanicAction::SetMachine { machine } => Ok(replace(&mut mechanic.machine, machine)),
-        RecipeMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
-        RecipeMechanicAction::SetFuelTemperature { temperature } => {
-            Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
-        }
-        RecipeMechanicAction::Module(action) => {
-            apply_module_action(&mut mechanic.module_config, action)
-        }
-    }
-}
-
-fn apply_mining_action(
-    mechanic: &mut metatorio_core::MiningMechanic,
-    action: MiningMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        MiningMechanicAction::SetResource { resource } => {
-            Ok(replace(&mut mechanic.resource, resource))
-        }
-        MiningMechanicAction::SetMachine { machine } => Ok(replace(&mut mechanic.machine, machine)),
-        MiningMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
-        MiningMechanicAction::SetFuelTemperature { temperature } => {
-            Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
-        }
-        MiningMechanicAction::Module(action) => {
-            apply_module_action(&mut mechanic.module_config, action)
-        }
-    }
-}
-
-fn apply_spoil_action(
-    mechanic: &mut metatorio_core::SpoilMechanic,
-    action: SpoilMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        SpoilMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
-    }
-}
-
-fn apply_plant_action(
-    mechanic: &mut metatorio_core::PlantMechanic,
-    action: PlantMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        PlantMechanicAction::SetSeed { seed } => Ok(replace(&mut mechanic.seed, seed)),
-    }
-}
-
-fn apply_item_fuel_action(
-    mechanic: &mut metatorio_core::ItemFuelMechanic,
-    action: ItemFuelMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        ItemFuelMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
-    }
-}
-
-fn apply_item_launch_action(
-    mechanic: &mut metatorio_core::ItemLaunchMechanic,
-    action: ItemLaunchMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        ItemLaunchMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
-        ItemLaunchMechanicAction::SetWeightMode { weight_mode } => {
-            Ok(replace(&mut mechanic.weight_mode, weight_mode))
-        }
-    }
-}
-
-fn apply_generator_action(
-    mechanic: &mut metatorio_core::GeneratorMechanic,
-    action: GeneratorMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        GeneratorMechanicAction::SetGenerator { generator } => {
-            Ok(replace(&mut mechanic.generator, generator))
-        }
-        GeneratorMechanicAction::SetFluid { fluid } => Ok(replace(&mut mechanic.fluid, fluid)),
-        GeneratorMechanicAction::SetTemperature { temperature } => {
-            Ok(replace(&mut mechanic.temperature, temperature))
-        }
-    }
-}
-
-fn apply_boiler_action(
-    mechanic: &mut metatorio_core::BoilerMechanic,
-    action: BoilerMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        BoilerMechanicAction::SetBoiler { boiler } => Ok(replace(&mut mechanic.boiler, boiler)),
-        BoilerMechanicAction::SetFluid { fluid } => Ok(replace(&mut mechanic.fluid, fluid)),
-        BoilerMechanicAction::SetTemperature { temperature } => {
-            Ok(replace(&mut mechanic.temperature, temperature))
-        }
-        BoilerMechanicAction::SetOutputTemperature { temperature } => {
-            Ok(replace(&mut mechanic.output_temperature, temperature))
-        }
-        BoilerMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
-        BoilerMechanicAction::SetFuelTemperature { temperature } => {
-            Ok(set_fuel_temperature(&mut mechanic.fuel, temperature))
-        }
-    }
-}
-
-fn apply_reactor_action(
-    mechanic: &mut metatorio_core::ReactorMechanic,
-    action: ReactorMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        ReactorMechanicAction::SetReactor { reactor } => {
-            Ok(replace(&mut mechanic.reactor, reactor))
-        }
-        ReactorMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
-        ReactorMechanicAction::SetNeighbours { neighbours } => {
-            Ok(replace(&mut mechanic.neighbours, neighbours))
-        }
-    }
-}
-
-fn apply_solar_action(
-    mechanic: &mut metatorio_core::SolarMechanic,
-    action: SolarMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        SolarMechanicAction::SetSolarPanel { solar_panel } => {
-            Ok(replace(&mut mechanic.solar_panel, solar_panel))
-        }
-        SolarMechanicAction::SetAccumulator { accumulator } => {
-            Ok(replace(&mut mechanic.accumulator, accumulator))
-        }
-    }
-}
-
-fn apply_fluid_fuel_action(
-    mechanic: &mut metatorio_core::FluidFuelMechanic,
-    action: FluidFuelMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        FluidFuelMechanicAction::SetFluid { fluid } => {
-            if fluid.is_empty() {
-                return Err(RuntimeError::InvalidValue("流体未选择".to_string()));
+        (MechanicAction::Reactor(action), Mechanic::Reactor(mechanic))
+        | (MechanicAction::FusionReactor(action), Mechanic::FusionReactor(mechanic)) => {
+            match action {
+                ReactorMechanicAction::SetReactor { reactor } => {
+                    Ok(replace(&mut mechanic.reactor, reactor))
+                }
+                ReactorMechanicAction::SetFuel { fuel } => Ok(replace(&mut mechanic.fuel, fuel)),
+                ReactorMechanicAction::SetNeighbours { neighbours } => {
+                    Ok(replace(&mut mechanic.neighbours, neighbours))
+                }
             }
-            Ok(replace(&mut mechanic.fluid, fluid))
         }
-    }
-}
-
-fn apply_fluid_heat_action(
-    mechanic: &mut metatorio_core::FluidHeatMechanic,
-    action: FluidHeatMechanicAction,
-) -> Result<bool, RuntimeError> {
-    match action {
-        FluidHeatMechanicAction::SetFluid { fluid } => {
-            if fluid.is_empty() {
-                return Err(RuntimeError::InvalidValue("流体未选择".to_string()));
+        (MechanicAction::Solar(action), Mechanic::Solar(mechanic)) => match action {
+            SolarMechanicAction::SetSolarPanel { solar_panel } => {
+                Ok(replace(&mut mechanic.solar_panel, solar_panel))
             }
-            Ok(replace(&mut mechanic.fluid, fluid))
-        }
-        FluidHeatMechanicAction::SetTemperature { temperature } => {
-            Ok(replace(&mut mechanic.temperature, temperature))
-        }
+            SolarMechanicAction::SetAccumulator { accumulator } => {
+                Ok(replace(&mut mechanic.accumulator, accumulator))
+            }
+        },
+        (MechanicAction::FluidFuel(action), Mechanic::FluidFuel(mechanic)) => match action {
+            FluidFuelMechanicAction::SetFluid { fluid } => {
+                if fluid.is_empty() {
+                    return Err(RuntimeError::InvalidValue("流体未选择".to_string()));
+                }
+                Ok(replace(&mut mechanic.fluid, fluid))
+            }
+        },
+        (MechanicAction::FluidHeat(action), Mechanic::FluidHeat(mechanic)) => match action {
+            FluidHeatMechanicAction::SetFluid { fluid } => {
+                if fluid.is_empty() {
+                    return Err(RuntimeError::InvalidValue("流体未选择".to_string()));
+                }
+                Ok(replace(&mut mechanic.fluid, fluid))
+            }
+            FluidHeatMechanicAction::SetTemperature { temperature } => {
+                Ok(replace(&mut mechanic.temperature, temperature))
+            }
+        },
+        (MechanicAction::TileExtract(action), Mechanic::TileExtract(mechanic)) => match action {
+            TileExtractMechanicAction::SetTile { tile } => Ok(replace(&mut mechanic.tile, tile)),
+            TileExtractMechanicAction::SetMachine { machine } => {
+                Ok(replace(&mut mechanic.machine, machine))
+            }
+        },
+        (MechanicAction::TileDispose(action), Mechanic::TileDispose(mechanic)) => match action {
+            TileDisposeMechanicAction::SetTile { tile } => Ok(replace(&mut mechanic.tile, tile)),
+            TileDisposeMechanicAction::SetItem { item } => Ok(replace(&mut mechanic.item, item)),
+        },
+        (action, _) => Err(RuntimeError::InvalidOperation(match action {
+            MechanicAction::Recipe(_) => "该机制不是 recipe 类型",
+            MechanicAction::VirtualScience(_) => "机制类型不匹配",
+            MechanicAction::Mining(_) => "该机制不是 mining 类型",
+            MechanicAction::Spoil(_) => "该机制不是 spoil 类型",
+            MechanicAction::Plant(_) => "该机制不是 plant 类型",
+            MechanicAction::ItemFuel(_) => "该机制不是 item-fuel 类型",
+            MechanicAction::ItemLaunch(_) => "该机制不是 item-launch 类型",
+            MechanicAction::Generator(_) => "该机制不是 generator 类型",
+            MechanicAction::Boiler(_) => "该机制不是 boiler 类型",
+            MechanicAction::FusionReactor(_) => "该机制不是 fusion-reactor 类型",
+            MechanicAction::FusionGenerator(_) => "该机制不是 fusion-generator 类型",
+            MechanicAction::Reactor(_) => "该机制不是 reactor 类型",
+            MechanicAction::Solar(_) => "该机制不是 solar 类型",
+            MechanicAction::FluidFuel(_) => "该机制不是 fluid-fuel 类型",
+            MechanicAction::FluidHeat(_) => "该机制不是 fluid-heat 类型",
+            MechanicAction::TileExtract(_) => "该机制不是 tile-extract 类型",
+            MechanicAction::TileDispose(_) => "该机制不是 tile-dispose 类型",
+        })),
     }
 }
 
@@ -3785,6 +3518,68 @@ mod tests {
         assert!(state.history_status().can_undo, "导入应记入历史");
         state.undo().unwrap();
         assert!(state.document.projects.is_empty(), "撤销导入应移除项目");
+    }
+
+    #[test]
+    fn import_remaps_every_nested_id_and_reserves_later_projects() {
+        use serde_json::json;
+        let project: ProjectDocument = serde_json::from_value(json!({
+            "id": 1,
+            "factories": [{"id": 2, "targets": [{"id": 3}],
+                "external_inputs": [{"id": 4}], "mechanics": [{"id": 5}],
+                "target_expressions": [{"id": 6, "terms": [{"id": 7}]}]}],
+            "universes": [{"id": 8, "targets": [{"id": 9}],
+                "external_inputs": [{"id": 10, "flow": {"location": {"kind": "space"}, "flow": "Electricity"}, "penalty": 1.0}],
+                "mechanics": [{"id": 11}],
+                "target_expressions": [{"id": 12, "terms": [{"id": 13}]}]}]
+        })).unwrap();
+        let mut state = RuntimeState::new(AppDocument {
+            projects: vec![project.clone()],
+            ..Default::default()
+        });
+        let original = state.document.clone();
+        state.import_projects(&AppDocument {
+            projects: vec![
+                project,
+                ProjectDocument {
+                    id: ProjectId(14),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        });
+        // Inspect serialized IDs independently of the allocator's inventory helper.
+        fn ids(value: &serde_json::Value, out: &mut Vec<u64>) {
+            match value {
+                serde_json::Value::Object(map) => {
+                    if let Some(id) = map.get("id").and_then(serde_json::Value::as_u64) {
+                        out.push(id);
+                    }
+                    for value in map.values() {
+                        ids(value, out);
+                    }
+                }
+                serde_json::Value::Array(values) => {
+                    for value in values {
+                        ids(value, out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut all_ids = Vec::new();
+        ids(
+            &serde_json::to_value(&state.document).unwrap(),
+            &mut all_ids,
+        );
+        assert_eq!(all_ids.len(), 27);
+        assert_eq!(all_ids.iter().copied().collect::<HashSet<_>>().len(), 27);
+        assert_eq!(state.document.projects[0], original.projects[0]);
+        assert!(state.allocate_id::<ProjectId>().0 > *all_ids.iter().max().unwrap());
+        state.undo().unwrap();
+        assert_eq!(state.document, original);
+        state.redo().unwrap();
+        assert_eq!(state.document.projects.len(), 3);
     }
 
     #[test]

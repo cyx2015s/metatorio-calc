@@ -53,6 +53,18 @@ fn recipe_mechanic(recipe: &str) -> Mechanic {
 }
 
 #[test]
+fn configuration_keys_do_not_require_clone() {
+    struct Key;
+    let store = load(fluid_dump());
+    let game = GameState::default();
+    let mechanic = recipe_mechanic("iron-plate");
+    assert_eq!(
+        expand([(Key, &mechanic)], &Context::new(&store, &game)).len(),
+        1
+    );
+}
+
+#[test]
 fn item_recipe_expands_single_variable() {
     let store = load(fluid_dump());
     let game = GameState::default();
@@ -66,7 +78,7 @@ fn item_recipe_expands_single_variable() {
 
     assert_eq!(expansion.len(), 1);
     let v = &expansion.variables[0];
-    assert_eq!(v.prim_var.inner, "iron-plate");
+    assert_eq!(v.config, "iron-plate");
     assert_eq!(v.flow.get(&DualVar::Item("iron-ore".into())), Some(&-1.0));
     assert_eq!(v.flow.get(&DualVar::Item("iron-plate".into())), Some(&1.0));
 }
@@ -89,7 +101,7 @@ fn stable_key_order_from_caller() {
     assert_eq!(a, b);
 
     // 流体区间仍是一个由调用方/求解器转换的子类型，不由 TempFlow 自动拆分。
-    let configs_used: Vec<&String> = a.variables.iter().map(|v| &v.prim_var.inner).collect();
+    let configs_used: Vec<&String> = a.variables.iter().map(|v| &v.config).collect();
     assert_eq!(configs_used, vec!["iron-plate", "heat-water"]);
     assert_eq!(
         a.variables[1].flow.get(&DualVar::Fluid {
@@ -132,7 +144,7 @@ fn fluid_fuel_and_fluid_heat_mechanics_expand() {
     let fuel_var = expansion
         .variables
         .iter()
-        .find(|v| v.prim_var.inner == "fuel")
+        .find(|v| v.config == "fuel")
         .expect("fluid-fuel 机制应展开");
     // 燃料只看热值：消耗覆盖**整个可行温度区间**的该流体（default..max），
     // 而不是钉在某个温度点上。
@@ -154,7 +166,7 @@ fn fluid_fuel_and_fluid_heat_mechanics_expand() {
     let heat_var = expansion
         .variables
         .iter()
-        .find(|v| v.prim_var.inner == "heat")
+        .find(|v| v.config == "heat")
         .expect("fluid-heat 机制应展开");
     // heat_capacity 默认 1kJ/单位/℃：500-100=400℃ → 400_000 J/s
     assert_eq!(

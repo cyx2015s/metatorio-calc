@@ -1,8 +1,7 @@
 //! 游戏机制到原始变量与流系数的展开。
 //!
-//! 一个配置可能对应多个原始变量：每个变温流体的可用温度都会形成一个
-//! 温度决策，`TempFlow` 负责保留这些决策之间的相关性。所有流量均以
-//! “每秒”计，负值表示消耗，正值表示产出。
+//! 每个有效机制生成单个代数变量，流体温度区间保留为流键，由转换流匹配。
+//! 所有流量均以“每秒”计，负值表示消耗，正值表示产出。
 
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +16,7 @@ use crate::mechanic::{
     ModuleConfig, PlantMechanic, ReactorMechanic, RecipeMechanic, SolarMechanic, SpoilMechanic,
     TileDisposeMechanic, TileExtractMechanic, quality_by_level,
 };
-use crate::prim_var::Expansion;
+use crate::prim_var::{ExpandedVariable, Expansion, Flow};
 use crate::quality::calc_quality_distribution;
 use crate::temp_flow::TempFlow;
 use metatorio_data::store::{PrototypeGroup, PrototypeStore};
@@ -34,78 +33,63 @@ use metatorio_data::{
 };
 
 /// Expand all mechanisms in the caller-provided order.
-pub fn expand<'a, C: Clone>(
+pub fn expand<'a, C>(
     mechanics: impl IntoIterator<Item = (C, &'a Mechanic)>,
     ctx: &Context,
 ) -> Expansion<C> {
     let mut expansion = Expansion::default();
     for (config, mechanic) in mechanics {
-        let before = expansion.variables.len();
-        match mechanic {
+        let flow = match mechanic {
             Mechanic::VirtualScience(mechanic) => {
-                if crate::science::science_pack_names(ctx.prototype).contains(&mechanic.item.id)
-                    && let Some(value) =
-                        crate::science::science_value(ctx.prototype, &mechanic.item)
-                {
-                    let mut temp = TempFlow::new();
-                    temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
-                    temp.add(DualVar::VirtualScience(mechanic.item.id.clone()), value);
-                    expansion.variables.extend(temp.into_variables(config));
+                if crate::science::science_pack_names(ctx.prototype).contains(&mechanic.item.id) {
+                    crate::science::science_value(ctx.prototype, &mechanic.item).map(|value| {
+                        let mut temp = TempFlow::new();
+                        temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
+                        temp.add(DualVar::VirtualScience(mechanic.item.id.clone()), value);
+                        temp.into_flow()
+                    })
+                } else {
+                    None
                 }
             }
-            Mechanic::Recipe(mechanic) => expand_recipe(config, mechanic, ctx, &mut expansion),
-            Mechanic::Mining(mechanic) => expand_mining(config, mechanic, ctx, &mut expansion),
-            Mechanic::Spoil(mechanic) => expand_spoil(config, mechanic, ctx, &mut expansion),
-            Mechanic::TileExtract(mechanic) => {
-                expand_tile_extract(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::TileDispose(mechanic) => {
-                expand_tile_dispose(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::Plant(mechanic) => expand_plant(config, mechanic, ctx, &mut expansion),
-            Mechanic::ItemFuel(mechanic) => expand_item_fuel(config, mechanic, ctx, &mut expansion),
-            Mechanic::ItemLaunch(mechanic) => {
-                expand_item_launch(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::Generator(mechanic) => {
-                expand_generator(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::Boiler(mechanic) => expand_boiler(config, mechanic, ctx, &mut expansion),
-            Mechanic::Reactor(mechanic) => expand_reactor(config, mechanic, ctx, &mut expansion),
-            Mechanic::FusionReactor(mechanic) => {
-                expand_fusion_reactor(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::FusionGenerator(mechanic) => {
-                expand_fusion_generator(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::Solar(mechanic) => expand_solar(config, mechanic, ctx, &mut expansion),
-            Mechanic::FluidFuel(mechanic) => {
-                expand_fluid_fuel(config, mechanic, ctx, &mut expansion)
-            }
-            Mechanic::FluidHeat(mechanic) => {
-                expand_fluid_heat(config, mechanic, ctx, &mut expansion)
-            }
-        }
-        // 给本次机制生成的每个变量写入单位成本。太阳能按表面倍率叠加所需
-        // 蓄电器面积（instance_cost 拿不到表面太阳能系数，故在展开处计算）。
+            Mechanic::Recipe(mechanic) => expand_recipe(mechanic, ctx),
+            Mechanic::Mining(mechanic) => expand_mining(mechanic, ctx),
+            Mechanic::Spoil(mechanic) => expand_spoil(mechanic, ctx),
+            Mechanic::TileExtract(mechanic) => expand_tile_extract(mechanic, ctx),
+            Mechanic::TileDispose(mechanic) => expand_tile_dispose(mechanic, ctx),
+            Mechanic::Plant(mechanic) => expand_plant(mechanic, ctx),
+            Mechanic::ItemFuel(mechanic) => expand_item_fuel(mechanic, ctx),
+            Mechanic::ItemLaunch(mechanic) => expand_item_launch(mechanic, ctx),
+            Mechanic::Generator(mechanic) => expand_generator(mechanic, ctx),
+            Mechanic::Boiler(mechanic) => expand_boiler(mechanic, ctx),
+            Mechanic::Reactor(mechanic) => expand_reactor(mechanic, ctx),
+            Mechanic::FusionReactor(mechanic) => expand_fusion_reactor(mechanic, ctx),
+            Mechanic::FusionGenerator(mechanic) => expand_fusion_generator(mechanic, ctx),
+            Mechanic::Solar(mechanic) => expand_solar(mechanic, ctx),
+            Mechanic::FluidFuel(mechanic) => expand_fluid_fuel(mechanic, ctx),
+            Mechanic::FluidHeat(mechanic) => expand_fluid_heat(mechanic, ctx),
+        };
+        let Some(mut flow) = flow else {
+            continue;
+        };
         let cost = if let Mechanic::Solar(mechanic) = mechanic {
             solar_instance_cost(ctx, mechanic)
         } else {
             instance_cost(ctx.prototype, mechanic)
         };
         let heating = mechanic_heating(ctx, mechanic);
-        for variable in &mut expansion.variables[before..] {
-            variable.cost = cost;
-            if heating > 0.0 {
-                *variable.flow.entry(DualVar::Heat).or_default() -= heating;
-            }
+        if heating > 0.0 {
+            *flow.entry(DualVar::Heat).or_default() -= heating;
         }
+        expansion
+            .variables
+            .push(ExpandedVariable { config, flow, cost });
     }
     expansion
 }
 
 /// 每单位机制实际占用实体的持续供暖功率（W）。独立于工作速度、插件能耗
-/// 和品质；在温度分支全部展开后叠加，避免被产出倍率缩放或覆盖已有热流。
+/// 和品质；在机制展开后叠加，避免被产出倍率缩放或覆盖已有热流。
 fn mechanic_heating(ctx: &Context, mechanic: &Mechanic) -> f64 {
     if !ctx.game.entities_require_heating {
         return 0.0;
@@ -448,27 +432,15 @@ fn recipe_output_quality(
     )
 }
 
-fn expand_recipe<C: Clone>(
-    config: C,
-    mechanic: &RecipeMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(recipe) = ctx
+fn expand_recipe(mechanic: &RecipeMechanic, ctx: &Context) -> Option<Flow> {
+    let recipe = ctx
         .prototype
         .get(PrototypeGroup::Recipe, &mechanic.recipe.id)
-        .and_then(|record| record.component::<RecipeComponent>())
-    else {
-        return;
-    };
-    let Some(crafter) = ctx.prototype.entity(&mechanic.machine.id) else {
-        return;
-    };
-    let Some(machine) = crafter.component::<CraftingMachineComponent>() else {
-        return;
-    };
+        .and_then(|record| record.component::<RecipeComponent>())?;
+    let crafter = ctx.prototype.entity(&mechanic.machine.id)?;
+    let machine = crafter.component::<CraftingMachineComponent>()?;
     if !machine.supports_recipe_fluid_input(recipe) {
-        return;
+        return None;
     }
     let recipe_time = if recipe.energy_required > 0.0 {
         recipe.energy_required
@@ -629,40 +601,25 @@ fn expand_recipe<C: Clone>(
             }
         }
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_mining<C: Clone>(
-    config: C,
-    mechanic: &MiningMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(machine_record) = ctx.prototype.entity(&mechanic.machine.id) else {
-        return;
-    };
-    let Some(machine) = machine_record.component::<MiningDrillComponent>() else {
-        return;
-    };
-    let Some(resource_record) = ctx.prototype.entity(&mechanic.resource) else {
-        return;
-    };
-    let Some(resource) = resource_record.component::<EntityComponent>() else {
-        return;
-    };
+fn expand_mining(mechanic: &MiningMechanic, ctx: &Context) -> Option<Flow> {
+    let machine_record = ctx.prototype.entity(&mechanic.machine.id)?;
+    let machine = machine_record.component::<MiningDrillComponent>()?;
+    let resource_record = ctx.prototype.entity(&mechanic.resource)?;
+    let resource = resource_record.component::<EntityComponent>()?;
     if let Some(resource_type) = resource_record.component::<ResourceEntityComponent>()
         && !machine.resource_categories.is_empty()
         && !machine
             .resource_categories
             .contains(&resource_type.category)
     {
-        return;
+        return None;
     }
-    let Some(minable) = resource.minable() else {
-        return;
-    };
+    let minable = resource.minable()?;
     if minable.mining_time <= 0.0 {
-        return;
+        return None;
     }
 
     let machine_quality = quality_level(ctx, &mechanic.machine.quality);
@@ -722,7 +679,7 @@ fn expand_mining<C: Clone>(
             .maximum_input_temperature
             .unwrap_or_else(|| fluid_max_temperature(ctx, fluid));
         if upper < lower {
-            return;
+            return None;
         }
         add_fluid_interval(&mut temp, fluid, -amount, lower, upper);
     }
@@ -776,20 +733,13 @@ fn expand_mining<C: Clone>(
             }
         }
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_spoil<C: Clone>(
-    config: C,
-    mechanic: &SpoilMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(item) = item_record(ctx, &mechanic.item.id) else {
-        return;
-    };
+fn expand_spoil(mechanic: &SpoilMechanic, ctx: &Context) -> Option<Flow> {
+    let item = item_record(ctx, &mechanic.item.id)?;
     if item.spoil_ticks.unwrap_or_default() == 0 {
-        return;
+        return None;
     }
 
     let base_quality = quality_level(ctx, &mechanic.item.quality);
@@ -816,37 +766,22 @@ fn expand_spoil<C: Clone>(
             spoil_rate,
         );
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_tile_extract<C: Clone>(
-    config: C,
-    mechanic: &TileExtractMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
+fn expand_tile_extract(mechanic: &TileExtractMechanic, ctx: &Context) -> Option<Flow> {
     // **地格决定产出什么流体，机械决定速率。** 原版 offshore-pump 的 `fluid_box`
     // 没有 filter——抽什么由地格决定（`TileComponent.fluid`），所以两者必须分开配。
-    let Some(tile) = ctx
+    let tile = ctx
         .prototype
         .get(PrototypeGroup::Tile, &mechanic.tile)
-        .and_then(|record| record.component::<TileComponent>())
-    else {
-        return;
-    };
-    let Some(fluid_name) = tile.fluid.clone() else {
-        return;
-    };
-    let Some(fluid) = fluid_record(ctx, &fluid_name) else {
-        return;
-    };
-    let Some(pump) = ctx
+        .and_then(|record| record.component::<TileComponent>())?;
+    let fluid_name = tile.fluid.clone()?;
+    let fluid = fluid_record(ctx, &fluid_name)?;
+    let pump = ctx
         .prototype
         .entity(&mechanic.machine.id)
-        .and_then(|record| record.component::<OffshorePumpComponent>())
-    else {
-        return;
-    };
+        .and_then(|record| record.component::<OffshorePumpComponent>())?;
 
     // `pumping_speed` 是「单位/刻」，×60 换成每秒；温度用该流体的默认温度。
     // 原版 offshore-pump 的 `energy_source` 是 `void`——它不耗电，所以这里不计能耗。
@@ -860,59 +795,37 @@ fn expand_tile_extract<C: Clone>(
         f64::from(temperature),
     );
     temp.scale(default_quality_multiplier(ctx, &mechanic.machine.quality));
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_tile_dispose<C: Clone>(
-    config: C,
-    mechanic: &TileDisposeMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
+fn expand_tile_dispose(mechanic: &TileDisposeMechanic, ctx: &Context) -> Option<Flow> {
     // 只有带 `destroys_dropped_items` 的地格能销毁东西（原版的岩浆），
     // 所以地格必须显式指定、且必须校验——不是随便找个地格就能扔。
-    let Some(tile) = ctx
+    let tile = ctx
         .prototype
         .get(PrototypeGroup::Tile, &mechanic.tile)
-        .and_then(|record| record.component::<TileComponent>())
-    else {
-        return;
-    };
+        .and_then(|record| record.component::<TileComponent>())?;
     if !tile.destroys_dropped_items {
-        return;
+        return None;
     }
-    if item_record(ctx, &mechanic.item.id).is_none() {
-        return;
-    }
+    item_record(ctx, &mechanic.item.id)?;
 
     // 消耗 1 单位/秒的物品，没有产出。成本由 `instance_cost` 给
     // （1/16 格 每（个/秒），见那里的注释）。
     let mut temp = TempFlow::new();
     temp.add(DualVar::Item(mechanic.item.clone()), -1.0);
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_plant<C: Clone>(
-    config: C,
-    mechanic: &PlantMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(seed) = item_record(ctx, &mechanic.seed.id) else {
-        return;
-    };
-    let Some(plant_name) = seed.plant_result.as_deref() else {
-        return;
-    };
-    let Some(plant) = ctx
+fn expand_plant(mechanic: &PlantMechanic, ctx: &Context) -> Option<Flow> {
+    let seed = item_record(ctx, &mechanic.seed.id)?;
+    let plant_name = seed.plant_result.as_deref()?;
+    let plant = ctx
         .prototype
         .entity(plant_name)
-        .and_then(|record| record.component::<PlantComponent>())
-    else {
-        return;
-    };
+        .and_then(|record| record.component::<PlantComponent>())?;
     if plant.growth_ticks == 0 {
-        return;
+        return None;
     }
     let rate = 60.0 / plant.growth_ticks as f64;
     let mut temp = TempFlow::new();
@@ -926,7 +839,7 @@ fn expand_plant<C: Clone>(
     {
         add_minable_outputs(&mut temp, ctx, minable, rate, NORMAL_QUALITY);
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 fn add_minable_outputs(
@@ -965,18 +878,11 @@ fn add_minable_outputs(
     }
 }
 
-fn expand_item_fuel<C: Clone>(
-    config: C,
-    mechanic: &ItemFuelMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(item) = item_record(ctx, &mechanic.item.id) else {
-        return;
-    };
+fn expand_item_fuel(mechanic: &ItemFuelMechanic, ctx: &Context) -> Option<Flow> {
+    let item = item_record(ctx, &mechanic.item.id)?;
     let fuel_value = item.fuel_value().amount;
     if fuel_value <= 0.0 || item.fuel_categories.is_empty() {
-        return;
+        return None;
     }
     let has_burnt_result = !item.burnt_result.is_empty();
     let mut temp = TempFlow::new();
@@ -1000,7 +906,7 @@ fn expand_item_fuel<C: Clone>(
             1.0,
         );
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 fn rocket_silo<'a>(ctx: &'a Context, weight_mode: bool) -> Option<&'a RocketSiloComponent> {
@@ -1012,21 +918,12 @@ fn rocket_silo<'a>(ctx: &'a Context, weight_mode: bool) -> Option<&'a RocketSilo
         })
 }
 
-fn expand_item_launch<C: Clone>(
-    config: C,
-    mechanic: &ItemLaunchMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(item) = item_record(ctx, &mechanic.item.id) else {
-        return;
-    };
+fn expand_item_launch(mechanic: &ItemLaunchMechanic, ctx: &Context) -> Option<Flow> {
+    let item = item_record(ctx, &mechanic.item.id)?;
     if item.rocket_launch_products.is_empty() {
-        return;
+        return None;
     }
-    let Some(silo) = rocket_silo(ctx, mechanic.weight_mode) else {
-        return;
-    };
+    let silo = rocket_silo(ctx, mechanic.weight_mode)?;
 
     let (item_count, capacity, capacity_var) = if mechanic.weight_mode {
         let weight = ctx
@@ -1040,11 +937,11 @@ fn expand_item_launch<C: Clone>(
             ctx.prototype.weight_constants().default_rocket_lift_weight
         };
         if weight <= 0.0 || lift_weight <= 0.0 {
-            return;
+            return None;
         }
         let item_count = (lift_weight / weight).floor();
         if item_count < 1.0 {
-            return;
+            return None;
         }
         (item_count, lift_weight, DualVar::RocketWeightCapacity)
     } else {
@@ -1052,7 +949,7 @@ fn expand_item_launch<C: Clone>(
             .to_be_inserted_to_rocket_inventory_size
             .unwrap_or_default();
         if slots == 0 || item.stack_size == 0 {
-            return;
+            return None;
         }
         (
             f64::from(slots) * f64::from(item.stack_size),
@@ -1073,30 +970,20 @@ fn expand_item_launch<C: Clone>(
             product.normalized_output().base * item_count,
         );
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_generator<C: Clone>(
-    config: C,
-    mechanic: &GeneratorMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(generator) = ctx
+fn expand_generator(mechanic: &GeneratorMechanic, ctx: &Context) -> Option<Flow> {
+    let generator = ctx
         .prototype
         .entity(&mechanic.generator.id)
-        .and_then(|record| record.component::<GeneratorComponent>())
-    else {
-        return;
-    };
+        .and_then(|record| record.component::<GeneratorComponent>())?;
     let fluid_name = generator
         .fluid_box
         .filter
         .as_deref()
         .unwrap_or(&mechanic.fluid);
-    let Some(fluid) = fluid_record(ctx, fluid_name) else {
-        return;
-    };
+    let fluid = fluid_record(ctx, fluid_name)?;
     // 燃料型发电机（burns_fluid = true）的出力只取决于 fluid.fuel_value，与温度
     // **无关**：它的输入就是"任意温度的燃料流体"，所以用**一个覆盖整个可行温度
     // 区间**的变量，具体温度交给辅助的温度转换去挑（枚举层因此只需一个候选）。
@@ -1116,7 +1003,7 @@ fn expand_generator<C: Clone>(
         None => (fluid.default_temperature, fluid.default_temperature),
     };
     if upper < lower {
-        return;
+        return None;
     }
     let output = generator.get_output(fluid_name, fluid, lower);
     let mut temp = TempFlow::new();
@@ -1139,7 +1026,7 @@ fn expand_generator<C: Clone>(
         temp.add(DualVar::Pollution { name: name.clone() }, amount / 60.0);
     }
     temp.scale(default_quality_multiplier(ctx, &mechanic.generator.quality));
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 fn add_generator_spent_fluid(
@@ -1169,27 +1056,17 @@ fn add_generator_spent_fluid(
     );
 }
 
-fn expand_boiler<C: Clone>(
-    config: C,
-    mechanic: &BoilerMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(boiler) = ctx
+fn expand_boiler(mechanic: &BoilerMechanic, ctx: &Context) -> Option<Flow> {
+    let boiler = ctx
         .prototype
         .entity(&mechanic.boiler.id)
-        .and_then(|record| record.component::<BoilerComponent>())
-    else {
-        return;
-    };
+        .and_then(|record| record.component::<BoilerComponent>())?;
     let input_name = boiler
         .fluid_box
         .filter
         .as_deref()
         .unwrap_or(&mechanic.fluid);
-    let Some(input_fluid) = fluid_record(ctx, input_name) else {
-        return;
-    };
+    let input_fluid = fluid_record(ctx, input_name)?;
     let input_temperature = mechanic
         .temperature
         .map(f64::from)
@@ -1201,7 +1078,7 @@ fn expand_boiler<C: Clone>(
             .maximum_input_temperature
             .is_some_and(|max| input_temperature > max)
     {
-        return;
+        return None;
     }
     let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     let mut fulfillment = 1.0;
@@ -1231,7 +1108,7 @@ fn expand_boiler<C: Clone>(
             let temperature_difference = output_temperature - input_temperature;
             let capacity = input_fluid.heat_capacity().amount;
             if temperature_difference <= 0.0 || capacity <= 0.0 {
-                return;
+                return None;
             }
             let amount = boiler.energy_consumption.amount * 60.0 * fulfillment
                 / capacity
@@ -1257,13 +1134,8 @@ fn expand_boiler<C: Clone>(
                 .filter
                 .as_deref()
                 .unwrap_or(input_name);
-            let Some(output_fluid) = fluid_record(ctx, output_name) else {
-                return;
-            };
-            let Some(output) = boiler.heating_output(input_fluid, output_fluid, input_temperature)
-            else {
-                return;
-            };
+            let output_fluid = fluid_record(ctx, output_name)?;
+            let output = boiler.heating_output(input_fluid, output_fluid, input_temperature)?;
             add_fluid_interval(
                 &mut temp,
                 input_name,
@@ -1281,24 +1153,17 @@ fn expand_boiler<C: Clone>(
         }
     }
     temp.scale(default_quality_multiplier(ctx, &mechanic.boiler.quality));
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_solar<C: Clone>(
-    config: C,
-    mechanic: &SolarMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(balance) = solar_balance(ctx, mechanic) else {
-        return;
-    };
+fn expand_solar(mechanic: &SolarMechanic, ctx: &Context) -> Option<Flow> {
+    let balance = solar_balance(ctx, mechanic)?;
     if balance.average_power <= 0.0 {
-        return;
+        return None;
     }
     let mut temp = TempFlow::new();
     temp.add(DualVar::Electricity, balance.average_power);
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 /// 太阳能配平信息：界面、LP 出力与设备成本共用同一计算。
@@ -1420,27 +1285,19 @@ fn solar_coefficient(ctx: &Context, panel: &SolarPanelComponent) -> f64 {
     }
 }
 
-fn expand_reactor<C: Clone>(
-    config: C,
-    mechanic: &ReactorMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(reactor) = ctx
+fn expand_reactor(mechanic: &ReactorMechanic, ctx: &Context) -> Option<Flow> {
+    let reactor = ctx
         .prototype
         .entity(&mechanic.reactor.id)
-        .and_then(|record| record.component::<ReactorComponent>())
-    else {
-        return;
-    };
+        .and_then(|record| record.component::<ReactorComponent>())?;
     if matches!(&reactor.energy_source, EnergySource::Heat(_)) {
-        return;
+        return None;
     }
     let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     if let EnergySource::Burner(source) = &reactor.energy_source
         && !valid_burner_fuel(ctx, source, fuel.as_ref())
     {
-        return;
+        return None;
     }
     let mut temp = TempFlow::new();
     let mut fulfillment = 1.0;
@@ -1471,24 +1328,17 @@ fn expand_reactor<C: Clone>(
     };
     temp.add(DualVar::Heat, heat);
     temp.scale(default_quality_multiplier(ctx, &mechanic.reactor.quality));
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 /// 流体燃料机制：燃烧 1 单位热值流体 → `fluid_value` 焦耳的流体燃料
 /// 抽象能量（数值单位 J/s，与 energy.rs 一致；复刻原版
 /// FluidFuelInstance::as_flow 的语义，去掉其 ×60 时间刻度）。
-fn expand_fluid_fuel<C: Clone>(
-    config: C,
-    mechanic: &FluidFuelMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(fluid) = fluid_record(ctx, &mechanic.fluid) else {
-        return;
-    };
+fn expand_fluid_fuel(mechanic: &FluidFuelMechanic, ctx: &Context) -> Option<Flow> {
+    let fluid = fluid_record(ctx, &mechanic.fluid)?;
     let fuel_value = fluid.fuel_value().amount;
     if fuel_value <= 0.0 {
-        return;
+        return None;
     }
     // 燃料只看热值、与温度**无关**：用一个覆盖整个可行温度区间的变量，
     // 具体温度交给辅助的温度转换去挑（与燃料型发电机同一范式）。
@@ -1506,28 +1356,21 @@ fn expand_fluid_fuel<C: Clone>(
         },
         fuel_value,
     );
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 /// 流体热量机制：把 1 单位高于默认温度的流体提取为
 /// `heat_capacity × (温度 - 默认温度)` 焦耳的流体热量抽象能量
 /// （数值单位 J/s，与 energy.rs 一致；复刻原版 FluidHeatInstance::as_flow
 /// 的语义，去掉其 ×60 时间刻度；温度不高于默认温度时不产热）。
-fn expand_fluid_heat<C: Clone>(
-    config: C,
-    mechanic: &FluidHeatMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(fluid) = fluid_record(ctx, &mechanic.fluid) else {
-        return;
-    };
+fn expand_fluid_heat(mechanic: &FluidHeatMechanic, ctx: &Context) -> Option<Flow> {
+    let fluid = fluid_record(ctx, &mechanic.fluid)?;
     let temperature = mechanic
         .temperature
         .map(f64::from)
         .unwrap_or(fluid.default_temperature);
     if temperature <= fluid.default_temperature {
-        return;
+        return None;
     }
     let heat_capacity = fluid.heat_capacity().amount;
     let mut temp = TempFlow::new();
@@ -1538,7 +1381,7 @@ fn expand_fluid_heat<C: Clone>(
         },
         heat_capacity * (temperature - fluid.default_temperature),
     );
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
 #[cfg(test)]
@@ -1871,35 +1714,19 @@ mod tests {
     }
 
     #[test]
-    fn parallel_variants_are_caller_defined() {
+    fn single_flow_preserves_intervals_and_cancels_sparse_coefficients() {
         let mut flow = TempFlow::new();
-        let mut low = crate::prim_var::Flow::default();
-        low.insert(
-            DualVar::Fluid {
-                name: "water".to_string(),
-                temperature: [15, 165],
-            },
-            2.0,
-        );
-        let mut high = crate::prim_var::Flow::default();
-        high.insert(
-            DualVar::Fluid {
-                name: "water".to_string(),
-                temperature: [165, 500],
-            },
-            2.0,
-        );
-        flow.add_parallel([low, high]);
-        let variables = flow.into_variables("test");
-        assert_eq!(variables.len(), 2);
-        assert!(variables[0].flow.contains_key(&DualVar::Fluid {
-            name: "water".to_string(),
-            temperature: [15, 165],
-        }));
-        assert!(variables[1].flow.contains_key(&DualVar::Fluid {
-            name: "water".to_string(),
-            temperature: [165, 500],
-        }));
+        let water = DualVar::Fluid {
+            name: "water".into(),
+            temperature: [15, 500],
+        };
+        flow.add(water.clone(), 2.0);
+        flow.add(DualVar::Heat, -10.0);
+        flow.add(DualVar::Heat, 10.0);
+        flow.scale(3.0);
+        let flow = flow.into_flow();
+        assert_eq!(flow.len(), 1);
+        assert_eq!(flow.get(&water), Some(&6.0));
     }
 }
 
@@ -1923,29 +1750,21 @@ fn valid_burner_fuel(
     }
 }
 
-fn expand_fusion_reactor<C: Clone>(
-    config: C,
-    mechanic: &ReactorMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(reactor) = ctx
+fn expand_fusion_reactor(mechanic: &ReactorMechanic, ctx: &Context) -> Option<Flow> {
+    let reactor = ctx
         .prototype
         .entity(&mechanic.reactor.id)
-        .and_then(|r| r.component::<FusionReactorComponent>())
-    else {
-        return;
-    };
+        .and_then(|r| r.component::<FusionReactorComponent>())?;
     let (Some(input), Some(output)) = (
         reactor.input_fluid_box.filter.as_deref(),
         reactor.output_fluid_box.filter.as_deref(),
     ) else {
-        return;
+        return None;
     };
     let (Some(input_fluid), Some(output_fluid)) =
         (fluid_record(ctx, input), fluid_record(ctx, output))
     else {
-        return;
+        return None;
     };
     let neighbours = mechanic.neighbours.unwrap_or_else(|| {
         metatorio_data::fusion::reactor_neighbours(
@@ -1953,22 +1772,19 @@ fn expand_fusion_reactor<C: Clone>(
             &mechanic.reactor.id,
         )
     });
-    let Some(temperature) =
-        metatorio_data::fusion::fusion_temperature(reactor, output_fluid, neighbours)
-    else {
-        return;
-    };
+    let temperature =
+        metatorio_data::fusion::fusion_temperature(reactor, output_fluid, neighbours)?;
     let base_temperature = reactor
         .target_temperature
         .unwrap_or(output_fluid.default_temperature);
     let rate = reactor.max_fluid_usage * 60.0;
     let base_power = rate * output_fluid.heat_capacity().amount * base_temperature;
     if !base_power.is_finite() || base_power <= 0.0 || rate <= 0.0 {
-        return;
+        return None;
     }
     let fuel = explicit_fuel(ctx, mechanic.fuel.as_ref());
     if !valid_burner_fuel(ctx, &reactor.burner, fuel.as_ref()) {
-        return;
+        return None;
     }
     let lower = reactor
         .minimum_input_temperature
@@ -1979,7 +1795,7 @@ fn expand_fusion_reactor<C: Clone>(
         .unwrap_or_else(|| input_fluid.max_temperature())
         .min(input_fluid.max_temperature());
     if lower > upper {
-        return;
+        return None;
     }
     let mut temp = TempFlow::new();
     let mut fulfillment = 1.0;
@@ -2015,30 +1831,22 @@ fn expand_fusion_reactor<C: Clone>(
         false,
         &mut fulfillment,
     );
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }
 
-fn expand_fusion_generator<C: Clone>(
-    config: C,
-    mechanic: &FusionGeneratorMechanic,
-    ctx: &Context,
-    out: &mut Expansion<C>,
-) {
-    let Some(generator) = ctx
+fn expand_fusion_generator(mechanic: &FusionGeneratorMechanic, ctx: &Context) -> Option<Flow> {
+    let generator = ctx
         .prototype
         .entity(&mechanic.generator.id)
-        .and_then(|r| r.component::<FusionGeneratorComponent>())
-    else {
-        return;
-    };
+        .and_then(|r| r.component::<FusionGeneratorComponent>())?;
     let (Some(input), Some(output)) = (
         generator.input_fluid_box.filter.as_deref(),
         generator.output_fluid_box.filter.as_deref(),
     ) else {
-        return;
+        return None;
     };
     let (Some(fluid), Some(spent)) = (fluid_record(ctx, input), fluid_record(ctx, output)) else {
-        return;
+        return None;
     };
     let minimum = generator
         .minimum_input_temperature
@@ -2054,7 +1862,7 @@ fn expand_fusion_generator<C: Clone>(
         None => (fluid.default_temperature, fluid.default_temperature),
     };
     if lower < minimum || upper > maximum || lower > upper {
-        return;
+        return None;
     }
     // Unlike ordinary steam generators this uses absolute temperature, not ΔT.
     let energy = if generator.burns_fluid {
@@ -2068,11 +1876,11 @@ fn expand_fusion_generator<C: Clone>(
         .output_flow_limit
         .map_or(0.0, |p| p.amount * 60.0);
     if !energy.is_finite() || energy <= 0.0 || limit <= 0.0 {
-        return;
+        return None;
     }
     let rate = (generator.max_fluid_usage * 60.0).min(limit / energy);
     if !rate.is_finite() || rate <= 0.0 {
-        return;
+        return None;
     }
     let mut temp = TempFlow::new();
     add_fluid_interval(&mut temp, input, -rate, lower, upper);
@@ -2091,5 +1899,5 @@ fn expand_fusion_generator<C: Clone>(
     if let Some(drain) = generator.energy_source.drain {
         temp.add(DualVar::Electricity, -drain.amount * 60.0);
     }
-    out.variables.extend(temp.into_variables(config));
+    Some(temp.into_flow())
 }

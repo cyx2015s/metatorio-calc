@@ -66,7 +66,7 @@ async function seed(page, count) {
    async invoke(command,args={}) {
     calls.push({command,args});
     if(command==='plugin:event|listen') {
-     if(args.event==='solve-result') setTimeout(()=>callbacks.get(args.handler)?.({payload:{project:1,factory:2,status:{solved:{cost:100,mechanics:mechanics.map((m,i)=>({mechanic:m.id,amount:(i+1)/3,cost:4,rate:1,scale:1,variant:0})),flows:[]}}}}),100);
+     if(args.event==='solve-result') setTimeout(()=>callbacks.get(args.handler)?.({payload:{project:1,factory:2,status:{solved:{cost:100,mechanics:mechanics.map((m,i)=>({mechanic:m.id,amount:(i+1)/3,cost:4,rate:1,scale:1})),flows:[]}}}}),100);
      return callbackId++;
     }
     if(command==='plugin:event|unlisten') return;

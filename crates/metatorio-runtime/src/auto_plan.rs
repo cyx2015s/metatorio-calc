@@ -22,76 +22,38 @@ use metatorio_data::{
 pub struct UsedCandidates<T> {
     /// 判定为「实际使用」的候选（保持原顺序）。
     pub used: Vec<T>,
-    /// LP 解里**所有非零**的候选（顶点解下就是解的支持集）。
-    ///
-    /// 用途：回写自检失败时的放宽档。`used` 的阈值可能把「用量/缩放」很小
-    /// 但实际必需的机制滤掉（缩放系数很大时就会这样），此时回写出去的文档
-    /// 会变成无解。
-    pub support: Vec<T>,
     /// 本次使用的过滤阈值。
     pub cutoff: f64,
     /// 参与判定的真实机制数量（不含辅助变量）。
     pub considered: usize,
 }
 
-/// 相对比例：HiGHS 给的是精确顶点解，没用到的变量就是 0，这里只留一点点
-/// 余量给数值误差。
+/// Legacy cutoff coefficients retained in diagnostics; never used to drop support.
 const TAIL_RATIO: f64 = 1e-9;
-/// 绝对下限：低于它的用量在任何场景下都视为数值噪声。
 const ABSOLUTE_FLOOR: f64 = 1e-9;
 
-/// 把求解结果中选中的流映射回候选机制。
-///
-/// 过滤掉零成本转换流的辅助变量（`MechanicId(u64::MAX)`，非真实机制）
-/// 和用量低于阈值的流；剩余流一定落在候选索引范围内（`[]` 自带越界检查）。
-///
-/// 阈值判定用**原问题空间的取值** `amount`（`LpSolution` 已还原），
-/// 相对「所有真实机制里最大的 amount」取比例。
-///
-/// 历史坑：这里原来用 `amount / scale`（逐变量 Ruiz 缩放后的值）当可比量，
-/// 但 `scale` 只是数值缩放系数、**与用量无关**——缩放系数很大时，一个真正
-/// 必需的机制会算出极小的比值而被丢掉，回写出去的文档于是「无解」。现在
-/// HiGHS 直接给**精确顶点解**，`amount` 本身没有缩放，直接用它即可。
-///
-/// - `used` 只用于**缩小**回写集合，是否正确由 `plan_auto_plan` 的自检兜底
-///   （自检不过就放宽到 `support`）；
-/// - `support`（amount ≠ 0）就是 LP 解的支撑集，必然可行。
-///
-/// 阈值只有一档：顶点解里没用到的变量精确为 0，取「最大 amount × 1e-9」再
-/// 叠一个绝对下限。辅助变量（零成本转换流）不参与最大值统计，否则它们的
-/// 搬运量会把阈值抬到真实机制之上。
+/// Preserve every nonzero real candidate, including arbitrarily small upstream flows.
+/// The cutoff is diagnostic only; auxiliary conversion variables do not count.
 pub fn used_candidates<T: Clone>(
     candidates: &[T],
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
 ) -> UsedCandidates<T> {
-    // 只看真实机制（辅助变量是零成本转换流，不是候选）。
-    let amounts: Vec<(ExpandedVarId, f64)> = prim
-        .into_iter()
-        .filter(|(id, _)| id.mechanic.0 != u64::MAX)
-        .collect();
-    let considered = amounts.len();
-    let max_amount = amounts
-        .iter()
-        .fold(0.0f64, |acc, (_, amount)| acc.max(amount.abs()));
-    let cutoff = (max_amount * TAIL_RATIO).max(ABSOLUTE_FLOOR);
-    // **不再按用量阈值丢弃候选。** HiGHS 给的是精确顶点解，未用到的变量精确为 0，
-    // 所以支撑集本身就是干净的；阈值唯一的作用是把「用量远小于主目标」的**必需**上游
-    // 机制误判成噪声丢掉——实测目标 1W 电力时整条核燃料链的用量在 1e-14 量级、低于
-    // 绝对下限 1e-9，回写出去的文档因此缺了反应堆的燃料生产者，随即「无解」。
-    // `cutoff` 仍然算出来放进报告，只作诊断信息，不再参与筛选。
+    let mut considered = 0;
+    let mut max_amount = 0.0f64;
     let mut used = Vec::new();
-    let mut support = Vec::new();
-    for (id, amount) in amounts {
+    for (id, amount) in prim {
+        let ExpandedVarId::Mechanic(mechanic) = id else {
+            continue;
+        };
+        considered += 1;
+        max_amount = max_amount.max(amount.abs());
         if amount != 0.0 {
-            let candidate = candidates[id.mechanic.0 as usize].clone();
-            used.push(candidate.clone());
-            support.push(candidate);
+            used.push(candidates[mechanic.0 as usize].clone());
         }
     }
     UsedCandidates {
         used,
-        support,
-        cutoff,
+        cutoff: (max_amount * TAIL_RATIO).max(ABSOLUTE_FLOOR),
         considered,
     }
 }
@@ -1140,45 +1102,41 @@ fn enumerate_energy(
                 },
             ));
         }
-        if let Some(generator) = record.component::<metatorio_data::FusionGeneratorComponent>() {
-            if let Some(name) = generator.input_fluid_box.filter.as_deref()
-                && let Some(fluid) = fluid_record(ctx, name)
-            {
-                if generator.burns_fluid && fluid.fuel_value().amount > 0.0 {
-                    out.push(Mechanic::FusionGenerator(
-                        metatorio_core::FusionGeneratorMechanic {
-                            generator: IdWithQuality::new(
-                                record.name.clone(),
-                                major_quality.clone(),
-                            ),
-                            temperature: None,
-                        },
-                    ));
-                } else if !generator.burns_fluid {
-                    for &temperature in fluid_temperatures
-                        .get(name)
-                        .map(Vec::as_slice)
-                        .unwrap_or_default()
+        if let Some(generator) = record.component::<metatorio_data::FusionGeneratorComponent>()
+            && let Some(name) = generator.input_fluid_box.filter.as_deref()
+            && let Some(fluid) = fluid_record(ctx, name)
+        {
+            if generator.burns_fluid && fluid.fuel_value().amount > 0.0 {
+                out.push(Mechanic::FusionGenerator(
+                    metatorio_core::FusionGeneratorMechanic {
+                        generator: IdWithQuality::new(record.name.clone(), major_quality.clone()),
+                        temperature: None,
+                    },
+                ));
+            } else if !generator.burns_fluid {
+                for &temperature in fluid_temperatures
+                    .get(name)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default()
+                {
+                    let t = f64::from(temperature);
+                    if t > 0.0
+                        && t >= generator
+                            .minimum_input_temperature
+                            .unwrap_or(fluid.default_temperature)
+                        && generator
+                            .maximum_input_temperature
+                            .is_none_or(|max| t <= max)
                     {
-                        let t = f64::from(temperature);
-                        if t > 0.0
-                            && t >= generator
-                                .minimum_input_temperature
-                                .unwrap_or(fluid.default_temperature)
-                            && generator
-                                .maximum_input_temperature
-                                .is_none_or(|max| t <= max)
-                        {
-                            out.push(Mechanic::FusionGenerator(
-                                metatorio_core::FusionGeneratorMechanic {
-                                    generator: IdWithQuality::new(
-                                        record.name.clone(),
-                                        major_quality.clone(),
-                                    ),
-                                    temperature: Some(temperature),
-                                },
-                            ));
-                        }
+                        out.push(Mechanic::FusionGenerator(
+                            metatorio_core::FusionGeneratorMechanic {
+                                generator: IdWithQuality::new(
+                                    record.name.clone(),
+                                    major_quality.clone(),
+                                ),
+                                temperature: Some(temperature),
+                            },
+                        ));
                     }
                 }
             }
@@ -1708,45 +1666,14 @@ mod tests {
         // 索引 0 是零成本转换流的辅助变量（MechanicId(u64::MAX)），仍然剔除。
         let candidates = vec!["aux", "kept", "tiny", "tail", "zero"];
         let prim = vec![
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(u64::MAX),
-                    variant: 0,
-                },
-                5.0,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(1),
-                    variant: 0,
-                },
-                2.0,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(2),
-                    variant: 0,
-                },
-                1e-12,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(3),
-                    variant: 0,
-                },
-                1e-8,
-            ),
-            (
-                ExpandedVarId {
-                    mechanic: MechanicId(4),
-                    variant: 0,
-                },
-                0.0,
-            ),
+            (ExpandedVarId::Conversion(0), 5.0),
+            (ExpandedVarId::Mechanic(MechanicId(1)), 2.0),
+            (ExpandedVarId::Mechanic(MechanicId(2)), 1e-12),
+            (ExpandedVarId::Mechanic(MechanicId(3)), 1e-8),
+            (ExpandedVarId::Mechanic(MechanicId(4)), 0.0),
         ];
         let filtered = used_candidates(&candidates, prim);
         assert_eq!(filtered.used, vec!["kept", "tiny", "tail"]);
-        assert_eq!(filtered.used, filtered.support, "used 应当就是支撑集");
         assert_eq!(filtered.considered, 4);
     }
 

@@ -62,6 +62,7 @@ const DECODED_CACHE_MAX_BYTES: usize = 128 * 1024 * 1024;
 /// 内部带两层缓存（都不改变语义，只省时间）：
 /// - **zip 只开一次**：py 的 graphics 包有上百 MB，每次读一张图都重开一遍要好几毫秒；
 /// - **解码结果按资源路径缓存**：一张 `recycling.png` 会被几千个配方引用。
+#[derive(Default)]
 pub struct IconSources {
     roots: HashMap<String, Archive>,
     zips: Mutex<HashMap<PathBuf, zip::ZipArchive<File>>>,
@@ -73,16 +74,6 @@ impl std::fmt::Debug for IconSources {
         f.debug_struct("IconSources")
             .field("roots", &self.roots.len())
             .finish()
-    }
-}
-
-impl Default for IconSources {
-    fn default() -> Self {
-        Self {
-            roots: HashMap::new(),
-            zips: Mutex::new(HashMap::new()),
-            decoded: Mutex::new(DecodedCache::default()),
-        }
     }
 }
 

@@ -202,20 +202,11 @@ impl Default for Milestone {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct RecipeProductivity {
     pub recipe: String,
     pub productivity: f64,
-}
-
-impl Default for RecipeProductivity {
-    fn default() -> Self {
-        Self {
-            recipe: String::new(),
-            productivity: 0.0,
-        }
-    }
 }
 
 /// 无限科技的研究次数覆盖（2.b）。
@@ -276,22 +267,12 @@ impl Default for UniverseMechanicEntry {
 }
 
 /// 宇宙工厂的一个目标：目标流本身带地点。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocatedTarget {
     pub id: TargetId,
     pub flow: LocatedDualVar,
     pub amount: f64,
-}
-
-impl Default for LocatedTarget {
-    fn default() -> Self {
-        Self {
-            id: TargetId::default(),
-            flow: LocatedDualVar::default(),
-            amount: 0.0,
-        }
-    }
 }
 
 /// 宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。
@@ -368,7 +349,7 @@ impl Default for UniverseDocument {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FactorySettings {
     pub planet: Option<String>,
@@ -384,33 +365,12 @@ pub struct FactorySettings {
     pub debug: bool,
 }
 
-impl Default for FactorySettings {
-    fn default() -> Self {
-        Self {
-            planet: None,
-            surface: None,
-            legacy_major_quality: String::new(),
-            debug: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct FlowTarget {
     pub id: TargetId,
     pub flow: DualVar,
     pub amount: f64,
-}
-
-impl Default for FlowTarget {
-    fn default() -> Self {
-        Self {
-            id: TargetId::default(),
-            flow: DualVar::Unknown,
-            amount: 0.0,
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

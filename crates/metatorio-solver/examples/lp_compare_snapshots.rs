@@ -30,8 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .columns
         .iter()
         .map(|c| {
-            c.label
-                .starts_with("flow:ExpandedVarId { mechanic: MechanicId(18446744073709551615),")
+            c.label.starts_with("flow:Conversion(")
+                || c.label
+                    .starts_with("flow:ExpandedVarId { mechanic: MechanicId(18446744073709551615),")
         })
         .collect();
     for (j, (a, b)) in a.columns.iter().zip(&b.columns).enumerate() {

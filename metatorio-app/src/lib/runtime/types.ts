@@ -854,7 +854,6 @@ export type SolveStatus =
 
 export interface MechanicSolution {
   mechanic: MechanicId;
-  variant: number;
   amount: number;
   /** `amount / scale`：剔除 Ruiz 缩放后的可比量（判断「几乎没用到」用它）。 */
   rate: number;

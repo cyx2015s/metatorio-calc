@@ -120,6 +120,7 @@ pnpm tauri build
 前端安装与更新命令应在 `metatorio-app` 内运行，不要在仓库根目录另建 npm 工程。
 Windows 若遇到 CMake 不支持 `Visual Studio 18 2026` 生成器，可更新 CMake，
 或在已安装 Ninja 时，于当前 PowerShell 会话设置 `$env:CMAKE_GENERATOR = 'Ninja'` 后重试。
+生成器版本、MSVC PDB 沙箱通信以及普通 pwsh 的差异，见 [Windows 原生依赖构建排查](docs/windows-native-build.md)。
 
 # 贡献
 

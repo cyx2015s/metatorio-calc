@@ -37,5 +37,5 @@ pub use mechanic::{
     RecipeMechanic, SolarMechanic, SpoilMechanic, TileDisposeMechanic, TileExtractMechanic,
     VirtualScienceMechanic,
 };
-pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow, PrimVar};
+pub use prim_var::{AIndexMap, ExpandedVariable, Expansion, Flow};
 pub use productivity::{InfiniteTechLevel, ProductivityResult, compute_productivity};

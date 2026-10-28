@@ -21,15 +21,20 @@ use crate::message::{
 };
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
-/// The solver variable identity used by the application adapter.
-///
-/// One mechanism may expand into several variables because of temperature
-/// variants.  The variant index is therefore part of the identity while the
-/// persisted document still only stores the mechanism ID.
+/// Real mechanisms have one variable each; conversion flows have independent IDs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct ExpandedVarId {
-    pub mechanic: MechanicId,
-    pub variant: u16,
+pub enum ExpandedVarId {
+    Mechanic(MechanicId),
+    Conversion(usize),
+}
+
+impl ExpandedVarId {
+    pub fn mechanic(self) -> Option<MechanicId> {
+        match self {
+            Self::Mechanic(id) => Some(id),
+            Self::Conversion(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -133,7 +138,6 @@ pub enum SolveStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MechanicSolution {
     pub mechanic: MechanicId,
-    pub variant: u16,
     pub amount: f64,
     /// `amount / scale`：剔除逐变量 Ruiz 缩放后的**可比量**。
     ///
@@ -1036,7 +1040,7 @@ pub fn plan_universe_with_progress(
     accessibility: &Accessibility,
     mut progress: impl FnMut(AutoPlanProgress),
 ) -> Result<(Vec<metatorio_core::LocatedMechanic>, AutoPlanReport), RuntimeError> {
-    use crate::document::{LocatedTargetExpression, UniverseDocument, UniverseMechanicEntry};
+    use crate::document::{UniverseDocument, UniverseMechanicEntry};
     use metatorio_core::{LocatedMechanic, Location, OrbitalCargoMechanic};
     check_solve_cancelled()?;
     progress(AutoPlanProgress {
@@ -1057,12 +1061,11 @@ pub fn plan_universe_with_progress(
         .collect();
     locations.push(Location::Space);
     let mut entries: Vec<UniverseMechanicEntry> = Vec::new();
-    let mut mechanics_by_id: HashMap<MechanicId, LocatedMechanic> = HashMap::new();
     let mut next_mechanic = 1u64;
     for location in &locations {
         check_solve_cancelled()?;
         let (planet, surface) = crate::universe::environment_for(location);
-        let mut game = make_game_state_with_accessibility(store, project_doc, &accessibility);
+        let mut game = make_game_state_with_accessibility(store, project_doc, accessibility);
         apply_environment_to_game_state(store, &mut game, planet, surface);
         let context = Context::new(store, &game);
         let major_quality = game
@@ -1083,15 +1086,14 @@ pub fn plan_universe_with_progress(
         };
         let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
         let (candidates, _) =
-            crate::auto_plan::filter_accessible_candidates(store, &accessibility, candidates);
+            crate::auto_plan::filter_accessible_candidates(store, accessibility, candidates);
         for mechanic in candidates {
             let id = MechanicId(next_mechanic);
             next_mechanic += 1;
             let located = LocatedMechanic::Local(metatorio_core::LocalLocatedMechanic {
                 location: location.clone(),
-                mechanic: mechanic.clone(),
+                mechanic,
             });
-            mechanics_by_id.insert(id, located.clone());
             entries.push(UniverseMechanicEntry {
                 id,
                 enabled: true,
@@ -1117,7 +1119,6 @@ pub fn plan_universe_with_progress(
                     for located in transports {
                         let id = MechanicId(next_mechanic);
                         next_mechanic += 1;
-                        mechanics_by_id.insert(id, located.clone());
                         entries.push(UniverseMechanicEntry {
                             id,
                             enabled: true,
@@ -1137,7 +1138,6 @@ pub fn plan_universe_with_progress(
             if known.insert(serde_json::to_string(&entry.mechanic).unwrap()) {
                 let id = MechanicId(next_mechanic);
                 next_mechanic += 1;
-                mechanics_by_id.insert(id, entry.mechanic.clone());
                 entries.push(UniverseMechanicEntry {
                     id,
                     enabled: true,
@@ -1163,15 +1163,7 @@ pub fn plan_universe_with_progress(
         external_inputs: universe_doc.external_inputs.clone(),
         mechanics: entries,
         targets: universe_doc.targets.clone(),
-        target_expressions: universe_doc
-            .target_expressions
-            .iter()
-            .map(|expression| LocatedTargetExpression {
-                id: expression.id,
-                constant: expression.constant,
-                terms: expression.terms.clone(),
-            })
-            .collect(),
+        target_expressions: universe_doc.target_expressions.clone(),
         strict_source: true,
         strict_sink: universe_doc.strict_sink,
     };
@@ -1204,7 +1196,13 @@ pub fn plan_universe_with_progress(
     let used: Vec<LocatedMechanic> = mechanics
         .into_iter()
         .filter(|m| m.amount != 0.0)
-        .filter_map(|m| mechanics_by_id.get(&m.mechanic).cloned())
+        .filter_map(|m| {
+            // Candidate IDs are assigned consecutively from 1 in insertion order.
+            let index = usize::try_from(m.mechanic.0.checked_sub(1)?).ok()?;
+            temp.mechanics
+                .get(index)
+                .map(|entry| entry.mechanic.clone())
+        })
         .collect();
     let report = AutoPlanReport {
         candidates_total,
@@ -1693,18 +1691,16 @@ fn build_autoplan_problem(
             .map(|(index, mechanic)| (index as u64, mechanic)),
         context,
     );
-    let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
-    let mut flows = AIndexMap::default();
-    for variable in expansion.variables {
-        let config = MechanicId(variable.prim_var.inner);
-        let variant = variant_counts.entry(config).or_default();
-        let flow_id = ExpandedVarId {
-            mechanic: config,
-            variant: *variant,
-        };
-        *variant = variant.saturating_add(1);
-        flows.insert(flow_id, (variable.flow, variable.cost));
-    }
+    let mut flows = expansion
+        .variables
+        .into_iter()
+        .map(|variable| {
+            (
+                ExpandedVarId::Mechanic(MechanicId(variable.config)),
+                (variable.flow, variable.cost),
+            )
+        })
+        .collect();
     let conversion_target = conversion_targets(
         target,
         factory_doc
@@ -1755,7 +1751,7 @@ pub struct AutoPlanReport {
     pub planning_optimization: Option<metatorio_solver::OptimizationReport>,
 }
 
-/// 一次求解结果里每机制的总用量（多温度变体求和）。
+/// 一次求解结果里每机制的用量。
 ///
 /// `SolveStatus::Solved.mechanics` 是**所有 LP 变量**（含取值为 0 的），所以每个
 /// 进了 LP 的机制都会有一条记录；没进 LP 的（disabled 等）不出现。清理
@@ -1839,16 +1835,10 @@ fn solve_document(
 
     // 每台实例成本由展开阶段写入每个变量（ExpandedVariable.cost），
     // 太阳能会随表面倍率叠加蓄电器面积——作为 LP 目标系数。
-    let mut variant_counts: HashMap<MechanicId, u16> = HashMap::new();
     let mut flows = AIndexMap::default();
-    let mut variable_costs: HashMap<ExpandedVarId, f64> = HashMap::new();
+    let mut variable_costs = HashMap::new();
     for variable in expansion.variables {
-        let variant = variant_counts.entry(variable.prim_var.inner).or_default();
-        let flow_id = ExpandedVarId {
-            mechanic: variable.prim_var.inner,
-            variant: *variant,
-        };
-        *variant = variant.saturating_add(1);
+        let flow_id = ExpandedVarId::Mechanic(variable.config);
         variable_costs.insert(flow_id, variable.cost);
         flows.insert(flow_id, (variable.flow, variable.cost));
     }
@@ -1933,13 +1923,12 @@ fn solve_document(
                     .map(|(id, amount)| {
                         let scale = prim_scale.get(&id).copied().unwrap_or(1.0);
                         MechanicSolution {
-                            mechanic: id.mechanic,
-                            variant: id.variant,
+                            mechanic: id.mechanic().unwrap_or(MechanicId(u64::MAX)),
                             amount,
                             rate: amount / scale.max(1e-12),
                             cost: variable_costs.get(&id).copied().unwrap_or(1.0),
                             scale,
-                            is_virtual: id.mechanic.0 == u64::MAX,
+                            is_virtual: id.mechanic().is_none(),
                         }
                     })
                     .collect(),
@@ -1993,8 +1982,7 @@ fn solve_document(
 /// 4. filter 归并：带具体流体 filter 的 FluidHeat/FluidFuel 归并为空串
 ///    （"任意流体"）抽象流。
 ///
-/// 全部使用 `MechanicId(u64::MAX)` 作为辅助变量身份（复刻 egui 的
-/// `usize::MAX`），不落入任何真实机制的求解结果。
+/// 辅助转换变量使用独立 ID，不占用真实机制 ID。
 pub fn add_conversion_flows(
     flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>,
     prototype: &PrototypeStore,
@@ -2012,15 +2000,16 @@ pub fn add_conversion_flows(
         }
     }
 
-    let mut aux: u16 = 0;
+    let mut aux = flows
+        .keys()
+        .filter_map(|id| match id {
+            ExpandedVarId::Conversion(index) => Some(index + 1),
+            ExpandedVarId::Mechanic(_) => None,
+        })
+        .max()
+        .unwrap_or(0);
     let mut add_aux = |flows: &mut AIndexMap<ExpandedVarId, (Flow, f64)>, flow: Flow| {
-        flows.insert(
-            ExpandedVarId {
-                mechanic: MechanicId(u64::MAX),
-                variant: aux,
-            },
-            (flow, 0.0),
-        );
+        flows.insert(ExpandedVarId::Conversion(aux), (flow, 0.0));
         aux += 1;
     };
 
@@ -2240,8 +2229,10 @@ pub fn make_game_state_with_accessibility(
     project: &ProjectDocument,
     accessibility: &metatorio_core::Accessibility,
 ) -> GameState {
-    let mut game = GameState::default();
-    game.reactor_neighbours = project.settings.reactor_neighbours.clone();
+    let mut game = GameState {
+        reactor_neighbours: project.settings.reactor_neighbours.clone(),
+        ..Default::default()
+    };
     let qualities = prototype.quality_order();
     if !qualities.is_empty() {
         game.qualities = qualities.to_vec();
@@ -4149,6 +4140,12 @@ mod tests {
                 "rate 应等于 amount/scale：{solution:?}"
             );
             assert_eq!(solution.is_virtual, solution.mechanic.0 == u64::MAX);
+            assert!(
+                serde_json::to_value(solution)
+                    .unwrap()
+                    .get("variant")
+                    .is_none()
+            );
         }
         assert!(
             mechanics.iter().any(|solution| !solution.is_virtual),
@@ -4300,6 +4297,34 @@ mod tests {
     /// 为多类别，煤炭只有 chemical，此前二者 ItemFuel 身份不相等 → 自动规划
     /// 选不中燃煤发电。
     #[test]
+    fn conversion_ids_are_independent_and_not_limited_to_u16() {
+        let store = PrototypeStore::load(&serde_json::json!({})).unwrap();
+        let narrow = DualVar::Fluid {
+            name: "water".into(),
+            temperature: [15, 15],
+        };
+        let broad = DualVar::Fluid {
+            name: "water".into(),
+            temperature: [15, 500],
+        };
+        let real_id = ExpandedVarId::Mechanic(MechanicId(u64::MAX));
+        let old_conversion = ExpandedVarId::Conversion(65_536);
+        let real_flow: Flow = [(narrow, 1.0)].into_iter().collect();
+        let mut flows = [
+            (real_id, (real_flow.clone(), 2.0)),
+            (old_conversion, (Flow::default(), 0.0)),
+        ]
+        .into_iter()
+        .collect();
+        let target = [(broad, 1.0)].into_iter().collect();
+        add_conversion_flows(&mut flows, &store, &target, &Flow::default());
+        assert_eq!(flows.len(), 3);
+        assert_eq!(flows[&real_id], (real_flow, 2.0));
+        assert!(flows[&old_conversion].0.is_empty());
+        assert!(flows.contains_key(&ExpandedVarId::Conversion(65_537)));
+    }
+
+    #[test]
     fn fuel_category_overlap_conversion_allows_multi_category_fuel() {
         let store = PrototypeStore::load(&serde_json::json!({})).expect("空 dump 应可加载");
         let narrow = vec!["chemical".to_string()];
@@ -4309,14 +4334,8 @@ mod tests {
             "processed-chemical".to_string(),
         ];
         let mut flows = AIndexMap::default();
-        let supply_var = ExpandedVarId {
-            mechanic: MechanicId(1),
-            variant: 0,
-        };
-        let boiler_var = ExpandedVarId {
-            mechanic: MechanicId(2),
-            variant: 0,
-        };
+        let supply_var = ExpandedVarId::Mechanic(MechanicId(1));
+        let boiler_var = ExpandedVarId::Mechanic(MechanicId(2));
         let mut supply_flow = Flow::default();
         supply_flow.insert(
             DualVar::ItemFuelSupply {
@@ -4379,21 +4398,12 @@ mod tests {
         let mut flows = AIndexMap::default();
         let mut supply_flow = Flow::default();
         supply_flow.insert(supply.clone(), 100.0);
-        flows.insert(
-            ExpandedVarId {
-                mechanic: MechanicId(1),
-                variant: 0,
-            },
-            (supply_flow, 1.0),
-        );
+        flows.insert(ExpandedVarId::Mechanic(MechanicId(1)), (supply_flow, 1.0));
         for (index, category) in [a.clone(), b.clone()].into_iter().enumerate() {
             let mut flow = Flow::default();
             flow.insert(demand(&category), -100.0);
             flows.insert(
-                ExpandedVarId {
-                    mechanic: MechanicId(index as u64 + 2),
-                    variant: 0,
-                },
+                ExpandedVarId::Mechanic(MechanicId(index as u64 + 2)),
                 (flow, 1.0),
             );
         }
@@ -4428,21 +4438,12 @@ mod tests {
         let mut supply_flow = Flow::default();
         supply_flow.insert(supply(true), 100.0);
         supply_flow.insert(supply(false), 100.0);
-        flows.insert(
-            ExpandedVarId {
-                mechanic: MechanicId(1),
-                variant: 0,
-            },
-            (supply_flow, 1.0),
-        );
+        flows.insert(ExpandedVarId::Mechanic(MechanicId(1)), (supply_flow, 1.0));
         for (index, burnt) in [false, true].into_iter().enumerate() {
             let mut flow = Flow::default();
             flow.insert(demand(burnt), -100.0);
             flows.insert(
-                ExpandedVarId {
-                    mechanic: MechanicId(index as u64 + 2),
-                    variant: 0,
-                },
+                ExpandedVarId::Mechanic(MechanicId(index as u64 + 2)),
                 (flow, 1.0),
             );
         }
@@ -4484,13 +4485,7 @@ mod tests {
         let mut flow = Flow::default();
         flow.insert(cold.clone(), 100.0);
         flow.insert(hot.clone(), 100.0);
-        flows.insert(
-            ExpandedVarId {
-                mechanic: MechanicId(1),
-                variant: 0,
-            },
-            (flow, 1.0),
-        );
+        flows.insert(ExpandedVarId::Mechanic(MechanicId(1)), (flow, 1.0));
         add_conversion_flows(&mut flows, &store, &Flow::default(), &Flow::default());
 
         let edge = |from: &DualVar, to: &DualVar| {
@@ -4525,13 +4520,7 @@ mod tests {
         let mut flows = AIndexMap::default();
         let mut flow = Flow::default();
         flow.insert(produced.clone(), 100.0);
-        flows.insert(
-            ExpandedVarId {
-                mechanic: MechanicId(1),
-                variant: 0,
-            },
-            (flow, 1.0),
-        );
+        flows.insert(ExpandedVarId::Mechanic(MechanicId(1)), (flow, 1.0));
         // 目标区间要作为 ~target~ 传进去——转换图只认「求解中实际出现的流键」，
         // 目标自己就是其中之一（~seen~ 从 target + sources + flows 收集）。
         let mut target_flow = Flow::default();
