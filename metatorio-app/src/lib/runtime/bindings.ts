@@ -881,8 +881,8 @@ export type FactoryDocument_Deserialize = {
 	id?: FactoryId,
 	name?: string,
 	settings?: FactorySettings_Deserialize,
-	targets?: FlowTarget_Deserialize[],
-	target_expressions?: TargetExpression_Deserialize[],
+	targets?: FlowTarget_Deserialize<DualVar_Deserialize>[],
+	target_expressions?: TargetExpression_Deserialize<DualVar_Deserialize>[],
 	external_inputs?: ExternalInput_Deserialize[],
 	mechanics?: MechanicEntry_Deserialize[],
 	strict_source?: boolean,
@@ -893,8 +893,8 @@ export type FactoryDocument_Serialize = {
 	id: FactoryId,
 	name: string,
 	settings: FactorySettings_Serialize,
-	targets: FlowTarget_Serialize[],
-	target_expressions: TargetExpression_Serialize[],
+	targets: FlowTarget_Serialize<DualVar_Serialize>[],
+	target_expressions: TargetExpression_Serialize<DualVar_Serialize>[],
 	external_inputs: ExternalInput_Serialize[],
 	mechanics: MechanicEntry_Serialize[],
 	strict_source: boolean,
@@ -1061,17 +1061,17 @@ export type FlowBalance_Serialize = {
 	scale: number | null,
 };
 
-export type FlowTarget = FlowTarget_Serialize | FlowTarget_Deserialize;
+export type FlowTarget<F = DualVar_Serialize | DualVar_Deserialize> = FlowTarget_Serialize<F> | FlowTarget_Deserialize<F>;
 
-export type FlowTarget_Deserialize = {
+export type FlowTarget_Deserialize<F = DualVar_Serialize | DualVar_Deserialize> = {
 	id?: TargetId,
-	flow?: DualVar_Deserialize,
+	flow?: F,
 	amount?: number | null,
 };
 
-export type FlowTarget_Serialize = {
+export type FlowTarget_Serialize<F = DualVar_Serialize | DualVar_Deserialize> = {
 	id: TargetId,
-	flow: DualVar_Serialize,
+	flow: F,
 	amount: number | null,
 };
 
@@ -1567,54 +1567,6 @@ export type LocatedMechanic_Serialize = {
 } & OrbitalCargoMechanic_Serialize | {
 	type: "orbital-drop",
 } & OrbitalCargoMechanic_Serialize;
-
-/**  宇宙工厂的一个目标：目标流本身带地点。 */
-export type LocatedTarget = LocatedTarget_Serialize | LocatedTarget_Deserialize;
-
-/**  宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。 */
-export type LocatedTargetExpression = LocatedTargetExpression_Serialize | LocatedTargetExpression_Deserialize;
-
-/**  宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。 */
-export type LocatedTargetExpression_Deserialize = {
-	id?: TargetExpressionId,
-	constant?: number | null,
-	terms?: LocatedTargetTerm_Deserialize[],
-};
-
-/**  宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。 */
-export type LocatedTargetExpression_Serialize = {
-	id: TargetExpressionId,
-	constant: number | null,
-	terms: LocatedTargetTerm_Serialize[],
-};
-
-export type LocatedTargetTerm = LocatedTargetTerm_Serialize | LocatedTargetTerm_Deserialize;
-
-export type LocatedTargetTerm_Deserialize = {
-	id?: TargetTermId,
-	flow?: LocatedDualVar_Deserialize,
-	coefficient?: number | null,
-};
-
-export type LocatedTargetTerm_Serialize = {
-	id: TargetTermId,
-	flow: LocatedDualVar_Serialize,
-	coefficient: number | null,
-};
-
-/**  宇宙工厂的一个目标：目标流本身带地点。 */
-export type LocatedTarget_Deserialize = {
-	id?: TargetId,
-	flow?: LocatedDualVar_Deserialize,
-	amount?: number | null,
-};
-
-/**  宇宙工厂的一个目标：目标流本身带地点。 */
-export type LocatedTarget_Serialize = {
-	id: TargetId,
-	flow: LocatedDualVar_Serialize,
-	amount: number | null,
-};
 
 /**
  *  A physical planning location.
@@ -3333,7 +3285,7 @@ export type Suggestion = {
 export type TargetAction = TargetAction_Serialize | TargetAction_Deserialize;
 
 export type TargetAction_Deserialize = ({ add: {
-	target: FlowTarget_Deserialize,
+	target: FlowTarget_Deserialize<DualVar_Deserialize>,
 } }) & { "set-amount"?: never; "set-flow"?: never; remove?: never; reorder?: never } | ({ remove: {
 	target: TargetId,
 } }) & { "set-amount"?: never; "set-flow"?: never; add?: never; reorder?: never } | ({ "set-flow": {
@@ -3348,7 +3300,7 @@ export type TargetAction_Deserialize = ({ add: {
 } }) & { "set-amount"?: never; "set-flow"?: never; add?: never; remove?: never };
 
 export type TargetAction_Serialize = ({ add: {
-	target: FlowTarget_Serialize,
+	target: FlowTarget_Serialize<DualVar_Serialize>,
 } }) & { "set-amount"?: never; "set-flow"?: never; remove?: never; reorder?: never } | ({ remove: {
 	target: TargetId,
 } }) & { "set-amount"?: never; "set-flow"?: never; add?: never; reorder?: never } | ({ "set-flow": {
@@ -3362,12 +3314,12 @@ export type TargetAction_Serialize = ({ add: {
 	position: number,
 } }) & { "set-amount"?: never; "set-flow"?: never; add?: never; remove?: never };
 
-export type TargetExpression = TargetExpression_Serialize | TargetExpression_Deserialize;
+export type TargetExpression<F = DualVar_Serialize | DualVar_Deserialize> = TargetExpression_Serialize<F> | TargetExpression_Deserialize<F>;
 
 export type TargetExpressionAction = TargetExpressionAction_Serialize | TargetExpressionAction_Deserialize;
 
 export type TargetExpressionAction_Deserialize = ({ add: {
-	expression: TargetExpression_Deserialize,
+	expression: TargetExpression_Deserialize<DualVar_Deserialize>,
 } }) & { "add-term"?: never; "remove-term"?: never; "reorder-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; remove?: never; reorder?: never } | ({ remove: {
 	expression: TargetExpressionId,
 } }) & { "add-term"?: never; "remove-term"?: never; "reorder-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; reorder?: never } | ({ "set-constant": {
@@ -3375,7 +3327,7 @@ export type TargetExpressionAction_Deserialize = ({ add: {
 	constant: number | null,
 } }) & { "add-term"?: never; "remove-term"?: never; "reorder-term"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; remove?: never; reorder?: never } | ({ "add-term": {
 	expression: TargetExpressionId,
-	term: TargetTerm_Deserialize,
+	term: TargetTerm_Deserialize<DualVar_Deserialize>,
 } }) & { "remove-term"?: never; "reorder-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; remove?: never; reorder?: never } | ({ "remove-term": {
 	expression: TargetExpressionId,
 	term: TargetTermId,
@@ -3397,7 +3349,7 @@ export type TargetExpressionAction_Deserialize = ({ add: {
 } }) & { "add-term"?: never; "remove-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; remove?: never; reorder?: never };
 
 export type TargetExpressionAction_Serialize = ({ add: {
-	expression: TargetExpression_Serialize,
+	expression: TargetExpression_Serialize<DualVar_Serialize>,
 } }) & { "add-term"?: never; "remove-term"?: never; "reorder-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; remove?: never; reorder?: never } | ({ remove: {
 	expression: TargetExpressionId,
 } }) & { "add-term"?: never; "remove-term"?: never; "reorder-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; reorder?: never } | ({ "set-constant": {
@@ -3405,7 +3357,7 @@ export type TargetExpressionAction_Serialize = ({ add: {
 	constant: number | null,
 } }) & { "add-term"?: never; "remove-term"?: never; "reorder-term"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; remove?: never; reorder?: never } | ({ "add-term": {
 	expression: TargetExpressionId,
-	term: TargetTerm_Serialize,
+	term: TargetTerm_Serialize<DualVar_Serialize>,
 } }) & { "remove-term"?: never; "reorder-term"?: never; "set-constant"?: never; "set-term-coefficient"?: never; "set-term-flow"?: never; add?: never; remove?: never; reorder?: never } | ({ "remove-term": {
 	expression: TargetExpressionId,
 	term: TargetTermId,
@@ -3428,33 +3380,33 @@ export type TargetExpressionAction_Serialize = ({ add: {
 
 export type TargetExpressionId = number;
 
-export type TargetExpression_Deserialize = {
+export type TargetExpression_Deserialize<F = DualVar_Serialize | DualVar_Deserialize> = {
 	id?: TargetExpressionId,
 	constant?: number | null,
-	terms?: TargetTerm_Deserialize[],
+	terms?: TargetTerm_Deserialize<F>[],
 };
 
-export type TargetExpression_Serialize = {
+export type TargetExpression_Serialize<F = DualVar_Serialize | DualVar_Deserialize> = {
 	id: TargetExpressionId,
 	constant: number | null,
-	terms: TargetTerm_Serialize[],
+	terms: TargetTerm_Serialize<F>[],
 };
 
 export type TargetId = number;
 
-export type TargetTerm = TargetTerm_Serialize | TargetTerm_Deserialize;
+export type TargetTerm<F = DualVar_Serialize | DualVar_Deserialize> = TargetTerm_Serialize<F> | TargetTerm_Deserialize<F>;
 
 export type TargetTermId = number;
 
-export type TargetTerm_Deserialize = {
+export type TargetTerm_Deserialize<F = DualVar_Serialize | DualVar_Deserialize> = {
 	id?: TargetTermId,
-	flow?: DualVar_Deserialize,
+	flow?: F,
 	coefficient?: number | null,
 };
 
-export type TargetTerm_Serialize = {
+export type TargetTerm_Serialize<F = DualVar_Serialize | DualVar_Deserialize> = {
 	id: TargetTermId,
-	flow: DualVar_Serialize,
+	flow: F,
 	coefficient: number | null,
 };
 
@@ -3778,8 +3730,8 @@ export type UniverseDocument_Deserialize = {
 	id?: UniverseId,
 	name?: string,
 	mechanics?: UniverseMechanicEntry_Deserialize[],
-	targets?: LocatedTarget_Deserialize[],
-	target_expressions?: LocatedTargetExpression_Deserialize[],
+	targets?: FlowTarget_Deserialize<LocatedDualVar_Deserialize>[],
+	target_expressions?: TargetExpression_Deserialize<LocatedDualVar_Deserialize>[],
 	external_inputs?: LocatedExternalInput_Deserialize[],
 	strict_source?: boolean,
 	strict_sink?: boolean,
@@ -3790,8 +3742,8 @@ export type UniverseDocument_Serialize = {
 	id: UniverseId,
 	name: string,
 	mechanics: UniverseMechanicEntry_Serialize[],
-	targets: LocatedTarget_Serialize[],
-	target_expressions: LocatedTargetExpression_Serialize[],
+	targets: FlowTarget_Serialize<LocatedDualVar_Serialize>[],
+	target_expressions: TargetExpression_Serialize<LocatedDualVar_Serialize>[],
 	external_inputs: LocatedExternalInput_Serialize[],
 	strict_source: boolean,
 	strict_sink: boolean,

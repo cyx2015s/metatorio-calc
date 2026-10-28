@@ -276,54 +276,11 @@ impl Default for UniverseMechanicEntry {
     }
 }
 
-/// 宇宙工厂的一个目标：目标流本身带地点。
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LocatedTarget {
-    pub id: TargetId,
-    pub flow: LocatedDualVar,
-    pub amount: f64,
-}
-
-/// 宇宙目标表达式：每一项各自带地点，因此一个表达式可以横跨任意地点。
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-pub struct LocatedTargetExpression {
-    pub id: TargetExpressionId,
-    pub constant: f64,
-    pub terms: Vec<LocatedTargetTerm>,
-}
-
-impl Default for LocatedTargetExpression {
-    fn default() -> Self {
-        Self {
-            id: TargetExpressionId::default(),
-            constant: 1.0,
-            terms: Vec::new(),
-        }
-    }
-}
-
-#[cfg_attr(feature = "specta", derive(specta::Type))]
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-pub struct LocatedTargetTerm {
-    pub id: TargetTermId,
-    pub flow: LocatedDualVar,
-    pub coefficient: f64,
-}
-
-impl Default for LocatedTargetTerm {
-    fn default() -> Self {
-        Self {
-            id: TargetTermId::default(),
-            flow: LocatedDualVar::default(),
-            coefficient: 1.0,
-        }
-    }
-}
+/// A universe target retains location as part of its flow identity.
+pub type LocatedTarget = FlowTarget<LocatedDualVar>;
+/// Terms may use different locations within one expression.
+pub type LocatedTargetExpression = TargetExpression<LocatedDualVar>;
+pub type LocatedTargetTerm = TargetTerm<LocatedDualVar>;
 
 /// 宇宙工厂的手动外部输入；成本覆盖同地点的隐式来源。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -384,22 +341,25 @@ pub struct FactorySettings {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-pub struct FlowTarget {
+#[schemars(bound = "F: JsonSchema + Serialize + Default")]
+pub struct FlowTarget<F = DualVar> {
     pub id: TargetId,
-    pub flow: DualVar,
+    pub flow: F,
     pub amount: f64,
 }
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-pub struct TargetExpression {
+#[schemars(bound = "F: JsonSchema + Serialize + Default")]
+#[serde(bound(deserialize = "F: Deserialize<'de> + Default"))]
+pub struct TargetExpression<F = DualVar> {
     pub id: TargetExpressionId,
     pub constant: f64,
-    pub terms: Vec<TargetTerm>,
+    pub terms: Vec<TargetTerm<F>>,
 }
 
-impl Default for TargetExpression {
+impl<F> Default for TargetExpression<F> {
     fn default() -> Self {
         Self {
             id: TargetExpressionId::default(),
@@ -412,17 +372,18 @@ impl Default for TargetExpression {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
-pub struct TargetTerm {
+#[schemars(bound = "F: JsonSchema + Serialize + Default")]
+pub struct TargetTerm<F = DualVar> {
     pub id: TargetTermId,
-    pub flow: DualVar,
+    pub flow: F,
     pub coefficient: f64,
 }
 
-impl Default for TargetTerm {
+impl<F: Default> Default for TargetTerm<F> {
     fn default() -> Self {
         Self {
             id: TargetTermId::default(),
-            flow: DualVar::Unknown,
+            flow: F::default(),
             coefficient: 1.0,
         }
     }
@@ -611,6 +572,51 @@ impl MechanicKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn target_wire_defaults_preserve_plain_and_located_flows() {
+        use serde_json::json;
+        fn check<T: serde::de::DeserializeOwned + Serialize + JsonSchema + Default>(
+            input: serde_json::Value,
+            expected: serde_json::Value,
+        ) {
+            let schema = serde_json::to_value(schemars::schema_for!(T)).unwrap();
+            let defaults = serde_json::to_value(T::default()).unwrap();
+            for (field, value) in defaults.as_object().unwrap() {
+                assert_eq!(
+                    &schema["properties"][field]["default"], value,
+                    "schema default for {field} must agree with persisted JSON"
+                );
+            }
+            let parsed: T = serde_json::from_value(input).unwrap();
+            assert_eq!(serde_json::to_value(parsed).unwrap(), expected);
+        }
+        check::<FlowTarget>(json!({}), json!({"id":0,"flow":"Unknown","amount":0.0}));
+        check::<LocatedTarget>(
+            json!({}),
+            json!({"id":0,"flow":{"location":{"kind":"space"},"flow":"Unknown"},"amount":0.0}),
+        );
+        check::<TargetExpression>(
+            json!({"id":7,"terms":[{"id":8}]}),
+            json!({"id":7,"constant":1.0,"terms":[{"id":8,"flow":"Unknown","coefficient":1.0}]}),
+        );
+        check::<LocatedTargetExpression>(
+            json!({"id":7,"terms":[{"id":8}]}),
+            json!({"id":7,"constant":1.0,"terms":[{"id":8,"flow":{"location":{"kind":"space"},"flow":"Unknown"},"coefficient":1.0}]}),
+        );
+        let located = json!({"id":9,"constant":2.0,"terms":[
+            {"id":10,"flow":{"location":{"kind":"space"},"flow":"Electricity"},"coefficient":3.0},
+            {"id":11,"flow":{"location":{"kind":"planet","name":"nauvis"},"flow":"Electricity"},"coefficient":4.0}
+        ]});
+        check::<LocatedTargetExpression>(located.clone(), located);
+    }
+
+    #[test]
+    fn located_external_inputs_keep_their_required_wire_fields() {
+        assert!(serde_json::from_str::<ExternalInput>("{}").is_ok());
+        assert!(serde_json::from_str::<LocatedExternalInput>("{}").is_err());
+        assert!(serde_json::from_str::<LocatedExternalInput>(r#"{"id":1,"penalty":2}"#).is_err());
+    }
 
     #[test]
     fn legacy_project_settings_stay_on_rust_and_new_projects_pick_a_compiled_solver() {

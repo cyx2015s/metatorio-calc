@@ -62,9 +62,9 @@ export type Location = Wire.Location;
 export type LocatedDualVar = Wire.LocatedDualVar_Serialize;
 export type LocatedMechanic = Wire.LocatedMechanic_Serialize;
 export type UniverseMechanicEntry = Wire.UniverseMechanicEntry_Serialize;
-export type LocatedTarget = Wire.LocatedTarget_Serialize;
-export type LocatedTargetTerm = Wire.LocatedTargetTerm_Serialize;
-export type LocatedTargetExpression = Wire.LocatedTargetExpression_Serialize;
+export type LocatedTarget = Wire.FlowTarget_Serialize<LocatedDualVar>;
+export type LocatedTargetTerm = Wire.TargetTerm_Serialize<LocatedDualVar>;
+export type LocatedTargetExpression = Wire.TargetExpression_Serialize<LocatedDualVar>;
 export type UniverseDocument = Wire.UniverseDocument_Serialize;
 export type LocatedMechanicSolution = Wire.LocatedMechanicSolution_Serialize;
 export type LocatedFlow = Wire.LocatedFlow_Serialize;
@@ -100,10 +100,10 @@ export type Mechanic = { type: Wire.Mechanic_Serialize["type"] } & {
   [K in Exclude<UnionKeys<Wire.Mechanic_Serialize>, "type">]?: UnionValue<Wire.Mechanic_Serialize, K>
 };
 export type MechanicEntry = Omit<Wire.MechanicEntry_Serialize, "mechanic"> & { mechanic: Mechanic } & { location?: Location; transport?: "rocket-export" | "orbital-drop" };
-export type FlowTarget = Wire.FlowTarget_Serialize & { location?: Location };
-export type TargetTerm = Wire.TargetTerm_Serialize & { location?: Location };
+export type FlowTarget = Wire.FlowTarget_Serialize<DualVar> & { location?: Location };
+export type TargetTerm = Wire.TargetTerm_Serialize<DualVar> & { location?: Location };
 export type ExternalInput = Wire.ExternalInput_Serialize & { location?: Location };
-export type TargetExpression = Omit<Wire.TargetExpression_Serialize, "terms"> & { terms: TargetTerm[] };
+export type TargetExpression = Omit<Wire.TargetExpression_Serialize<DualVar>, "terms"> & { terms: TargetTerm[] };
 export type FactoryDocument = Omit<Wire.FactoryDocument_Serialize, "mechanics" | "targets" | "target_expressions" | "external_inputs"> & { mechanics: MechanicEntry[]; targets: FlowTarget[]; target_expressions: TargetExpression[]; external_inputs: ExternalInput[] };
 export type ProjectDocument = Omit<Wire.ProjectDocument_Serialize, "factories"> & { factories: FactoryDocument[] };
 export type AppDocument = Omit<Wire.AppDocument_Serialize, "projects"> & { projects: ProjectDocument[] };

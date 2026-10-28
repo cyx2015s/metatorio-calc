@@ -116,3 +116,17 @@ Rust 源码 API 的变化：`SolveSnapshot` 的项目字段收敛到 `inputs: Pr
 验证：迁移的 **17/17 浏览器脚本按既有单脚本方式顺序运行通过**；前端 **142 项单元测试通过**；网络 preview 模式通过；真实浏览器资源探针验证了回调异常、浏览器关闭、所属服务停止以及外部服务保留。依赖真实工程和 Rust 编码桥的 `saved-universe-export-browser.cjs` 保持独立生命周期，未计入这 17 项。
 
 日志：`local/browser-harness-serial.log`、`local/browser-harness-serial/results.json`、`local/browser-harness-unit.log`、`local/browser-harness-lifecycle.log`、`local/browser-harness-preview.log`。原版对照日志为 `local/browser-harness-original-{filter,network,universe}.log`。
+
+## 后续去重：普通/带地点目标文档
+
+以 `a5cf00e` 为本阶段基线。`FlowTarget<F = DualVar>`、`TargetTerm<F = DualVar>`、`TargetExpression<F = DualVar>` 共用三份字段和默认值实现，替代原来的六份 DTO。`LocatedTarget`、`LocatedTargetTerm`、`LocatedTargetExpression` 是使用 `LocatedDualVar` 的具体别名，地点继续属于流身份；JSON 没有增加包装层。
+
+普通外部输入和带地点外部输入保留各自的定义：前者支持默认字段，后者要求调用方提供字段，不能为了减少行数而放宽输入协议。
+
+新增兼容性测试先在原实现上运行通过，再在泛型实现上运行通过，覆盖空目标、表达式及项的默认值和跨地点表达式往返。测试还检查 Schema 字段默认值与实际序列化 JSON 一致。前端别名显式指定 Serialize 阶段的普通流或带地点流；更新后的 `bindings.ts`、`types.ts` 经 TypeScript 类型擦除后的 JavaScript 与本阶段 HEAD 逐字节一致。
+
+同一 tokei 口径下，计入新增测试和重新生成的绑定后，从 **90,061 降至 90,036 SLoC，净减 25 SLoC**。原始全库减少 20% 的目标仍未达到。后续继续审查目标与表达式操作中的重复规则。
+
+验证：完整工作区 **781 通过、0 失败、26 个忽略项，78 个测试目标结束**；包含 MCP 完整 inputSchema、生成绑定一致性和真实资产规划。前端 **142 项单元测试通过**，类型检查 0 错误/0 警告，生产构建通过；格式和 diff 检查通过。
+
+日志与统计：`local/planning-wire-{baseline,generic,schema}.log`、`local/planning-targets-regression.log`、`local/planning-frontend-{check,tests,build}.log`、`local/planning-targets-sloc.json`、`local/planning-types-runtime-equivalence.json`。

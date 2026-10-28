@@ -21,6 +21,8 @@
 
 输入使用 `_Deserialize`，输出使用 `_Serialize`，因此 serde 默认字段和省略字段可以准确反映在前端。不要为消除类型报错而关闭 serde phases。浮点类型按 JSON 的实际行为导出为 `number | null`；展示代码处理不可用值，不能把它当作零。
 
+目标和表达式现在由 Rust 泛型 `FlowTarget<F>`、`TargetTerm<F>`、`TargetExpression<F>` 生成。前端视图别名显式指定 `DualVar` 或 `LocatedDualVar`，例如 `Wire.TargetTerm_Serialize<LocatedDualVar>`；这样输出仍使用完整的带地点流类型，而不会依赖生成泛型默认参数中的输入/输出联合。Rust 的 `LocatedTarget`、`LocatedTargetTerm`、`LocatedTargetExpression` 是对应的具体类型别名，JSON 中没有增加包装层。
+
 ## 兼容性选择
 
 - 精确锁定 `tauri-specta = 2.0.0-rc.26`、`specta = 2.0.0-rc.26`、`specta-typescript = 0.0.13`。这些仍是预发布依赖，升级时应一起检查生成 diff 与回归结果。
