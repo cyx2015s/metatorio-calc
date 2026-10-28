@@ -1,16 +1,8 @@
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const { seed, waitFor } = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-const appRoot = path.resolve(__dirname, '..');
-const port = Number(process.env.UI_TEST_PORT || 5201), url = `http://127.0.0.1:${port}`;
-(async () => {
-  const server = spawn(process.execPath, [path.join(appRoot,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',String(port),'--strictPort'], {cwd:appRoot,windowsHide:true,stdio:'ignore'});
-  let browser;
-  try {
-    await waitFor(async()=>{try{return (await fetch(url)).ok}catch{return false}},600);
-    browser = await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+
+withBrowser({ port: Number(process.env.UI_TEST_PORT || 5201) }, async (browser, url) => {
     const page = await browser.newPage({viewport:{width:1600,height:1100}}), errors=[];
     page.on('pageerror',error=>errors.push(String(error)));
     await seed(page,96);
@@ -135,5 +127,4 @@ const port = Number(process.env.UI_TEST_PORT || 5201), url = `http://127.0.0.1:$
     await expectIds(Array.from({length:96},(_,i)=>i+1));
     assert.deepEqual(errors,[]);
     console.log('Mechanism filter DOM passed: lazy/deduplicated cache, retry, offscreen entries, quality/temperature wildcards, AND, grouping, collapsed summary, config/environment invalidation, disabled entries, narrow viewport, factory switch and no document writes.');
-  } finally { await browser?.close(); server.kill(); }
-})().catch(error=>{console.error(error);process.exitCode=1});
+}).catch(error=>{console.error(error);process.exitCode=1});

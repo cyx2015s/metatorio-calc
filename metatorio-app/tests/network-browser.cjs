@@ -1,18 +1,9 @@
+const { withBrowser } = require('./browser-harness.cjs');
 const {installNetworkPngMock}=require('./network-png-mock.cjs');
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const {seed, waitFor} = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const {spawn} = require('node:child_process');
-const appRoot = path.resolve(__dirname, '..'), port = Number(process.env.UI_TEST_PORT || 5203);
-const url = `http://127.0.0.1:${port}`;
-(async () => {
-  const server = spawn(process.execPath, [path.join(appRoot, 'node_modules/vite/bin/vite.js'),
-    ...(process.env.NETWORK_PREVIEW ? ['preview'] : []), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {cwd: appRoot, windowsHide: true, stdio: 'ignore'});
-  let browser;
-  try {
-    await waitFor(async () => { try { return (await fetch(url)).ok; } catch { return false; } }, 600);
-    browser = await chromium.launch({headless: true, ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
+
+withBrowser({ port: Number(process.env.UI_TEST_PORT || 5203), preview: !!process.env.NETWORK_PREVIEW }, async (browser, url) => {
     const page = await browser.newPage({viewport: {width: 1600, height: 1100}, deviceScaleFactor: 2, acceptDownloads: true});
     page.setDefaultTimeout(30000);
     const errors = [], requests = [];
@@ -234,7 +225,7 @@ const url = `http://127.0.0.1:${port}`;
     await ready();
     if (await graph.getByRole('button', {name:'关闭网络详情', exact:true}).count()) await graph.getByRole('button', {name:'关闭网络详情', exact:true}).click();
     // Keep this repeated save/error test compact; large-size coverage lives in the universe regression.
-    await graph.locator('.network-canvas').evaluate(el=>el._cyreg.cy.nodes().forEach((n,i)=>n.position({x:(i%15)*240,y:Math.floor(i/15)*240})));
+    await graph.locator('.network-canvas').evaluate(el=>{el._cyreg.cy.nodes().forEach((n,i)=>n.position({x:(i%15)*240,y:Math.floor(i/15)*240}));});
     const exportPng = async (mode = 'success') => {
       if (process.env.NETWORK_TEST_TRACE) console.log(`export start: ${mode}`);
       await graph.getByRole('button', {name: '导出 PNG', exact: true}).click();
@@ -335,5 +326,4 @@ const url = `http://127.0.0.1:${port}`;
     assert.ok(requests.every(request => request.startsWith(url) || request.startsWith('blob:') || request.startsWith('data:')), 'offline dependencies: no CDN requests');
     assert.deepEqual(errors, []);
     console.log('Network browser passed: lazy engines, full cached expansion/retry, canvas, shared editing/filter, state restoration, PNG, narrow viewport and offline assets.');
-  } finally { await browser?.close(); server.kill(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+}).catch(error => { console.error(error); process.exitCode = 1; });

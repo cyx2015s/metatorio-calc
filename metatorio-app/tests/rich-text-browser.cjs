@@ -1,18 +1,9 @@
+const { withBrowser } = require('./browser-harness.cjs');
 // Real Svelte DOM with the existing mocked IPC fixture; no production data changes.
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const { seed, waitFor } = require("./mechanic-layout.cjs");
 const assert = require("node:assert/strict");
-const path = require("node:path");
-const { spawn } = require("node:child_process");
-const appRoot=path.resolve(__dirname,"..");
-const port=Number(process.env.UI_TEST_PORT||5198),url=process.env.UI_TEST_URL||`http://127.0.0.1:${port}`;
 
-(async()=>{
- const server=process.env.UI_TEST_URL?null:spawn(process.execPath,[path.join(appRoot,"node_modules/vite/bin/vite.js"),"--host","127.0.0.1","--port",String(port),"--strictPort"],{cwd:appRoot,windowsHide:true,stdio:"ignore"});
- let browser;
- try {
-  await waitFor(async()=>{try{return (await fetch(url)).ok}catch{return false}},600);
-  browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+withBrowser({ port: Number(process.env.UI_TEST_PORT||5198), externalUrl: process.env.UI_TEST_URL }, async (browser, url) => {
   const page=await browser.newPage({viewport:{width:1600,height:1000}});
   const errors=[];page.on('pageerror',error=>errors.push(String(error)));
   await seed(page,65);
@@ -62,5 +53,4 @@ const port=Number(process.env.UI_TEST_PORT||5198),url=process.env.UI_TEST_URL||`
   assert.equal(await page.evaluate(()=>window.__richInjected),undefined);
   assert.deepEqual(errors,[]);
   console.log('Rich text DOM regression passed: colors, tooltip, CJK search, full-width ID, metadata exclusion, references, fallback, HTML inertness.');
- } finally {await browser?.close();server?.kill();}
-})().catch(error=>{console.error(error);process.exitCode=1});
+}).catch(error=>{console.error(error);process.exitCode=1});

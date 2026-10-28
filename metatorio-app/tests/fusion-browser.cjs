@@ -1,13 +1,8 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const {seed,waitFor}=require('./mechanic-layout.cjs');
-const assert=require('node:assert/strict'),path=require('node:path'),{spawn}=require('node:child_process');
-const root=path.resolve(__dirname,'..'),port=5222,url=`http://127.0.0.1:${port}`;
-(async()=>{
- const server=spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:root,windowsHide:true,stdio:'ignore'});
- let browser;
- try{
-  await waitFor(async()=>{try{return(await fetch(url)).ok}catch{return false}},600);
-  browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+const assert = require('node:assert/strict');
+
+withBrowser({ port: 5222 }, async (browser, url) => {
   const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await seed(page,2);
   await page.addInitScript(()=>{
@@ -61,5 +56,4 @@ const root=path.resolve(__dirname,'..'),port=5222,url=`http://127.0.0.1:${port}`
   const graph=page.getByRole('region',{name:'机制网络视图'});await waitFor(async()=>await graph.getAttribute('data-network-ready')==='true',600);
   assert.ok(await graph.locator('.network-canvas').evaluate(el=>el._cyreg.cy.nodes().filter(n=>n.data('kind')==='mechanic').every(n=>String(n.style('background-width')).includes('%'))));
   assert.deepEqual(errors,[]);console.log('Fusion browser passed: inherited neighbours, fuel category filtering, temperature edit and quality network icons.');
- }finally{await browser?.close();server.kill();}
-})().catch(e=>{console.error(e);process.exitCode=1});
+}).catch(e=>{console.error(e);process.exitCode=1});

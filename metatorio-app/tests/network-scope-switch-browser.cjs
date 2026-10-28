@@ -1,13 +1,8 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const {seed,waitFor}=require('./mechanic-layout.cjs');
-const assert=require('node:assert/strict'),path=require('node:path'),{spawn}=require('node:child_process');
-const root=path.resolve(__dirname,'..'),port=5224,url=`http://127.0.0.1:${port}`;
-(async()=>{
- const server=spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:root,windowsHide:true,stdio:'ignore'});
- let browser;
- try {
-  await waitFor(async()=>{try{return(await fetch(url)).ok}catch{return false}},600);
-  browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+const assert = require('node:assert/strict');
+
+withBrowser({ port: 5224 }, async (browser, url) => {
   const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[];
   page.on('pageerror',error=>{errors.push(String(error));console.log('PAGE ERROR:',error.stack||String(error));});
   await seed(page,0);
@@ -79,5 +74,4 @@ const root=path.resolve(__dirname,'..'),port=5224,url=`http://127.0.0.1:${port}`
   await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="mechanic"]').length===2));
   assert.deepEqual(errors,[]);
   console.log('Network scope switch passed: immediate mechanism/target/external-input edits and independent view settings across repeated universe/factory switches.');
- }finally{await browser?.close();server.kill();}
-})().catch(error=>{console.error(error);process.exitCode=1;});
+}).catch(error=>{console.error(error);process.exitCode=1;});

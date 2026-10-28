@@ -1,17 +1,9 @@
+const { withBrowser } = require('./browser-harness.cjs');
 // Actual Svelte page with mocked IPC: progress lifetime, scope and stale events.
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { seed, waitFor } = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-const root = path.resolve(__dirname, '..');
-const port = Number(process.env.UI_TEST_PORT || 5204);
-(async () => {
-  const server = spawn(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {cwd: root, windowsHide: true, stdio: 'ignore'});
-  let browser;
-  try {
-    await waitFor(async () => { try { return (await fetch(`http://127.0.0.1:${port}`)).ok; } catch { return false; } }, 600);
-    browser = await chromium.launch({headless: true, ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
+
+withBrowser({ port: Number(process.env.UI_TEST_PORT || 5204) }, async (browser, url) => {
     const page = await browser.newPage({viewport: {width: 1600, height: 1000}});
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -36,7 +28,7 @@ const port = Number(process.env.UI_TEST_PORT || 5204);
       };
       window.__emitPlanProgress = payload => listeners.get('auto-plan-progress')?.({payload});
     });
-    await page.goto(`http://127.0.0.1:${port}`);
+    await page.goto(url);
     await page.locator('.mech-card').first().waitFor();
     const status = page.locator('.auto-plan-progress');
     const button = page.getByRole('button', {name: '自动规划', exact: true});
@@ -93,8 +85,4 @@ const port = Number(process.env.UI_TEST_PORT || 5204);
     assert.equal(await status.count(), 0);
     assert.deepEqual(errors, []);
     console.log('PASS: pending dimensions, persistent counts, verification, factory scope, MCP runs, stale events, success and failure cleanup');
-  } finally {
-    await browser?.close();
-    server.kill();
-  }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+}).catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,14 +1,8 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const {seed,waitFor}=require('./mechanic-layout.cjs');
-const {spawn}=require('node:child_process');
-const path=require('node:path');const assert=require('node:assert/strict');
-const root=path.resolve(__dirname,'..'),port=5220,url=`http://127.0.0.1:${port}`;
-(async()=>{
- const server=spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:root,windowsHide:true,stdio:'ignore'});
- let browser;
- try{
-  await waitFor(async()=>{try{return(await fetch(url)).ok}catch{return false}},600);
-  browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+const assert = require('node:assert/strict');
+
+withBrowser({ port: 5220 }, async (browser, url) => {
   const page=await browser.newPage({viewport:{width:1000,height:700},deviceScaleFactor:2});await seed(page,1);await page.goto(url);
   const result=await page.evaluate(async()=>{
    const cytoscape=(await import('/node_modules/.vite/deps/cytoscape.js')).default;
@@ -44,5 +38,4 @@ const root=path.resolve(__dirname,'..'),port=5220,url=`http://127.0.0.1:${port}`
   });
   assert.equal(result.differences,0,JSON.stringify(result));assert.ok(result.ink>100&&result.bluePixels>10);assert.ok(result.count>10);assert.ok(result.unchanged);
   console.log('Tiled renderer passed:',JSON.stringify(result));
- }finally{await browser?.close();server.kill();}
-})().catch(e=>{console.error(e);process.exitCode=1});
+}).catch(e=>{console.error(e);process.exitCode=1});

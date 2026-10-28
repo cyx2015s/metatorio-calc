@@ -1,16 +1,8 @@
-const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const {seed, waitFor} = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const {spawn} = require('node:child_process');
-const appRoot = path.resolve(__dirname, '..'), port = Number(process.env.UI_TEST_PORT || 5204);
-const url = `http://127.0.0.1:${port}`;
-(async () => {
-  const server = spawn(process.execPath, [path.join(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {cwd: appRoot, windowsHide: true, stdio: 'ignore'});
-  let browser;
-  try {
-    await waitFor(async () => { try { return (await fetch(url)).ok; } catch { return false; } }, 600);
-    browser = await chromium.launch({headless: true, ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
+
+withBrowser({ port: Number(process.env.UI_TEST_PORT || 5204) }, async (browser, url) => {
     const page = await browser.newPage({viewport: {width: 1600, height: 1100}});
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -75,5 +67,4 @@ const url = `http://127.0.0.1:${port}`;
     assert.equal(await page.evaluate(() => document.body.scrollWidth > innerWidth), false);
     assert.deepEqual(errors, []);
     console.log('External input shortcuts passed: zero-cost energy, reuse, suppression, restore, unit independence, implicit promotion and existing scoped messages only.');
-  } finally { await browser?.close(); server.kill(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+}).catch(error => { console.error(error); process.exitCode = 1; });

@@ -1,12 +1,7 @@
 // Browser regression for the mechanism workspace. IPC is mocked: this tests UI
 // layout/interactions, not Factorio data or the LP solver. See docs/mechanic-workspace.md.
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
+const { withBrowser, waitFor, pause } = require("./browser-harness.cjs");
 const assert = require("node:assert/strict");
-const path = require("node:path");
-const { spawn } = require("node:child_process");
-const appRoot = path.resolve(__dirname, "..");
-const port = Number(process.env.UI_TEST_PORT || 5197);
-const url = `http://127.0.0.1:${port}`;
 
 async function seed(page, count) {
  await page.addInitScript(({count})=>{
@@ -116,11 +111,6 @@ async function seed(page, count) {
  },{count});
 
 }
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitFor(check, attempts = 100) {
-  for (let i = 0; i < attempts; i++) { if (await check()) return; await pause(50); }
-  throw Error("Timed out waiting for UI state");
-}
 async function checkRows(page) {
   const geometry = await page.locator(".mech-card").evaluateAll((cards) => cards.map((card) => ({
     height: card.getBoundingClientRect().height,
@@ -132,13 +122,7 @@ async function checkRows(page) {
   assert.equal(await page.evaluate(() => document.body.scrollWidth > innerWidth), false);
 }
 async function run() {
-  const server = spawn(process.execPath, [path.join(appRoot, "node_modules/vite/bin/vite.js"), "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
-    cwd: appRoot, windowsHide: true, stdio: "ignore",
-  });
-  let browser;
-  try {
-    await waitFor(async () => { try { return (await fetch(url)).ok; } catch { return false; } });
-    browser = await chromium.launch({ headless: true, ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : {}) });
+  return withBrowser({ port: Number(process.env.UI_TEST_PORT || 5197), attempts: 100 }, async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.stack || error.message));
@@ -351,10 +335,7 @@ async function run() {
     assert.deepEqual(selectionChecks, [[1,2],[10001,10002],[10001,10003],[10001,10002],[1,2],[10001,10002],[1,2],[1,null],[1,2],[null,null],[1,2],[11,12]]);
     assert.deepEqual(errors,[]);
     console.log(JSON.stringify({rows:1000,initialMounted:mounted,initialFlowRequests:requests,rowHeight:72,checks:'layout, nested selectors, focus, parameters, group reorder, virtual mounting, project/factory selection'},null,2));
-  } finally {
-    await browser?.close();
-    server.kill();
-  }
+  });
 }
 if (require.main === module) run().catch(error=>{console.error(error);process.exitCode=1});
 module.exports = { seed, waitFor };

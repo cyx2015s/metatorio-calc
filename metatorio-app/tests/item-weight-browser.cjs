@@ -1,17 +1,8 @@
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const { seed, waitFor } = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-const appRoot = path.resolve(__dirname, '..');
-const port = 5207, url = `http://127.0.0.1:${port}`;
 
-(async () => {
-  const server = spawn(process.execPath, [path.join(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: appRoot, windowsHide: true, stdio: 'ignore' });
-  let browser;
-  try {
-    await waitFor(async () => { try { return (await fetch(url)).ok; } catch { return false; } }, 600);
-    browser = await chromium.launch({ headless: true, ...(process.env.BROWSER_EXECUTABLE ? { executablePath: process.env.BROWSER_EXECUTABLE } : {}) });
+withBrowser({ port: 5207 }, async (browser, url) => {
     const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
     const errors = []; page.on('pageerror', error => errors.push(String(error)));
     await seed(page, 5);
@@ -41,5 +32,4 @@ const port = 5207, url = `http://127.0.0.1:${port}`;
     if (process.env.WEIGHT_SCREENSHOT) await page.screenshot({ path: process.env.WEIGHT_SCREENSHOT });
     assert.deepEqual(errors, []);
     console.log('Item weight hover DOM passed: shared facts, mass units, recipe attribution, quality note and no overflow.');
-  } finally { await browser?.close(); server.kill(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+}).catch(error => { console.error(error); process.exitCode = 1; });

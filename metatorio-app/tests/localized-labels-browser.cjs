@@ -1,19 +1,9 @@
+const { withBrowser } = require('./browser-harness.cjs');
 // Exercise the shared runtime and real Svelte views with mocked catalog IPC.
-const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const { seed, waitFor } = require('./mechanic-layout.cjs');
 const assert = require('node:assert/strict');
-const path = require('node:path');
-const { spawn } = require('node:child_process');
-const appRoot = path.resolve(__dirname, '..');
-const port = Number(process.env.UI_TEST_PORT || 5199);
-const url = `http://127.0.0.1:${port}`;
 
-(async () => {
-  const server = spawn(process.execPath, [path.join(appRoot, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {cwd: appRoot, windowsHide: true, stdio: 'ignore'});
-  let browser;
-  try {
-    await waitFor(async () => { try { return (await fetch(url)).ok; } catch { return false; } }, 600);
-    browser = await chromium.launch({headless: true, ...(process.env.BROWSER_EXECUTABLE ? {executablePath: process.env.BROWSER_EXECUTABLE} : {})});
+withBrowser({ port: Number(process.env.UI_TEST_PORT || 5199) }, async (browser, url) => {
     const page = await browser.newPage({viewport: {width: 1600, height: 1000}});
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
@@ -88,8 +78,4 @@ const url = `http://127.0.0.1:${port}`;
     assert.ok(!failure.includes('iron-plate'));
     assert.deepEqual(errors, []);
     console.log('Localized labels DOM passed: categories, rich subgroup, quality values, namespace isolation, same-context refresh, space locations, synthetic flows and infeasibility diagnostics.');
-  } finally {
-    await browser?.close();
-    server.kill();
-  }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+}).catch(error => { console.error(error); process.exitCode = 1; });

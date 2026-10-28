@@ -102,3 +102,17 @@ Rust 源码 API 的变化：`SolveSnapshot` 的项目字段收敛到 `inputs: Pr
 本阶段生产代码减少 **59 SLoC**，新增守卫测试增加 74 SLoC，所以本阶段总量增加 15 SLoC。与 `8ad316d` 相比，累计从 **90,224 降到 90,202 SLoC，净减 22 SLoC**。不能将生产代码的减少或自动生成文件单独排除后的数字，当作全库 20% 目标已完成。
 
 最终完整工作区回归：**779 通过、0 失败、26 个忽略项，78 个测试目标全部结束**；包含任务复用、并发隔离、过期快照重算、超时/取消、真实资产规划以及生成绑定一致性检查。`cargo fmt --all -- --check` 与 `git diff --check` 通过。本阶段没有调整测试产量。日志：`local/snapshot-final.log`、`local/snapshot-guard.log`。
+
+## 后续去重：浏览器回归生命周期
+
+以 `82c3863` 为本阶段基线。17 个脚本共用 `tests/browser-harness.cjs` 管理 Vite 启动、服务就绪、Chromium 启动及资源关闭。各脚本继续持有页面选项、IPC 夹具、交互和断言；`mechanic-layout.cjs` 保留 seed 与 waitFor 的既有导出。静态 AST 对照确认原有 **344 处断言、页面创建和 seed 调用**保留。
+
+共享夹具保留各脚本端口及浏览器可执行文件配置，支持原有的 preview 和外部 URL 分支。异常路径也关闭浏览器和自己创建的服务，借用外部 URL 时不停止外部服务。
+
+顺序验证时，原版网络脚本长时间停在返回 Cytoscape 集合的 `evaluate` 调用，关闭其测试浏览器后取得了该位置的错误栈。仅用于移动节点或调整视图的三个回调现明确返回 undefined，避免将图集合/核心对象交回 Playwright；节点操作和断言保留。修改后的整份网络脚本验证通过，不把未完成的原版运行当作可比较的性能基准。
+
+相同 tokei 口径下，这 17 个脚本从 **2,036 SLoC 降至 1,895 SLoC**（包含新增共享夹具），净减 **141 SLoC**。全库从 **90,202 降至 90,061 SLoC**。原始全库减少 20% 的目标仍未达到。
+
+验证：迁移的 **17/17 浏览器脚本按既有单脚本方式顺序运行通过**；前端 **142 项单元测试通过**；网络 preview 模式通过；真实浏览器资源探针验证了回调异常、浏览器关闭、所属服务停止以及外部服务保留。依赖真实工程和 Rust 编码桥的 `saved-universe-export-browser.cjs` 保持独立生命周期，未计入这 17 项。
+
+日志：`local/browser-harness-serial.log`、`local/browser-harness-serial/results.json`、`local/browser-harness-unit.log`、`local/browser-harness-lifecycle.log`、`local/browser-harness-preview.log`。原版对照日志为 `local/browser-harness-original-{filter,network,universe}.log`。

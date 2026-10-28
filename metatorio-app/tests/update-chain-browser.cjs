@@ -1,13 +1,8 @@
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
+const { withBrowser } = require('./browser-harness.cjs');
 const {seed,waitFor}=require('./mechanic-layout.cjs');
-const assert=require('node:assert/strict'),path=require('node:path'),{spawn}=require('node:child_process');
-const root=path.resolve(__dirname,'..'),port=5223,url=`http://127.0.0.1:${port}`;
-(async()=>{
- const server=spawn(process.execPath,[path.join(root,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:root,windowsHide:true,stdio:'ignore'});
- let browser;
- try {
-  await waitFor(async()=>{try{return(await fetch(url)).ok}catch{return false}},600);
-  browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+const assert = require('node:assert/strict');
+
+withBrowser({ port: 5223 }, async (browser, url) => {
   const page=await browser.newPage({viewport:{width:1600,height:1000}}),errors=[];
   page.on('pageerror',e=>errors.push(String(e)));page.setDefaultTimeout(10000);
   await seed(page,2);
@@ -86,5 +81,4 @@ const root=path.resolve(__dirname,'..'),port=5223,url=`http://127.0.0.1:${port}`
   assert.deepEqual(await run(async()=>{const {runtime:r}=await import('/src/lib/runtime/store.svelte.ts');return {mining:r.productivityInfo.mining,milestones:r.orderedMilestones,accessibility:r.accessibility}}),{mining:10,milestones:[],accessibility:[]});
   assert.deepEqual(errors,[]);
   console.log('Update chain passed: immediate edits, refresh ordering, scoped solve cache, stale replies, no-op selection and overlapping dispatches.');
- } finally {await browser?.close();server.kill();}
-})().catch(error=>{console.error(error);process.exitCode=1;});
+}).catch(error=>{console.error(error);process.exitCode=1;});

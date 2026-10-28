@@ -1,16 +1,9 @@
+const { withBrowser } = require('./browser-harness.cjs');
 const {installNetworkPngMock}=require('./network-png-mock.cjs');
-const {chromium}=require(process.env.PLAYWRIGHT_MODULE||'playwright');
 const {seed,waitFor}=require('./mechanic-layout.cjs');
 const assert=require('node:assert/strict');
-const path=require('node:path');
-const {spawn}=require('node:child_process');
-const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${port}`;
-(async()=>{
- const server=spawn(process.execPath,[path.join(appRoot,'node_modules/vite/bin/vite.js'),'--host','127.0.0.1','--port',String(port),'--strictPort'],{cwd:appRoot,windowsHide:true,stdio:'ignore'});
- let browser;
- try {
-  await waitFor(async()=>{try{return(await fetch(url)).ok}catch{return false}},600);
-  browser=await chromium.launch({headless:true,...(process.env.BROWSER_EXECUTABLE?{executablePath:process.env.BROWSER_EXECUTABLE}:{})});
+
+withBrowser({ port: 5214 }, async (browser, url) => {
   const page=await browser.newPage({viewport:{width:1600,height:1000}});page.setDefaultTimeout(15000);
   const errors=[];page.on('pageerror',e=>errors.push(String(e)));
   await seed(page,5);
@@ -156,7 +149,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   await page.getByLabel('网络显示大小',{exact:true}).selectOption('2');
   await waitFor(async()=>await canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').first().numericStyle('font-size'))===groupFont*2);
   // Export above the former arbitrary 8192-pixel side limit at original size.
-  await canvas.evaluate(el=>el._cyreg.cy.nodes().filter(n=>!n.isParent()).last().position({x:9000,y:1000}));
+  await canvas.evaluate(el=>{el._cyreg.cy.nodes().filter(n=>!n.isParent()).last().position({x:9000,y:1000});});
   const originalBounds=await canvas.evaluate(el=>{const b=el._cyreg.cy.elements().boundingBox();return {w:Math.ceil(b.w),h:Math.ceil(b.h)};});
   const largePng = await exportUniversePng();
   assert.ok(originalBounds.w>8192);
@@ -197,7 +190,7 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   assert.equal(grouped.transports.length,3);
   assert.ok(grouped.transports.every(t=>t.links.length>0),'local transport connections are retained');
   assert.ok(grouped.transports.filter(t=>t.type==='orbital-drop').every(t=>t.links.every(e=>e.source.startsWith('m:'))));
-  if(process.env.CLUSTER_TRANSPORT_SCREENSHOT){await canvas.evaluate(el=>el._cyreg.cy.fit(undefined,40));await page.screenshot({path:process.env.CLUSTER_TRANSPORT_SCREENSHOT});}
+  if(process.env.CLUSTER_TRANSPORT_SCREENSHOT){await canvas.evaluate(el=>{el._cyreg.cy.fit(undefined,40);});await page.screenshot({path:process.env.CLUSTER_TRANSPORT_SCREENSHOT});}
   await exportUniversePng();
   await page.getByLabel('按地点聚类').uncheck();
   await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="location"]').length===0));
@@ -215,5 +208,4 @@ const appRoot=path.resolve(__dirname,'..'),port=5214,url=`http://127.0.0.1:${por
   assert.equal(await page.getByLabel('机制地点').count(),0);
   assert.deepEqual(errors,[]);
   console.log('Universe shared workspace passed: tabs, targets/temperature/selector, expressions, scoped edits/clone/location, solved panel, network editor and ordinary factory isolation.');
- } finally {await browser?.close();server.kill();}
-})().catch(e=>{console.error(e);process.exitCode=1});
+}).catch(e=>{console.error(e);process.exitCode=1});

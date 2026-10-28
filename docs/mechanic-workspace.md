@@ -79,6 +79,8 @@ pnpm test:network-browser
 
 `test:layout` 需要独立的 Playwright 环境，默认从 Node 模块路径加载 `playwright`；也可设置 `PLAYWRIGHT_MODULE` 为现有包的绝对目录。`BROWSER_EXECUTABLE` 可指定本机 Chrome/Chromium 的可执行文件，否则使用 Playwright 自带浏览器。测试自行启动和关闭本机 Vite 服务，端口可通过 `UI_TEST_PORT` 指定（默认 5197）。
 
+浏览器脚本通过 `tests/browser-harness.cjs` 的 `withBrowser` 共用 Vite/Chromium 生命周期，各自创建页面、安装 IPC 夹具并执行断言。脚本按单个命令顺序运行；共享夹具在异常时也关闭资源，只有自己启动的服务会被停止。`mechanic-layout.cjs` 继续导出既有的 `seed`、`waitFor`，现有脚本的夹具导入路径保持可用。
+
 浏览器回归使用模拟 IPC，覆盖 65 个混合机制和 1000 行长列表：固定行高、窄窗口、插件选择器返回、焦点恢复、温度写回、全部流量、启用切换、合并组键盘拖拽、视口挂载与编辑保留。它不验证原型数据或 LP 求解正确性，也不替代真实游戏图标下的人工阅读检查。
 
 `test:selector-browser` 默认使用端口 5200，验证目录/流选择器的初始值、草稿编辑、目录刷新保留草稿、未关闭时替换请求后的完整重置，以及关闭后重新打开的预选恢复。测试通过程序点击被遮挡的背景入口模拟替换正在编辑的请求，以覆盖正常模态交互不易触发的复用路径。
