@@ -30,18 +30,11 @@ pub trait JobSnapshot: Clone + Send + Sync + 'static {
     fn epoch(&self) -> u64;
     fn store(&self) -> &Arc<PrototypeStore>;
 }
-impl JobSnapshot for SolveSnapshot {
-    fn revision(&self) -> u64 {
-        self.revision
-    }
-    fn epoch(&self) -> u64 {
-        self.accessibility_epoch
-    }
-    fn store(&self) -> &Arc<PrototypeStore> {
-        &self.store
-    }
-}
-impl JobSnapshot for metatorio_runtime::solve::UniverseSnapshot {
+// Specialized snapshots share the project input identity via Deref.
+impl<S> JobSnapshot for S
+where
+    S: std::ops::Deref<Target = metatorio_runtime::ProjectSnapshot> + Clone + Send + Sync + 'static,
+{
     fn revision(&self) -> u64 {
         self.revision
     }

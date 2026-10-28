@@ -10,7 +10,7 @@
   import SecondaryMenu from "./SecondaryMenu.svelte";
   import { groupModules } from "./mechanic-layout";
   import ModuleEditor from "./ModuleEditor.svelte";
-  import { mechanicKindLabels as kindLabel } from "$lib/mechanics/presentation";
+  import { mechanicKindLabels as kindLabel, mechanicPrimary } from "$lib/mechanics/presentation";
   import { compactNumber } from "$lib/format";
   import type { MechanicActions } from "$lib/mechanics/actions";
   import type { CatalogKind, MechanicEntry } from "$lib/runtime/types";
@@ -73,20 +73,9 @@
   let solarOrbit = $derived(entry.location?.kind === "space" || runtime.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.settings.surface != null);
   let solarContinuous = $derived(solarOrbit || !!solarBalanceInfo?.continuous_daylight);
 
-  let primaryName = $derived(
-    entry.mechanic.recipe?.id ??
-      entry.mechanic.item?.id ??
-      entry.mechanic.tile ??
-      entry.mechanic.seed?.id ??
-      entry.mechanic.resource ??
-      entry.mechanic.generator?.id ??
-      entry.mechanic.boiler?.id ??
-      entry.mechanic.reactor?.id ??
-      entry.mechanic.solar_panel?.id ??
-      entry.mechanic.fluid ??
-      "",
-  );
-  let primaryIcon = $derived(iconTypeForKind(primaryKind()));
+  const primary = $derived(mechanicPrimary(entry.mechanic));
+  const primaryName = $derived(primary.name);
+  const primaryIcon = $derived(iconTypeForKind(primary.kind));
   let machineName = $derived(entry.mechanic.machine?.id ?? "");
   let fluidName = $derived(entry.mechanic.fluid ?? "");
 
@@ -133,50 +122,13 @@
       alive = false;
     };
   });
-  let primaryQuality = $derived(
-    entry.mechanic.recipe?.quality ??
-      entry.mechanic.item?.quality ??
-      entry.mechanic.seed?.quality ??
-      entry.mechanic.generator?.quality ??
-      entry.mechanic.boiler?.quality ??
-      entry.mechanic.reactor?.quality ??
-      entry.mechanic.solar_panel?.quality ??
-      "normal",
-  );
+  const primaryQuality = $derived(primary.quality);
   let machineQuality = $derived(entry.mechanic.machine?.quality ?? "normal");
   // 本地化显示名（无翻译回退内部 id）
-  let primaryLabel = $derived(primaryName ? runtime.localizedName(primaryKind(), primaryName) : "");
+  let primaryLabel = $derived(primaryName ? runtime.localizedName(primary.kind, primaryName) : "");
   const neighbourEstimate = $derived(runtime.document?.projects.find(p=>p.id===project)?.settings.reactor_neighbours?.[primaryName] ?? 3);
   let machineLabel = $derived(machineName ? runtime.localizedName(machineKind(), machineName) : "");
   let fluidLabel = $derived(fluidName ? runtime.localizedName("fluid", fluidName) : "");
-  function primaryKind(): CatalogKind {
-    switch (kind) {
-      case "recipe":
-        return "recipe";
-      case "mining":
-        return "resource";
-      case "generator":
-      case "fusion-generator":
-        return kind;
-      case "boiler":
-        return "boiler";
-      case "reactor":
-      case "fusion-reactor":
-        return kind;
-      case "solar":
-        return "solar-panel";
-      case "fluid-fuel":
-      case "fluid-heat":
-        return "fluid";
-      case "tile-extract":
-        return "tile";
-      case "tile-dispose":
-        return "item";
-      default:
-        return "item";
-    }
-  }
-
   function machineKind(): CatalogKind {
     if (kind === "mining") return "mining-machine";
     // 抽水机（offshore pump）不在制造机目录里，按实体名做本地化。
@@ -217,8 +169,8 @@
 <div class="identity" class:off={!entry.enabled} data-mechanic-editor={entry.id} aria-label={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel}`}>
     <div class="configuration">
       {#if entry.location}<LocationPicker value={entry.location} planetsOnly={!!entry.transport} label="机制地点" onChange={location => actions.setLocation(entry.id, location).catch(() => {})} />{/if}
-      <button class="icon-btn primary" title={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} aria-label={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} onclick={() => onPick(primaryKind())}>
-        <HoverIcon type={primaryIcon} name={primaryName || "+"} size={28} detailKind={primaryName ? primaryKind() : undefined} quality={primaryQuality} />
+      <button class="icon-btn primary" title={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} aria-label={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} onclick={() => onPick(primary.kind)}>
+        <HoverIcon type={primaryIcon} name={primaryName || "+"} size={28} detailKind={primaryName ? primary.kind : undefined} quality={primaryQuality} />
       </button>
       {#if hasMachine}
         <button class="icon-btn machine-button" title={`更换机器：${machineLabel || "未选择"}`} aria-label={`更换机器：${machineLabel || "未选择"}`}

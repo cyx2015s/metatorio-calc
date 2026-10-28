@@ -942,16 +942,7 @@ impl RuntimeState {
                 Ok(outcome)
             }
             UniverseAction::SetTransportItem { mechanic, item } => {
-                let entry = self
-                    .universe_mut(project_id, universe_id)?
-                    .mechanics
-                    .iter_mut()
-                    .find(|e| e.id == mechanic)
-                    .ok_or(RuntimeError::UniverseMechanicNotFound {
-                        project: project_id,
-                        universe: universe_id,
-                        mechanic,
-                    })?;
+                let entry = self.universe_mechanic_mut(project_id, universe_id, mechanic)?;
                 let (LocatedMechanic::RocketExport(transfer)
                 | LocatedMechanic::OrbitalDrop(transfer)) = &mut entry.mechanic
                 else {
@@ -1041,16 +1032,7 @@ impl RuntimeState {
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::SetMechanicEnabled { mechanic, enabled } => {
-                let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .mechanics
-                    .iter_mut()
-                    .find(|entry| entry.id == mechanic)
-                    .ok_or(RuntimeError::UniverseMechanicNotFound {
-                        project: project_id,
-                        universe: universe_id,
-                        mechanic,
-                    })?;
+                let entry = self.universe_mechanic_mut(project_id, universe_id, mechanic)?;
                 let changed = replace(&mut entry.enabled, enabled);
                 Ok(Outcome::meta_if(changed, project_id))
             }
@@ -1069,16 +1051,7 @@ impl RuntimeState {
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::SetMechanicLocation { mechanic, location } => {
-                let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .mechanics
-                    .iter_mut()
-                    .find(|entry| entry.id == mechanic)
-                    .ok_or(RuntimeError::UniverseMechanicNotFound {
-                        project: project_id,
-                        universe: universe_id,
-                        mechanic,
-                    })?;
+                let entry = self.universe_mechanic_mut(project_id, universe_id, mechanic)?;
                 if matches!(location, Location::Space)
                     && matches!(
                         entry.mechanic,
@@ -1104,16 +1077,7 @@ impl RuntimeState {
             } => {
                 let parsed: metatorio_core::Mechanic = serde_json::from_str(&mechanic_json)
                     .map_err(|error| RuntimeError::InvalidValue(error.to_string()))?;
-                let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .mechanics
-                    .iter_mut()
-                    .find(|entry| entry.id == mechanic)
-                    .ok_or(RuntimeError::UniverseMechanicNotFound {
-                        project: project_id,
-                        universe: universe_id,
-                        mechanic,
-                    })?;
+                let entry = self.universe_mechanic_mut(project_id, universe_id, mechanic)?;
                 let LocatedMechanic::Local(local) = &mut entry.mechanic else {
                     return Err(RuntimeError::InvalidValue(
                         "轨道货运不支持普通机制编辑".to_string(),
@@ -1123,27 +1087,8 @@ impl RuntimeState {
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::Mechanic { mechanic, action } => {
-                let compat = matches!(
-                    &action,
-                    MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
-                        | MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
-                        | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
-                );
-                let clamp = matches!(
-                    &action,
-                    MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
-                        | MechanicAction::Mining(MiningMechanicAction::SetMachine { .. })
-                );
-                let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .mechanics
-                    .iter_mut()
-                    .find(|entry| entry.id == mechanic)
-                    .ok_or(RuntimeError::UniverseMechanicNotFound {
-                        project: project_id,
-                        universe: universe_id,
-                        mechanic,
-                    })?;
+                let (compat, clamp) = mechanic_repair_needs(&action);
+                let entry = self.universe_mechanic_mut(project_id, universe_id, mechanic)?;
                 let LocatedMechanic::Local(local) = &mut entry.mechanic else {
                     return Err(RuntimeError::InvalidValue(
                         "轨道货运不支持普通机制编辑".to_string(),
@@ -1249,12 +1194,12 @@ impl RuntimeState {
                 term,
                 position,
             } => {
-                let entry = self
-                    .universe_mut(project_id, universe_id)?
-                    .target_expressions
-                    .iter_mut()
-                    .find(|e| e.id == expression)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".into()))?;
+                let entry = find_located_expression_mut(
+                    &mut self
+                        .universe_mut(project_id, universe_id)?
+                        .target_expressions,
+                    expression,
+                )?;
                 let index = entry
                     .terms
                     .iter()
@@ -1292,22 +1237,16 @@ impl RuntimeState {
             } => {
                 validate_finite("目标表达式常数", constant)?;
                 let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .target_expressions
-                    .iter_mut()
-                    .find(|candidate| candidate.id == expression)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let entry =
+                    find_located_expression_mut(&mut universe.target_expressions, expression)?;
                 let changed = replace(&mut entry.constant, constant);
                 Ok(Outcome::meta_if(changed, project_id))
             }
             UniverseAction::AddTargetExpressionTerm { expression, flow } => {
                 let term_id = self.allocate_id();
                 let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .target_expressions
-                    .iter_mut()
-                    .find(|candidate| candidate.id == expression)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let entry =
+                    find_located_expression_mut(&mut universe.target_expressions, expression)?;
                 entry.terms.push(LocatedTargetTerm {
                     id: term_id,
                     flow,
@@ -1319,11 +1258,8 @@ impl RuntimeState {
             }
             UniverseAction::RemoveTargetExpressionTerm { expression, term } => {
                 let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .target_expressions
-                    .iter_mut()
-                    .find(|candidate| candidate.id == expression)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
+                let entry =
+                    find_located_expression_mut(&mut universe.target_expressions, expression)?;
                 let index = entry
                     .terms
                     .iter()
@@ -1338,16 +1274,7 @@ impl RuntimeState {
                 flow,
             } => {
                 let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .target_expressions
-                    .iter_mut()
-                    .find(|candidate| candidate.id == expression)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
-                let term = entry
-                    .terms
-                    .iter_mut()
-                    .find(|candidate| candidate.id == term)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式项不存在".to_string()))?;
+                let term = find_located_term_mut(universe, expression, term)?;
                 let changed = replace(&mut term.flow, flow);
                 Ok(Outcome::meta_if(changed, project_id))
             }
@@ -1358,16 +1285,7 @@ impl RuntimeState {
             } => {
                 validate_finite("目标项系数", coefficient)?;
                 let universe = self.universe_mut(project_id, universe_id)?;
-                let entry = universe
-                    .target_expressions
-                    .iter_mut()
-                    .find(|candidate| candidate.id == expression)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式不存在".to_string()))?;
-                let term = entry
-                    .terms
-                    .iter_mut()
-                    .find(|candidate| candidate.id == term)
-                    .ok_or(RuntimeError::InvalidValue("目标表达式项不存在".to_string()))?;
+                let term = find_located_term_mut(universe, expression, term)?;
                 let changed = replace(&mut term.coefficient, coefficient);
                 Ok(Outcome::meta_if(changed, project_id))
             }
@@ -1428,18 +1346,7 @@ impl RuntimeState {
             }
             FactoryAction::Mechanic { mechanic, action } => {
                 // Recipe or machine edits both recheck categories and fluid input support.
-                let needs_compat = matches!(
-                    &action,
-                    MechanicAction::Recipe(RecipeMechanicAction::SetRecipe { .. })
-                        | MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
-                        | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
-                );
-                // 机器变化后，让外层按机器槽位上限钳制插件数量。
-                let needs_clamp = matches!(
-                    &action,
-                    MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
-                        | MechanicAction::Mining(MiningMechanicAction::SetMachine { .. })
-                );
+                let (needs_compat, needs_clamp) = mechanic_repair_needs(&action);
                 let entry = self
                     .factory_mut(project_id, factory_id)?
                     .mechanics
@@ -1966,6 +1873,23 @@ impl RuntimeState {
             .ok_or(RuntimeError::UniverseNotFound { project, universe })
     }
 
+    fn universe_mechanic_mut(
+        &mut self,
+        project: ProjectId,
+        universe: crate::id::UniverseId,
+        mechanic: MechanicId,
+    ) -> Result<&mut crate::document::UniverseMechanicEntry, RuntimeError> {
+        find_by_id_mut(
+            &mut self.universe_mut(project, universe)?.mechanics,
+            mechanic,
+            RuntimeError::UniverseMechanicNotFound {
+                project,
+                universe,
+                mechanic,
+            },
+        )
+    }
+
     pub fn apply_universe_auto_plan(
         &mut self,
         project: ProjectId,
@@ -2095,61 +2019,44 @@ impl RuntimeState {
                     factory.id = self.allocate_id();
                 }
             }
+            let mut remap = |id: &mut u64| {
+                if remap_all || occupied.contains(id) {
+                    *id = self.allocate_id();
+                }
+            };
             for factory in &mut project.factories {
                 for target in &mut factory.targets {
-                    if remap_all || occupied.contains(&target.id.0) {
-                        target.id = self.allocate_id();
-                    }
+                    remap(&mut target.id.0);
                 }
                 for expression in &mut factory.target_expressions {
-                    if remap_all || occupied.contains(&expression.id.0) {
-                        expression.id = self.allocate_id();
-                    }
+                    remap(&mut expression.id.0);
                     for term in &mut expression.terms {
-                        if remap_all || occupied.contains(&term.id.0) {
-                            term.id = self.allocate_id();
-                        }
+                        remap(&mut term.id.0);
                     }
                 }
                 for input in &mut factory.external_inputs {
-                    if remap_all || occupied.contains(&input.id.0) {
-                        input.id = self.allocate_id();
-                    }
+                    remap(&mut input.id.0);
                 }
                 for mechanic in &mut factory.mechanics {
-                    if remap_all || occupied.contains(&mechanic.id.0) {
-                        mechanic.id = self.allocate_id();
-                    }
+                    remap(&mut mechanic.id.0);
                 }
             }
             for universe in &mut project.universes {
-                if remap_all || occupied.contains(&universe.id.0) {
-                    universe.id = self.allocate_id();
-                }
+                remap(&mut universe.id.0);
                 for input in &mut universe.external_inputs {
-                    if remap_all || occupied.contains(&input.id.0) {
-                        input.id = self.allocate_id();
-                    }
+                    remap(&mut input.id.0);
                 }
                 for expression in &mut universe.target_expressions {
-                    if remap_all || occupied.contains(&expression.id.0) {
-                        expression.id = self.allocate_id();
-                    }
+                    remap(&mut expression.id.0);
                     for term in &mut expression.terms {
-                        if remap_all || occupied.contains(&term.id.0) {
-                            term.id = self.allocate_id();
-                        }
+                        remap(&mut term.id.0);
                     }
                 }
                 for mechanic in &mut universe.mechanics {
-                    if remap_all || occupied.contains(&mechanic.id.0) {
-                        mechanic.id = self.allocate_id();
-                    }
+                    remap(&mut mechanic.id.0);
                 }
                 for target in &mut universe.targets {
-                    if remap_all || occupied.contains(&target.id.0) {
-                        target.id = self.allocate_id();
-                    }
+                    remap(&mut target.id.0);
                 }
             }
             occupied.extend(project_ids(&project));
@@ -2688,6 +2595,23 @@ fn apply_factory_context(
     })
 }
 
+/// Compatibility repair and module clamping must agree for factory and universe edits.
+fn mechanic_repair_needs(action: &MechanicAction) -> (bool, bool) {
+    (
+        matches!(
+            action,
+            MechanicAction::Recipe(
+                RecipeMechanicAction::SetRecipe { .. } | RecipeMechanicAction::SetMachine { .. }
+            ) | MechanicAction::Mining(MiningMechanicAction::SetResource { .. })
+        ),
+        matches!(
+            action,
+            MechanicAction::Recipe(RecipeMechanicAction::SetMachine { .. })
+                | MechanicAction::Mining(MiningMechanicAction::SetMachine { .. })
+        ),
+    )
+}
+
 /// Build a kind-tagged mechanic action from a selector commit.  The target
 /// mechanic's kind is known up front, so the produced action always matches
 /// the mechanic — a mismatched (selector kind, mechanic kind) pair is a
@@ -3140,46 +3064,68 @@ fn find_term_mut(
     expression: TargetExpressionId,
     term: TargetTermId,
 ) -> Result<&mut TargetTerm, RuntimeError> {
-    let expression = factory
-        .target_expressions
-        .iter_mut()
-        .find(|candidate| candidate.id == expression)
-        .ok_or(RuntimeError::TargetExpressionNotFound(expression))?;
-    expression
-        .terms
-        .iter_mut()
-        .find(|candidate| candidate.id == term)
-        .ok_or(RuntimeError::TargetTermNotFound(term))
+    let expression = find_expression_mut(&mut factory.target_expressions, expression)?;
+    find_by_id_mut(
+        &mut expression.terms,
+        term,
+        RuntimeError::TargetTermNotFound(term),
+    )
+}
+
+fn find_located_expression_mut(
+    items: &mut [crate::document::LocatedTargetExpression],
+    id: TargetExpressionId,
+) -> Result<&mut crate::document::LocatedTargetExpression, RuntimeError> {
+    find_by_id_mut(
+        items,
+        id,
+        RuntimeError::InvalidValue("目标表达式不存在".into()),
+    )
+}
+
+fn find_located_term_mut(
+    universe: &mut crate::document::UniverseDocument,
+    expression: TargetExpressionId,
+    term: TargetTermId,
+) -> Result<&mut crate::document::LocatedTargetTerm, RuntimeError> {
+    let expression = find_located_expression_mut(&mut universe.target_expressions, expression)?;
+    find_by_id_mut(
+        &mut expression.terms,
+        term,
+        RuntimeError::InvalidValue("目标表达式项不存在".into()),
+    )
 }
 
 fn find_target_mut(
     items: &mut [FlowTarget],
     id: TargetId,
 ) -> Result<&mut FlowTarget, RuntimeError> {
-    items
-        .iter_mut()
-        .find(|item| item.id == id)
-        .ok_or(RuntimeError::TargetNotFound(id))
+    find_by_id_mut(items, id, RuntimeError::TargetNotFound(id))
 }
 
 fn find_expression_mut(
     items: &mut [TargetExpression],
     id: TargetExpressionId,
 ) -> Result<&mut TargetExpression, RuntimeError> {
-    items
-        .iter_mut()
-        .find(|item| item.id == id)
-        .ok_or(RuntimeError::TargetExpressionNotFound(id))
+    find_by_id_mut(items, id, RuntimeError::TargetExpressionNotFound(id))
 }
 
 fn find_external_mut(
     items: &mut [ExternalInput],
     id: ExternalInputId,
 ) -> Result<&mut ExternalInput, RuntimeError> {
-    items
-        .iter_mut()
-        .find(|item| item.id == id)
-        .ok_or(RuntimeError::ExternalInputNotFound(id))
+    find_by_id_mut(items, id, RuntimeError::ExternalInputNotFound(id))
+}
+
+fn find_by_id_mut<T: HasId>(
+    items: &mut [T],
+    id: T::Id,
+    error: RuntimeError,
+) -> Result<&mut T, RuntimeError>
+where
+    T::Id: PartialEq,
+{
+    items.iter_mut().find(|item| item.id() == id).ok_or(error)
 }
 
 fn index_by_id<T>(items: &[T], id: T::Id) -> Result<usize, RuntimeError>
@@ -3203,51 +3149,24 @@ where
     Ok(true)
 }
 
-impl HasId for FlowTarget {
-    type Id = TargetId;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
+macro_rules! impl_has_id {
+    ($($row:ty => $id:ty),* $(,)?) => {
+        $(impl HasId for $row {
+            type Id = $id;
+            fn id(&self) -> Self::Id { self.id }
+        })*
+    };
 }
-
-impl HasId for TargetExpression {
-    type Id = TargetExpressionId;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
-}
-
-impl HasId for crate::document::LocatedExternalInput {
-    type Id = ExternalInputId;
-    fn id(&self) -> Self::Id {
-        self.id
-    }
-}
-
-impl HasId for ExternalInput {
-    type Id = ExternalInputId;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
-}
-
-impl HasId for MechanicEntry {
-    type Id = MechanicId;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
-}
-
-impl HasId for TargetTerm {
-    type Id = TargetTermId;
-
-    fn id(&self) -> Self::Id {
-        self.id
-    }
+impl_has_id! {
+    FlowTarget => TargetId,
+    TargetExpression => TargetExpressionId,
+    TargetTerm => TargetTermId,
+    ExternalInput => ExternalInputId,
+    MechanicEntry => MechanicId,
+    crate::document::LocatedExternalInput => ExternalInputId,
+    crate::document::LocatedTargetExpression => TargetExpressionId,
+    crate::document::LocatedTargetTerm => TargetTermId,
+    crate::document::UniverseMechanicEntry => MechanicId,
 }
 
 fn next_free_id(factory: &FactoryDocument) -> u64 {
@@ -3623,6 +3542,67 @@ mod tests {
             "导入后 universe id 必须唯一: {ids:?}"
         );
     }
+    #[test]
+    fn universe_mechanic_edits_do_not_resolve_ids_from_another_universe() {
+        use crate::message::UniverseAction;
+        let document = serde_json::from_value(serde_json::json!({
+            "projects": [{"id": 1, "universes": [
+                {"id": 2, "mechanics": [{"id": 3}]},
+                {"id": 4, "mechanics": [{"id": 5}]}
+            ]}]
+        }))
+        .unwrap();
+        let mut state = RuntimeState::new(document);
+        let before = state.clone();
+        let mechanic = MechanicId(5);
+        let actions = [
+            UniverseAction::SetMechanicEnabled {
+                mechanic,
+                enabled: false,
+            },
+            UniverseAction::SetMechanicLocation {
+                mechanic,
+                location: Location::Space,
+            },
+            UniverseAction::SetTransportItem {
+                mechanic,
+                item: Default::default(),
+            },
+            UniverseAction::SetLocalMechanic {
+                mechanic,
+                mechanic_json: serde_json::to_string(&Mechanic::Recipe(Default::default()))
+                    .unwrap(),
+            },
+            UniverseAction::Mechanic {
+                mechanic,
+                action: MechanicAction::Recipe(RecipeMechanicAction::SetRecipe {
+                    recipe: Default::default(),
+                }),
+            },
+        ];
+        for action in actions {
+            let error = state
+                .dispatch(AppMessage::Universe {
+                    project: ProjectId(1),
+                    universe: crate::UniverseId(2),
+                    action,
+                })
+                .unwrap_err();
+            assert_eq!(
+                error,
+                RuntimeError::UniverseMechanicNotFound {
+                    project: ProjectId(1),
+                    universe: crate::UniverseId(2),
+                    mechanic,
+                }
+            );
+            assert_eq!(
+                state, before,
+                "failed edits must preserve document, history, IDs and revision"
+            );
+        }
+    }
+
     fn state_with_factory() -> (RuntimeState, ProjectId, FactoryId) {
         let mut state = RuntimeState::default();
         state

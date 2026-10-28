@@ -1,3 +1,5 @@
+import type { CatalogKind, Mechanic } from "../runtime/types";
+
 export const mechanicKindLabels: Record<string, string> = {
     recipe: "配方",
     mining: "采矿",
@@ -17,3 +19,35 @@ export const mechanicKindLabels: Record<string, string> = {
     "tile-extract": "地格抽取",
     "tile-dispose": "地格销毁",
 };
+
+// Catalog selector, primary field, and (when different) localization namespace.
+const primaryPrototypes = {
+  recipe: ["recipe", "recipe"],
+  mining: ["resource", "resource"],
+  spoil: ["item", "item"],
+  plant: ["item", "seed"],
+  "item-fuel": ["item", "item"],
+  "virtual-science": ["item", "item"],
+  "item-launch": ["item", "item"],
+  generator: ["generator", "generator", "entity"],
+  "fusion-generator": ["fusion-generator", "generator", "entity"],
+  boiler: ["boiler", "boiler", "entity"],
+  reactor: ["reactor", "reactor", "entity"],
+  "fusion-reactor": ["fusion-reactor", "reactor", "entity"],
+  solar: ["solar-panel", "solar_panel", "entity"],
+  "fluid-fuel": ["fluid", "fluid"],
+  "fluid-heat": ["fluid", "fluid"],
+  "tile-extract": ["tile", "tile"],
+  "tile-dispose": ["item", "item"],
+} as const satisfies Record<Mechanic["type"], readonly [CatalogKind, keyof Mechanic, (CatalogKind | "entity")?]>;
+
+/** One primary identity for editor selection, icons, quality and group headings. */
+export function mechanicPrimary(mechanic: Mechanic) {
+  const [kind, field, prototypeKind = kind] = primaryPrototypes[mechanic.type];
+  const value = mechanic[field];
+  return {
+    kind, prototypeKind,
+    name: typeof value === "string" ? value : value?.id ?? "",
+    quality: typeof value === "object" ? value?.quality ?? "normal" : "normal",
+  };
+}

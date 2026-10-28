@@ -1,3 +1,4 @@
+import { mechanicPrimary } from "./mechanics/presentation.ts";
 import type { DualVar, IdWithQuality, Mechanic } from "./runtime/types";
 export type Localize = (kind: string, name: string) => string;
 
@@ -28,16 +29,6 @@ export function flowName(flow: DualVar, localize: Localize): string {
 }
 
 export function mechanicPrototype(mechanic: Mechanic): {kind:string;name:string} {
-  switch(mechanic.type) {
-    case "recipe": return {kind:"recipe",name:mechanic.recipe?.id || ""};
-    case "mining": return {kind:"resource",name:mechanic.resource || ""};
-    case "solar": return {kind:"entity",name:mechanic.solar_panel?.id || ""};
-    case "tile-extract": return {kind:"tile",name:mechanic.tile || ""};
-    case "fusion-generator": case "generator": return {kind:"entity",name:mechanic.generator?.id || ""};
-    case "boiler": return {kind:"entity",name:mechanic.boiler?.id || ""};
-    case "fusion-reactor": case "reactor": return {kind:"entity",name:mechanic.reactor?.id || ""};
-    case "fluid-fuel": case "fluid-heat": return {kind:"fluid",name:mechanic.fluid || ""};
-    case "plant": return {kind:"item",name:mechanic.seed?.id || ""};
-    default: return {kind:"item",name:mechanic.item?.id || ""};
-  }
+  const { prototypeKind: kind, name } = mechanicPrimary(mechanic);
+  return { kind, name };
 }

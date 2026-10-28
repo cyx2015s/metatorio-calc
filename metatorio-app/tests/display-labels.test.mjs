@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mechanicPrimary } from '../src/lib/mechanics/presentation.ts';
 import { lookupName, flowName, mechanicPrototype } from '../src/lib/display-labels.ts';
 
 const names = new Map(Object.entries({
@@ -52,4 +53,10 @@ test('group headings include solar panels and extraction tiles; retain heterogen
     [{type:'recipe',recipe:{id:'plate'}},'recipe','plate'],
     [{type:'virtual-science',item:{id:'science'}},'item','science'],
   ]) assert.deepEqual(mechanicPrototype(mechanic), {kind,name});
+});
+
+test('disposal uses the item identity even when a destruction tile is configured', () => {
+  const mechanic = { type: 'tile-dispose', item: { id: 'spoilage', quality: 'epic' }, tile: 'lava' };
+  assert.deepEqual(mechanicPrimary(mechanic), { kind: 'item', prototypeKind: 'item', name: 'spoilage', quality: 'epic' });
+  assert.deepEqual(mechanicPrototype(mechanic), { kind: 'item', name: 'spoilage' });
 });

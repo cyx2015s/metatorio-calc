@@ -3443,6 +3443,59 @@ pub(crate) async fn persist_project(
     Ok(())
 }
 
+/// Resolve project inputs off-lock; publish accessibility only after successful
+/// computation and only while its revision and invalidation epoch are current.
+fn with_snapshot_accessibility<R, E>(
+    host: &dyn Host,
+    snapshot: &metatorio_runtime::ProjectSnapshot,
+    compute: impl FnOnce(&metatorio_core::Accessibility) -> Result<R, E>,
+) -> Result<R, E> {
+    let accessibility = snapshot.resolve_accessibility();
+    let result = compute(&accessibility)?;
+    cache_snapshot_accessibility(host, snapshot, accessibility);
+    Ok(result)
+}
+
+fn cache_snapshot_accessibility(
+    host: &dyn Host,
+    snapshot: &metatorio_runtime::ProjectSnapshot,
+    accessibility: metatorio_core::Accessibility,
+) {
+    if let Ok(runtime) = host.state().runtime.lock() {
+        runtime.cache_accessibility_if_current(
+            snapshot.project,
+            snapshot.revision,
+            snapshot.accessibility_epoch,
+            accessibility,
+        );
+    }
+}
+
+/// Project-only reads retain their cache write after the blocking task joins.
+async fn read_project_accessibility<R: Send + 'static>(
+    host: &Arc<dyn Host>,
+    project: ProjectId,
+    compute: impl FnOnce(&metatorio_runtime::ProjectSnapshot, &metatorio_core::Accessibility) -> R
+    + Send
+    + 'static,
+) -> Result<R, String> {
+    ensure_context_for_project_offlock(host.state(), project).await?;
+    let snapshot = with_runtime(host.state(), |runtime| {
+        runtime
+            .project_snapshot(project)
+            .map_err(|error| error.to_string())
+    })?;
+    let (snapshot, accessibility, result) = tokio::task::spawn_blocking(move || {
+        let accessibility = snapshot.resolve_accessibility();
+        let result = compute(&snapshot, &accessibility);
+        (snapshot, accessibility, result)
+    })
+    .await
+    .map_err(|error| error.to_string())?;
+    cache_snapshot_accessibility(host.as_ref(), &snapshot, accessibility);
+    Ok(result)
+}
+
 /// 锁外求解一个工厂：取快照（短锁）→ 后台线程求解 → 回填可达性缓存（短锁）。
 ///
 /// 求解本身不持有 runtime 锁，因此 MCP 调用与 GUI 交互不会被长求解挡住；
@@ -3470,19 +3523,10 @@ pub(crate) async fn solve_factory_offlock(
                     .map_err(|error| error.to_string())
             },
             move |snapshot| {
-                let accessibility = snapshot.resolve_accessibility();
-                let result = metatorio_runtime::solve_snapshot_with(snapshot, &accessibility)
-                    .map_err(|error| error.to_string())?;
-                // 锁外算出的可达性回填缓存（仅当文档/失效代次都没变）。
-                if let Ok(runtime) = compute_host.state().runtime.lock() {
-                    runtime.cache_accessibility_if_current(
-                        snapshot.project,
-                        snapshot.revision,
-                        snapshot.accessibility_epoch,
-                        accessibility,
-                    );
-                }
-                Ok(result)
+                with_snapshot_accessibility(compute_host.as_ref(), snapshot, |accessibility| {
+                    metatorio_runtime::solve_snapshot_with(snapshot, accessibility)
+                        .map_err(|error| error.to_string())
+                })
             },
         )
         .await
@@ -3515,22 +3559,16 @@ pub async fn auto_plan_universe_offlock(
                 .map_err(metatorio_runtime::Diagnostic::from)
             },
             move |snapshot| {
-                let accessibility = snapshot.resolve_accessibility();
-                let (mechanics, report) = metatorio_runtime::solve::plan_universe_with_progress(
-                    snapshot,
-                    &accessibility,
-                    &observe,
-                )
-                .map_err(metatorio_runtime::Diagnostic::from)?;
-                if let Ok(runtime) = cache.state().runtime.lock() {
-                    runtime.cache_accessibility_if_current(
-                        project,
-                        snapshot.revision,
-                        snapshot.accessibility_epoch,
-                        accessibility,
-                    );
-                }
-                Ok((snapshot.clone(), mechanics, report))
+                with_snapshot_accessibility(cache.as_ref(), snapshot, |accessibility| {
+                    let (mechanics, report) =
+                        metatorio_runtime::solve::plan_universe_with_progress(
+                            snapshot,
+                            accessibility,
+                            &observe,
+                        )
+                        .map_err(metatorio_runtime::Diagnostic::from)?;
+                    Ok((snapshot.clone(), mechanics, report))
+                })
             },
         )
         .await?;
@@ -3613,23 +3651,16 @@ pub async fn solve_universe_offlock(
                 })
             },
             move |snapshot| {
-                let accessibility = snapshot.resolve_accessibility();
-                let mut result = metatorio_runtime::solve_universe(
-                    &snapshot.store,
-                    &snapshot.project_doc,
-                    &snapshot.universe_doc,
-                    &accessibility,
-                )?;
-                if let Ok(runtime) = cache.state().runtime.lock() {
-                    runtime.cache_accessibility_if_current(
-                        project,
-                        snapshot.revision,
-                        snapshot.accessibility_epoch,
+                with_snapshot_accessibility(cache.as_ref(), snapshot, |accessibility| {
+                    let mut result = metatorio_runtime::solve_universe(
+                        &snapshot.store,
+                        &snapshot.project_doc,
+                        &snapshot.universe_doc,
                         accessibility,
-                    );
-                }
-                result.revision = snapshot.revision;
-                Ok(result)
+                    )?;
+                    result.revision = snapshot.revision;
+                    Ok(result)
+                })
             },
         )
         .await
@@ -4158,23 +4189,20 @@ pub(crate) async fn execute_command(
                             .map_err(metatorio_runtime::Diagnostic::from)
                     },
                     move |snapshot| {
-                        let accessibility = snapshot.resolve_accessibility();
-                        let (mechanics, auto_report) =
-                            metatorio_runtime::solve::plan_auto_plan_with_progress(
-                                snapshot,
-                                &accessibility,
-                                &observe_progress,
-                            )
-                            .map_err(metatorio_runtime::Diagnostic::from)?;
-                        if let Ok(runtime) = compute_host.state().runtime.lock() {
-                            runtime.cache_accessibility_if_current(
-                                snapshot.project,
-                                snapshot.revision,
-                                snapshot.accessibility_epoch,
-                                accessibility,
-                            );
-                        }
-                        Ok((snapshot.clone(), mechanics, auto_report))
+                        with_snapshot_accessibility(
+                            compute_host.as_ref(),
+                            snapshot,
+                            |accessibility| {
+                                let (mechanics, auto_report) =
+                                    metatorio_runtime::solve::plan_auto_plan_with_progress(
+                                        snapshot,
+                                        accessibility,
+                                        &observe_progress,
+                                    )
+                                    .map_err(metatorio_runtime::Diagnostic::from)?;
+                                Ok((snapshot.clone(), mechanics, auto_report))
+                            },
+                        )
                     },
                 )
                 .await;
@@ -4936,29 +4964,10 @@ pub async fn accessibility(
     host: &Arc<dyn Host>,
     project: ProjectId,
 ) -> Result<Vec<Accessible>, String> {
-    let state = host.state();
-    ensure_context_for_project_offlock(state, project).await?;
-    // 锁内只取快照；可达性 BFS（py 上下文约 2.5s）在锁外算。
-    let snapshot = with_runtime(state, |runtime| {
-        runtime.project_snapshot(project).map_err(|e| e.to_string())
-    })?;
-    let (snapshot, accessibility, nodes) = tokio::task::spawn_blocking(move || {
-        let accessibility = snapshot.resolve_accessibility();
-        let nodes: Vec<Accessible> = accessibility.accessible().iter().cloned().collect();
-        (snapshot, accessibility, nodes)
+    read_project_accessibility(host, project, |_, accessibility| {
+        accessibility.accessible().iter().cloned().collect()
     })
     .await
-    .map_err(|error| error.to_string())?;
-    let _ = with_runtime(state, |runtime| {
-        runtime.cache_accessibility_if_current(
-            snapshot.project,
-            snapshot.revision,
-            snapshot.accessibility_epoch,
-            accessibility,
-        );
-        Ok(())
-    });
-    Ok(nodes)
 }
 
 pub async fn milestones_ordered(
@@ -4979,28 +4988,7 @@ pub async fn productivity(
     host: &Arc<dyn Host>,
     project: ProjectId,
 ) -> Result<metatorio_runtime::ProductivityView, String> {
-    let state = host.state();
-    ensure_context_for_project_offlock(state, project).await?;
-    let snapshot = with_runtime(state, |runtime| {
-        runtime.project_snapshot(project).map_err(|e| e.to_string())
-    })?;
-    let (snapshot, accessibility, view) = tokio::task::spawn_blocking(move || {
-        let accessibility = snapshot.resolve_accessibility();
-        let view = metatorio_runtime::productivity_view(&snapshot, &accessibility);
-        (snapshot, accessibility, view)
-    })
-    .await
-    .map_err(|error| error.to_string())?;
-    let _ = with_runtime(state, |runtime| {
-        runtime.cache_accessibility_if_current(
-            snapshot.project,
-            snapshot.revision,
-            snapshot.accessibility_epoch,
-            accessibility,
-        );
-        Ok(())
-    });
-    Ok(view)
+    read_project_accessibility(host, project, metatorio_runtime::productivity_view).await
 }
 
 pub fn project_save_path(state: &AppState, project: ProjectId) -> Option<String> {
@@ -5132,6 +5120,84 @@ mod tests {
             dir,
         })
     }
+    #[test]
+    fn snapshot_accessibility_is_published_only_after_current_success() {
+        let host = FileHost {
+            state: AppState::default(),
+            dir: std::env::temp_dir(),
+        };
+        let store = || PrototypeStore::load(&serde_json::from_str(DEMO_DUMP).unwrap()).unwrap();
+        let (project, snapshot) = {
+            let mut runtime = host.state.runtime.lock().unwrap();
+            runtime.install_context("snapshot-test".into(), store());
+            runtime.set_active_context(Some("snapshot-test".into()));
+            runtime
+                .dispatch(AppMessage::Application(
+                    metatorio_runtime::ApplicationAction::NewProject {
+                        name: "test".into(),
+                    },
+                ))
+                .unwrap();
+            let project = runtime.state.document.projects[0].id;
+            (project, runtime.project_snapshot(project).unwrap())
+        };
+        let current = || {
+            with_runtime(&host.state, |runtime| {
+                runtime
+                    .project_snapshot(project)
+                    .map_err(|error| error.to_string())
+            })
+            .unwrap()
+        };
+        let failure: Result<(), &str> =
+            with_snapshot_accessibility(&host, &snapshot, |_| Err("failure"));
+        assert_eq!(failure, Err("failure"));
+        assert!(
+            !current().has_cached_accessibility(),
+            "failed computations must leave the cache cold"
+        );
+
+        with_snapshot_accessibility(&host, &snapshot, |_| {
+            host.state
+                .runtime
+                .try_lock()
+                .expect("compute must run outside runtime lock")
+                .dispatch(AppMessage::Project {
+                    project,
+                    action: ProjectAction::SetName {
+                        name: "edited".into(),
+                    },
+                })
+                .unwrap();
+            Ok::<_, &str>(())
+        })
+        .unwrap();
+        assert!(
+            !current().has_cached_accessibility(),
+            "a newer document must reject old accessibility"
+        );
+
+        let snapshot = current();
+        with_snapshot_accessibility(&host, &snapshot, |_| {
+            let mut runtime = host.state.runtime.lock().unwrap();
+            runtime.install_context("snapshot-test".into(), store());
+            assert_eq!(runtime.state.revision, snapshot.revision);
+            Ok::<_, &str>(())
+        })
+        .unwrap();
+        assert!(
+            !current().has_cached_accessibility(),
+            "context replacement must reject old accessibility even at the same revision"
+        );
+
+        let snapshot = current();
+        assert_eq!(
+            with_snapshot_accessibility(&host, &snapshot, |_| Ok::<_, &str>(42)),
+            Ok(42)
+        );
+        assert!(current().has_cached_accessibility());
+    }
+
     fn fixture_project(id: u64) -> metatorio_runtime::document::ProjectDocument {
         metatorio_runtime::document::ProjectDocument {
             id: ProjectId(id),

@@ -646,23 +646,10 @@ impl Runtime {
         project_id: ProjectId,
         factory_id: FactoryId,
     ) -> Result<SolveSnapshot, RuntimeError> {
-        let project_doc = self.state.project(project_id)?.clone();
         let factory_doc = self.state.factory(project_id, factory_id)?.clone();
         Ok(SolveSnapshot {
-            project: project_id,
+            inputs: self.project_snapshot(project_id)?,
             factory: factory_id,
-            revision: self.state.revision,
-            accessibility_epoch: self.accessibility_epoch.load(Ordering::SeqCst),
-            store: self.context_arc(project_id)?,
-            graph: self.graph_for_project(project_id)?,
-            accessibility_options: accessibility_options(&project_doc.settings),
-            accessibility: self
-                .accessibilities
-                .lock()
-                .unwrap()
-                .get(&project_id)
-                .cloned(),
-            project_doc,
             factory_doc,
         })
     }
@@ -726,6 +713,13 @@ impl Runtime {
         })
     }
     pub fn universe_document_matches(&self, snapshot: &UniverseSnapshot) -> bool {
+        self.project_inputs_match(snapshot)
+            && self
+                .state
+                .universe(snapshot.project, snapshot.universe_doc.id)
+                .is_ok_and(|u| u == &snapshot.universe_doc)
+    }
+    fn project_inputs_match(&self, snapshot: &ProjectSnapshot) -> bool {
         self.accessibility_epoch.load(Ordering::SeqCst) == snapshot.accessibility_epoch
             && self
                 .context_arc(snapshot.project)
@@ -734,11 +728,8 @@ impl Runtime {
                 p.settings == snapshot.project_doc.settings
                     && p.planning == snapshot.project_doc.planning
             })
-            && self
-                .state
-                .universe(snapshot.project, snapshot.universe_doc.id)
-                .is_ok_and(|u| u == &snapshot.universe_doc)
     }
+
     /// 项目级读取快照（不含工厂）：供可达性/产能/里程碑等**只读重计算**
     /// 在锁外执行。
     pub fn project_snapshot(&self, project_id: ProjectId) -> Result<ProjectSnapshot, RuntimeError> {
@@ -771,19 +762,7 @@ impl Runtime {
     /// - 项目级设置与规划偏好没被改过（它们参与自动规划的枚举与求解）；
     /// - 上下文仓库实例与可达性失效代次没变（计划基于它们算出来）。
     pub fn document_matches(&self, snapshot: &SolveSnapshot) -> bool {
-        self.accessibility_epoch.load(Ordering::SeqCst) == snapshot.accessibility_epoch
-            && self
-                .context_arc(snapshot.project)
-                .map(|store| Arc::ptr_eq(&store, &snapshot.store))
-                .unwrap_or(false)
-            && self
-                .state
-                .project(snapshot.project)
-                .map(|project| {
-                    project.settings == snapshot.project_doc.settings
-                        && project.planning == snapshot.project_doc.planning
-                })
-                .unwrap_or(false)
+        self.project_inputs_match(snapshot)
             && self
                 .state
                 .factory(snapshot.project, snapshot.factory)
@@ -980,44 +959,19 @@ pub fn write_document_file(document: &AppDocument, path: &Path) -> Result<(), Ru
 /// 求解输入快照：把「求解所需的一切」从 `&mut Runtime` 里摘出来，使求解可以
 /// 在**不持有 runtime 锁**的线程上运行。
 ///
-/// 所有重字段都是 `Arc`（O(1) 拷贝），文档是浅副本；取快照本身是微秒级。
+/// 原型仓库和依赖图通过 `Arc` 共享；项目/工厂文档独立克隆，隔离后续编辑。
 /// `revision` 记录快照依据的文档版本，调用方据此丢弃过期结果。
 #[derive(Debug, Clone)]
 pub struct SolveSnapshot {
-    pub project: ProjectId,
+    pub inputs: ProjectSnapshot,
     pub factory: FactoryId,
-    /// 取快照时的文档版本。
-    pub revision: u64,
-    /// 取快照时的可达性失效代次（用于判断锁外算出的可达性还能否回填）。
-    pub accessibility_epoch: u64,
-    pub store: Arc<PrototypeStore>,
-    pub graph: Arc<metatorio_core::GraphData>,
-    /// 由项目设置派生的可达性选项（无缓存时用它现算可达性）。
-    accessibility_options: AccessibilityOptions,
-    /// 已缓存的可达性结果；`None` 表示需要按 `accessibility_options` 现算。
-    accessibility: Option<Accessibility>,
-    pub project_doc: ProjectDocument,
     pub factory_doc: FactoryDocument,
 }
 
-impl SolveSnapshot {
-    /// 解析本次求解要用的可达性：有缓存直接用，否则现算。
-    ///
-    /// 纯函数（只读快照），可以在锁外/后台线程跑；py 上下文冷缓存约 2.5s。
-    pub fn resolve_accessibility(&self) -> Accessibility {
-        match &self.accessibility {
-            Some(cached) => cached.clone(),
-            None => metatorio_core::compute_accessibility_with_graph(
-                &self.store,
-                &self.accessibility_options,
-                &self.graph,
-            ),
-        }
-    }
-
-    /// 快照是否带上了已缓存的可达性（用于判断本次是否还要现算）。
-    pub fn has_cached_accessibility(&self) -> bool {
-        self.accessibility.is_some()
+impl std::ops::Deref for SolveSnapshot {
+    type Target = ProjectSnapshot;
+    fn deref(&self) -> &Self::Target {
+        &self.inputs
     }
 }
 
@@ -1231,16 +1185,25 @@ pub fn plan_universe_with_progress(
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
     pub project: ProjectId,
+    /// Snapshot document revision.
     pub revision: u64,
+    /// Accessibility invalidation generation, checked before off-lock cache publication.
     pub accessibility_epoch: u64,
     pub store: Arc<PrototypeStore>,
     pub graph: Arc<metatorio_core::GraphData>,
+    /// Project-derived options used when the accessibility cache is cold.
     accessibility_options: AccessibilityOptions,
+    /// A cached accessibility result, or None when it must be computed off-lock.
     accessibility: Option<Accessibility>,
     pub project_doc: ProjectDocument,
 }
 
 impl ProjectSnapshot {
+    /// Whether this snapshot carries a warm project accessibility cache.
+    pub fn has_cached_accessibility(&self) -> bool {
+        self.accessibility.is_some()
+    }
+
     /// 解析本次计算要用的可达性：有缓存直接用，否则现算（纯函数，可锁外跑）。
     pub fn resolve_accessibility(&self) -> Accessibility {
         match &self.accessibility {
