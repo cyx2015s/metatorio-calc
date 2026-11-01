@@ -63,10 +63,12 @@ The unpublished universe format uses only `rocket-export` and `orbital-drop`; th
 old `transfer` tag and command names are intentionally not accepted.
 
 Transport price estimates live in `ProjectSettings.orbital_transport_costs`: defaults
-are `rocket_export_per_kg = 1`, `orbital_drop_per_stack = 64`, and `orbital_drop_spoil_penalty = 216000`.
+are `rocket_export_per_kg = 64^3` (262144), `orbital_drop_per_stack = 64`, and
+`orbital_drop_spoil_penalty = 64^3` (262144).
 Effective spoil ticks include the quality spoil-time multiplier, matching local spoilage.
 The project message `set-orbital-transport-costs` updates these estimates through
 normal history, persistence and recomputation. Omitted fields
 receive these defaults; coefficients must be finite and nonnegative. This project
-configuration is used consistently by previews, solves and auto-planning. No frontend
-price editor is exposed yet. Prices do not change physical coefficients or strict-sink rules.
+configuration is used consistently by previews, solves and auto-planning. The frontend
+price editor is in the project settings sidebar. Explicit saved prices remain unchanged
+when defaults change. Prices do not change physical coefficients or strict-sink rules.

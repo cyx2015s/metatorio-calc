@@ -109,6 +109,22 @@ withBrowser({ port: 5221 }, async (browser, url) => {
   await page.getByRole('button', { name: '恢复全部默认邻接数量', exact: true }).click();
   await waitFor(async () => await panel.getByRole('spinbutton', { name: /^邻接数量/ }).count() === 0);
   assert.deepEqual(await page.evaluate(() => window.__layoutDocument.projects[1].settings.reactor_neighbours), {});
+  const beforeLegacyRead = await edits();
+  await page.evaluate(async () => {
+    delete window.__layoutDocument.projects[1].settings.orbital_transport_costs;
+    delete window.__layoutDocument.projects[1].settings.reactor_neighbours;
+    const { runtime } = await import('/src/lib/runtime/store.svelte.ts');
+    await runtime.refresh();
+  });
+  await waitFor(async () => await cost.inputValue() === '262144');
+  assert.equal(await page.getByRole('spinbutton', { name: '轨道投送成本', exact: true }).inputValue(), '64');
+  assert.equal(await page.getByRole('spinbutton', { name: '变质额外成本系数', exact: true }).inputValue(), '262144');
+  assert.equal(await edits(), beforeLegacyRead, 'reading missing fields does not write defaults');
+  await edit(cost, '0');
+  await waitFor(async () => await edits() === beforeLegacyRead + 1 && await cost.isEnabled());
+  assert.deepEqual(await page.evaluate(() => window.__layoutDocument.projects[1].settings.orbital_transport_costs), {
+    rocket_export_per_kg: 0, orbital_drop_per_stack: 64, orbital_drop_spoil_penalty: 262144,
+  });
   await panel.scrollIntoViewIfNeeded();
   if (process.env.ESTIMATES_SCREENSHOT) await page.screenshot({ path: process.env.ESTIMATES_SCREENSHOT });
   assert.equal(await panel.evaluate(el => el.scrollWidth > el.clientWidth), false);

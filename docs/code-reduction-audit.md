@@ -186,3 +186,13 @@ python scripts/count-sloc.py --output local/sloc-current-partition.json
 | 合计 | 90,575 |
 
 分类明细：`local/sloc-final-partition.json`。本轮审阅也确认普通/宇宙目标表达式操作的 ID 分配和错误契约仍有差异，不能直接用同一分支替换；未为了减少行数改变其行为。
+
+## 轨道运输默认值调整
+
+按最新实测结论，火箭发运的每 kg 系数和变质额外成本系数改为 **64³ = 262,144**，轨道投送的每组常数保留 **64**。新建项目和缺失字段使用新默认值；已保存的显式值（包括旧默认值和零）不迁移、不覆盖。前端运输提示与项目估算面板共用回退常量，避免两处独立维护。
+
+浏览器回归复现了上一阶段的一个边界遗漏：前端旧式数据缺少整组 `orbital_transport_costs` 时，新增面板读取属性会抛错，导致项目设置不可见。现在面板对缺失字段使用回退值，仅查看不会写入；第一次编辑会带上完整的其它成本字段。普通 Rust 文档的 serde 默认补齐逻辑保持不变。增加浏览器覆盖验证该行为以及显式旧值/零值保留。
+
+最终 64³ 默认值的 `orbital_cargo` **9 项测试通过**，覆盖重量与载荷、双向运输、变质品质倍率、完整规划、回写成本、持久化、撤销和拒绝非法成本；没有调整目标产量。大目标成本的比较使用四倍机器精度的舍入容差，其它物理系数和数值断言继续保留。前端 **142 项测试通过**，类型检查零错误/警告，生产构建与项目设置/宇宙工作区两份浏览器回归通过。
+
+日志：`local/orbital-defaults-64cube.log`、`local/orbital-defaults-{check,unit,build}-final.log`、`local/orbital-defaults-{estimates,universe}-browser-final.log`；修复前的缺失字段错误保存在 `local/orbital-defaults-legacy-before.log`。中途被新要求替代的 2²⁴ 运行已停止，不计作最终版本验证。

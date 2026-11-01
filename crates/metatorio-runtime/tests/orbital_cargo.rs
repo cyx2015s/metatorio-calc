@@ -53,7 +53,7 @@ fn opposite_directions_preserve_quality_and_charge_weight_or_stacks() {
         up[0].0[&LocatedDualVar::new(cargo.location.clone(), DualVar::RocketWeightCapacity)],
         -2000.0
     );
-    assert_eq!(up[0].1, 2.0);
+    assert_eq!(up[0].1, 2.0 * 262_144.0);
     assert_eq!(down[0].0.len(), 2);
     assert_eq!(down[0].0[&space], -1.0);
     assert_eq!(down[0].0[&local], 1.0);
@@ -114,7 +114,7 @@ fn no_hidden_delivery_and_disabled_drop_cannot_satisfy_target() {
     else {
         panic!("{result:?}")
     };
-    assert!((cost - 328.0).abs() < 1e-8);
+    assert!((cost - 52_428_928.0).abs() < 1e-8);
     assert_eq!(mechanics.len(), 2);
     assert_eq!(
         mechanics
@@ -122,7 +122,7 @@ fn no_hidden_delivery_and_disabled_drop_cannot_satisfy_target() {
             .find(|m| m.mechanic == MechanicId(10))
             .unwrap()
             .cost,
-        2.0
+        2.0 * 262_144.0
     );
     assert_eq!(
         mechanics
@@ -148,7 +148,7 @@ fn joint_planning_writes_both_directions_with_actual_delivery_cost() {
     let UniverseSolveStatus::Solved { cost, .. } = result.status else {
         panic!("{result:?}")
     };
-    assert!((cost - 328.0).abs() < 1e-8);
+    assert!((cost - 52_428_928.0).abs() < 1e-8);
     let entries = &r.state.document.projects[0].universes[0].mechanics;
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().any(|e|matches!(&e.mechanic,LocatedMechanic::RocketExport(c) if c.location==Location::planet("a")&&c.item.quality=="rare")));
@@ -198,7 +198,7 @@ fn default_prices_match_50kg_and_50_item_stack_examples() {
         &LocatedMechanic::OrbitalDrop(cargo()),
     )
     .unwrap();
-    assert_eq!(up[0].1, 50.0);
+    assert_eq!(up[0].1, 50.0 * 262_144.0);
     assert_eq!(down[0].1, 1.28);
 }
 
@@ -207,9 +207,21 @@ fn project_price_overrides_roundtrip_and_reach_joint_planning() {
     use metatorio_runtime::document::OrbitalTransportCosts;
     let default: OrbitalTransportCosts = serde_json::from_value(json!({})).unwrap();
     assert_eq!(default, OrbitalTransportCosts::default());
+    assert_eq!(default.rocket_export_per_kg, 262_144.0);
+    assert_eq!(default.orbital_drop_per_stack, 64.0);
+    assert_eq!(default.orbital_drop_spoil_penalty, 262_144.0);
+    // Persisted coefficients remain explicit overrides.
+    let saved: OrbitalTransportCosts = serde_json::from_value(json!({
+        "rocket_export_per_kg": 1, "orbital_drop_per_stack": 64,
+        "orbital_drop_spoil_penalty": 216000
+    }))
+    .unwrap();
+    assert_eq!(saved.rocket_export_per_kg, 1.0);
+    assert_eq!(saved.orbital_drop_spoil_penalty, 216000.0);
     let partial: OrbitalTransportCosts =
         serde_json::from_value(json!({"rocket_export_per_kg":3})).unwrap();
     assert_eq!(partial.orbital_drop_per_stack, 64.0);
+    assert_eq!(partial.orbital_drop_spoil_penalty, 262_144.0);
     let mut r = runtime();
     let reply = r.dispatch(serde_json::from_value(json!({"scope":"project","action":{"project":1,"action":{"set-orbital-transport-costs":{"costs":{"rocket_export_per_kg":3,"orbital_drop_per_stack":100}}}}})).unwrap()).unwrap();
     assert!(reply.changed);
@@ -222,7 +234,7 @@ fn project_price_overrides_roundtrip_and_reach_joint_planning() {
             .settings
             .orbital_transport_costs
             .orbital_drop_spoil_penalty,
-        216000.0
+        262_144.0
     );
     let document: AppDocument =
         serde_json::from_value(serde_json::to_value(&r.state.document).unwrap()).unwrap();
@@ -307,7 +319,8 @@ fn drop_spoil_penalty_uses_ticks_and_quality_but_exports_are_unaffected() {
         "item":{"food":{"stack_size":50,"weight":50000,"spoil_ticks":3600,"spoil_result":"waste"},"waste":{"stack_size":50}},
         "quality":{"normal":{"level":0,"next":"rare"},"rare":{"level":2,"spoil_ticks_multiplier":2}}
     })).unwrap();
-    for (quality, expected) in [("normal", 61.28), ("rare", 31.28)] {
+    for (quality, ticks) in [("normal", 3600.0), ("rare", 7200.0)] {
+        let expected = 1.28 + 262_144.0 / ticks;
         let cargo = OrbitalCargoMechanic {
             location: Location::planet("a"),
             item: IdWithQuality::new("food", quality),
@@ -325,7 +338,7 @@ fn drop_spoil_penalty_uses_ticks_and_quality_but_exports_are_unaffected() {
             &LocatedMechanic::RocketExport(cargo.clone()),
         )
         .unwrap();
-        assert_eq!(up[0].1, 50.0);
+        assert_eq!(up[0].1, 50.0 * 262_144.0);
         let costs = OrbitalTransportCosts {
             orbital_drop_spoil_penalty: 0.0,
             ..Default::default()
@@ -356,7 +369,9 @@ fn spoil_penalty_reaches_joint_planning_and_written_mechanic_cost() {
     else {
         panic!("{result:?}")
     };
-    assert!((cost - 3328.0).abs() < 1e-8);
+    let expected_drop = 1.28 + 262_144.0 / 7200.0;
+    let expected = 100.0 * (2.0 * 262_144.0 + expected_drop);
+    assert!((cost - expected).abs() <= 4.0 * f64::EPSILON * expected);
     let entries = &r.state.document.projects[0].universes[0].mechanics;
     let drop = entries
         .iter()
@@ -368,7 +383,7 @@ fn spoil_penalty_reaches_joint_planning_and_written_mechanic_cost() {
             .find(|m| m.mechanic == drop.id)
             .unwrap()
             .cost
-            - 31.28)
+            - expected_drop)
             .abs()
             < 1e-10
     );

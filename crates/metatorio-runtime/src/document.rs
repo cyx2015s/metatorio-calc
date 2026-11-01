@@ -155,9 +155,9 @@ pub struct OrbitalTransportCosts {
 impl Default for OrbitalTransportCosts {
     fn default() -> Self {
         Self {
-            rocket_export_per_kg: 1.0,
+            rocket_export_per_kg: f64::from(64_u32.pow(3)),
             orbital_drop_per_stack: 64.0,
-            orbital_drop_spoil_penalty: 60.0 * 60.0 * 60.0,
+            orbital_drop_spoil_penalty: f64::from(64_u32.pow(3)),
         }
     }
 }

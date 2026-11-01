@@ -4,11 +4,13 @@
   import Selector from "./Selector.svelte";
   import RichText from "./RichText.svelte";
   import { diagnosticFrom } from "$lib/diagnostic";
+  import { DEFAULT_ORBITAL_TRANSPORT_COSTS } from "$lib/runtime/project-settings";
 
   let { project }: { project: ProjectDocument } = $props();
   let pending = $state(false);
   let error = $state("");
   let picking = $state(false);
+  let transportCosts = $derived({ ...DEFAULT_ORBITAL_TRANSPORT_COSTS, ...project.settings.orbital_transport_costs });
   const costs: { key: keyof OrbitalTransportCosts; label: string; unit: string }[] = [
     { key: "rocket_export_per_kg", label: "火箭出口成本", unit: "每 kg 物品" },
     { key: "orbital_drop_per_stack", label: "轨道投送成本", unit: "每组物品" },
@@ -84,13 +86,13 @@
     {#each costs as { key, label, unit } (key)}
       <label class="field">
         <span>{label}</span>
-        <input type="number" min="0" step="any" value={project.settings.orbital_transport_costs[key]}
+        <input type="number" min="0" step="any" value={transportCosts[key]}
           aria-label={label} onchange={async (event) => {
             const input = event.currentTarget;
-            const next = number(event, project.settings.orbital_transport_costs[key]);
+            const next = number(event, transportCosts[key]);
             if (next !== null) {
-              await save({ "set-orbital-transport-costs": { costs: { ...project.settings.orbital_transport_costs, [key]: next } } });
-              input.value = String(project.settings.orbital_transport_costs[key] ?? "");
+              await save({ "set-orbital-transport-costs": { costs: { ...transportCosts, [key]: next } } });
+              input.value = String(transportCosts[key] ?? "");
             }
           }} />
         <span class="muted">{unit}</span>
