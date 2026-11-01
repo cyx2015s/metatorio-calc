@@ -142,3 +142,28 @@ Rust 源码 API 的变化：`SolveSnapshot` 的项目字段收敛到 `inputs: Pr
 三个成本系数分别按 kg、堆叠数量和有效变质时间（tick）解释，不随显示时间刻度换算，不改变物理运输系数。允许零、小数和科学记数法；空白、负数及非有限值不会发送。每次修改保留其它系数，等待期间禁用面板操作；失败显示错误并恢复已提交值。组件按项目 ID 重建，消息固定发往操作开始时的项目，旧响应不覆盖新项目的界面。
 
 浏览器回归覆盖选择器添加/取消/重复选择、默认恢复、范围边界、缺失原型、错误恢复、同组字段保留和请求进行中的项目切换。前端 142 项测试通过，类型检查零错误/警告，生产构建通过，并检查了真实浏览器截图的布局。后端既有 `fusion` 与 `orbital_cargo` 用例继续验证估算的原型校验、持久化、撤销和联合规划。验证日志：`local/project-estimates-{browser-final,unit,check-final,build-final,drift}.log`。
+
+完整 Rust 回归的 78 个目标全部结束：780 项通过、26 项忽略，唯一失败为注释更新后的生成绑定不一致。重新生成绑定后，`bindings_are_current` 单独复测通过，合计 781 项通过；没有修改求解用例或放宽断言。完整日志保留初次失败：`local/project-estimates-rust.log`；重新生成和复测分别见 `local/project-estimates-bindings-final.log`、`local/project-estimates-drift.log`。
+
+## 手写生产代码新口径基线
+
+使用同一份 `scripts/count-sloc.py` 和 tokei 14.0.0 重算历史提交，不修改历史源码：
+
+```powershell
+python scripts/count-sloc.py --revision 1cea8dc --output local/sloc-original-partition.json
+python scripts/count-sloc.py --revision cddcdce --output local/sloc-before-feature-partition.json
+python scripts/count-sloc.py --revision 830c4d4 --output local/sloc-feature-commit.json
+python scripts/count-sloc.py --output local/sloc-current-partition.json
+```
+
+脚本要求 Python、Cargo 和带 JSON 输出的 tokei。独立的 `scripts/sloc-rust` 工具通过 syn 语法树识别 Rust 内联测试模块、测试函数和 `impl` 内的仅测试辅助方法，并排除测试专属外置模块的源码。`cfg(all(test, ...))` 可以排除，`cfg(any(test, feature = ...))` 仍可能用于生产，不能一并排除。字符串或注释中的属性、括号不影响识别。为兼容现有 nightly `pub mut(self)` 语法，只在解析副本中按词法 token 将字段写权限标记替换为空白，保留源码行列；实际计数仍使用原文。遇到未支持的测试属性位置会中止而非静默归入生产。两个工具回归测试覆盖条件判断、伪属性字符串/注释、行号、外置模块、辅助方法和 nightly 字段语法。
+
+仅统计 Git 跟踪及非忽略的第一方源码，目录范围和语言与旧口径一致；生成代码按文件头标记单列。测试目录、浏览器夹具、内联测试归入测试；示例和开发脚本分别列出。空白与注释仍由 tokei 排除。输出包括每个文件的分类，便于复核；`inline_rust_tests` 是测试总量的子集，不再重复相加。
+
+| 固定提交 | 手写生产 | 测试 | 生成 | 示例 | 开发脚本 | 合计 |
+|---|---:|---:|---:|---:|---:|---:|
+| 原始基线 `1cea8dc` | 51,546 | 31,741 | 0 | 4,276 | 1,203 | 88,766 |
+| 功能前 `cddcdce` | 50,260 | 31,849 | 2,447 | 4,277 | 1,203 | 90,036 |
+| 新功能 `830c4d4` | 50,382 | 31,964 | 2,447 | 4,277 | 1,203 | 90,273 |
+
+旧口径合计与两份既有历史记录完全一致。新功能增加 122 行手写生产代码和 115 行测试代码；不能把新增功能的增长隐藏为精简收益。新口径的 20% 目标为生产代码最多 **41,236 SLoC**，相较原始基线至少减少 **10,310 SLoC**。后续新增测试和生成绑定不抵消该主指标的减少，但继续公开全部分项。
