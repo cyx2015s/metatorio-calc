@@ -75,6 +75,7 @@ import type {
   ProductivityView,
   ProjectId,
   ProjectDocument,
+  ProjectAction,
   PrototypeDetail,
   SolveResult,
   RuntimeDiagnostic,
@@ -1232,12 +1233,8 @@ class RuntimeStore {
   }
 
   /** 重命名项目。 */
-  async setProjectName(name: string): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-name": { name } } },
-    });
+  setProjectName(name: string): Promise<void> {
+    return this.sendProjectAction({ "set-name": { name } });
   }
 
   /** 重命名工厂。 */
@@ -1323,70 +1320,43 @@ class RuntimeStore {
 
   // ── 项目设置 ────────────────────────────────────────────────────
 
-  async setTimeScale(time_scale: TimeScale): Promise<void> {
+  private async sendProjectAction(action: ProjectAction): Promise<void> {
     const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-time-scale": { time_scale } } },
-    });
+    await this.send({ scope: "project", action: { project, action } });
   }
 
-  async setAllAccessible(enabled: boolean): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-all-accessible": { enabled } } },
-    });
+  setTimeScale(time_scale: TimeScale): Promise<void> {
+    return this.sendProjectAction({ "set-time-scale": { time_scale } });
   }
 
-  async setQualityLimit(quality: string | null): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-quality-limit": { quality } } },
-    });
+  setAllAccessible(enabled: boolean): Promise<void> {
+    return this.sendProjectAction({ "set-all-accessible": { enabled } });
   }
 
-  async setSolver(solver: LpSolver): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-solver": { solver } } },
-    });
+  setQualityLimit(quality: string | null): Promise<void> {
+    return this.sendProjectAction({ "set-quality-limit": { quality } });
   }
 
-  async setMiningProductivity(productivity: number): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-mining-productivity": { productivity } } },
-    });
+  setSolver(solver: LpSolver): Promise<void> {
+    return this.sendProjectAction({ "set-solver": { solver } });
+  }
+
+  setMiningProductivity(productivity: number): Promise<void> {
+    return this.sendProjectAction({ "set-mining-productivity": { productivity } });
   }
 
   // ── 里程碑 / 配方产能 ────────────────────────────────────────────
 
-  async addMilestone(node: Accessible, unlocked = true): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "add-milestone": { node, unlocked } } },
-    });
+  addMilestone(node: Accessible, unlocked = true): Promise<void> {
+    return this.sendProjectAction({ "add-milestone": { node, unlocked } });
   }
 
-  async setMilestoneUnlocked(node: Accessible, unlocked: boolean): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-milestone-unlocked": { node, unlocked } } },
-    });
+  setMilestoneUnlocked(node: Accessible, unlocked: boolean): Promise<void> {
+    return this.sendProjectAction({ "set-milestone-unlocked": { node, unlocked } });
   }
 
-  async removeMilestone(node: Accessible): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "remove-milestone": { node } } },
-    });
+  removeMilestone(node: Accessible): Promise<void> {
+    return this.sendProjectAction({ "remove-milestone": { node } });
   }
 
   /** 把里程碑重置为默认（实验室输入的科技瓶物品，全部解锁）。 */
@@ -1435,47 +1405,24 @@ class RuntimeStore {
     }
   }
 
-  async setIgnoreProductivity(ignore: boolean): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-ignore-productivity": { ignore } } },
-    });
+  setIgnoreProductivity(ignore: boolean): Promise<void> {
+    return this.sendProjectAction({ "set-ignore-productivity": { ignore } });
   }
 
-  async setRecipeProductivity(recipe: string, productivity: number): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: {
-        project,
-        action: { "set-recipe-productivity": { productivity: { recipe, productivity } } },
-      },
-    });
+  setRecipeProductivity(recipe: string, productivity: number): Promise<void> {
+    return this.sendProjectAction({ "set-recipe-productivity": { productivity: { recipe, productivity } } });
   }
 
-  async removeRecipeProductivity(recipe: string): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "remove-recipe-productivity": { recipe } } },
-    });
+  removeRecipeProductivity(recipe: string): Promise<void> {
+    return this.sendProjectAction({ "remove-recipe-productivity": { recipe } });
   }
 
-  async setInfiniteTechLevel(tech: string, level: number): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-infinite-tech-level": { level: { tech, level } } } },
-    });
+  setInfiniteTechLevel(tech: string, level: number): Promise<void> {
+    return this.sendProjectAction({ "set-infinite-tech-level": { level: { tech, level } } });
   }
 
-  async removeInfiniteTechLevel(tech: string): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "remove-infinite-tech-level": { tech } } },
-    });
+  removeInfiniteTechLevel(tech: string): Promise<void> {
+    return this.sendProjectAction({ "remove-infinite-tech-level": { tech } });
   }
 
   // ── 工厂环境（星球/地表/主品质） ────────────────────────────────
@@ -1496,12 +1443,8 @@ class RuntimeStore {
     });
   }
 
-  async setProjectMajorQuality(quality: string): Promise<void> {
-    const project = this.requireProject();
-    await this.send({
-      scope: "project",
-      action: { project, action: { "set-major-quality": { quality } } },
-    });
+  setProjectMajorQuality(quality: string): Promise<void> {
+    return this.sendProjectAction({ "set-major-quality": { quality } });
   }
 
   async setStrictSource(strict: boolean): Promise<void> {
@@ -2042,9 +1985,8 @@ class RuntimeStore {
 
   // ── 自动规划偏好（项目级全局） ──────────────────────────────────
 
-  async planningMessage(action: import("./types").PlanningAction): Promise<void> {
-    const project = this.requireProject();
-    await this.send({ scope: "project", action: { project, action: { planning: action } } });
+  planningMessage(action: import("./types").PlanningAction): Promise<void> {
+    return this.sendProjectAction({ planning: action });
   }
 
   async setAlternativeCount(count: number): Promise<void> {
