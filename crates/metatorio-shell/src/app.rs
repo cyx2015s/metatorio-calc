@@ -43,7 +43,7 @@ use metatorio_runtime::{
         effective_resource_category, fluid_fuel_info, fluid_tags, item_fuel_info, item_tags,
         surface_condition_text,
     },
-    solve::Runtime,
+    solve::{Runtime, attach_auto_plan_report},
     state::DispatchResult,
 };
 use serde::{Deserialize, Serialize};
@@ -3594,7 +3594,7 @@ pub async fn auto_plan_universe_offlock(
         }
     }
     let mut result = solve_universe_offlock(host, state, project, universe).await?;
-    metatorio_runtime::solve::attach_universe_plan_report(&mut result, &report);
+    metatorio_runtime::solve::attach_universe_plan_report(&mut result, report);
     emit(host, "universe-solve-result", result.clone());
     let revision = with_runtime(state, |r| Ok(r.state.revision))?;
     emit(host, "document-changed", revision);
@@ -3706,24 +3706,6 @@ impl CommandOutcome {
         self.errors.extend(other.errors);
         self.diagnostics.extend(other.diagnostics);
     }
-}
-
-/// 把自动规划**回写前**的候选过滤决策补进求解结果（见 `SolveDiagnostics`）。
-///
-/// 为什么随结果返回而不是只写日志：应用没有安装 logger，`log` 宏是空操作。
-/// 极端 mod 下「结果少了一条关键机制」时必须能看出它是被阈值剪掉的。
-pub(crate) fn attach_auto_plan_report(
-    result: &mut metatorio_runtime::SolveResult,
-    report: &metatorio_runtime::solve::AutoPlanReport,
-) {
-    result.report.variables_before = report.variables_before;
-    result.report.variables_after = report.variables_after;
-    result.report.solver = report.solver;
-    result.report.planning_optimization = report.planning_optimization.clone();
-    result.report.writeback_cutoff = report.cutoff;
-    result.report.candidates_total = report.candidates_total;
-    result.report.candidates_considered = report.candidates_considered;
-    result.report.candidates_used = report.candidates_used;
 }
 
 /// 逐条执行命令并汇总结果：第一个求解产出、命令的 JSON 序列化、全部错误。
@@ -4254,7 +4236,7 @@ pub(crate) async fn execute_command(
             if !written.changed {
                 return match solve_factory_offlock(host, state, project, factory).await {
                     Ok(mut result) => {
-                        attach_auto_plan_report(&mut result, &auto_report);
+                        attach_auto_plan_report(&mut result, auto_report);
                         emit(host, "solve-result", result.clone());
                         CommandOutcome::done(Some(metatorio_runtime::CommandEffect::Solve(result)))
                     }
@@ -4277,7 +4259,7 @@ pub(crate) async fn execute_command(
             }
             // 回写产生的重解结果里补上本次自动规划的候选过滤决策。
             if let Some(metatorio_runtime::CommandEffect::Solve(result)) = outcome.effect.as_mut() {
-                attach_auto_plan_report(result, &auto_report);
+                attach_auto_plan_report(result, auto_report);
             }
             outcome
         }
@@ -5032,65 +5014,6 @@ mod tests {
     };
 
     use super::*;
-
-    #[test]
-    fn attach_auto_plan_report_preserves_full_candidate_timeout() {
-        let factory_optimization = metatorio_solver::OptimizationReport {
-            optimality_proven: true,
-            termination_reason: metatorio_solver::OptimizationTermination::Optimal,
-            elapsed_seconds: 0.2,
-            time_limit_seconds: 30.0,
-            recent_pivot_cost_changes: vec![],
-            ..Default::default()
-        };
-        let planning_optimization = metatorio_solver::OptimizationReport {
-            optimality_proven: false,
-            termination_reason: metatorio_solver::OptimizationTermination::TimeLimit,
-            elapsed_seconds: 30.1,
-            time_limit_seconds: 30.0,
-            recent_pivot_cost_changes: vec![metatorio_solver::PivotCostChange {
-                pivot: 42,
-                cost_before: 10.0,
-                cost_after: 8.0,
-                decrease: 2.0,
-            }],
-            ..Default::default()
-        };
-        let mut result = metatorio_runtime::SolveResult {
-            revision: 0,
-            project: ProjectId(1),
-            factory: FactoryId(2),
-            report: metatorio_runtime::solve::SolveDiagnostics {
-                exact_optimality_verified: true,
-                optimization: Some(factory_optimization.clone()),
-                ..Default::default()
-            },
-            status: SolveStatus::Solved {
-                cost: 8.0,
-                mechanics: vec![],
-                flows: vec![],
-            },
-        };
-        let report = metatorio_runtime::solve::AutoPlanReport {
-            variables_before: 100,
-            variables_after: 2,
-            planning_optimization: Some(planning_optimization.clone()),
-            ..Default::default()
-        };
-        attach_auto_plan_report(&mut result, &report);
-        assert_eq!(result.report.optimization, Some(factory_optimization));
-        assert_eq!(
-            result.report.planning_optimization,
-            Some(planning_optimization)
-        );
-        assert!(result.report.exact_optimality_verified);
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(
-            json["report"]["planning_optimization"]["termination_reason"],
-            "time-limit"
-        );
-        assert_eq!(json["report"]["variables_before"], 100);
-    }
 
     struct FileHost {
         state: AppState,

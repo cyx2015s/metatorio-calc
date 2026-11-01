@@ -807,17 +807,7 @@ impl Runtime {
         self.state
             .apply_auto_plan(project_id, factory_id, mechanics)?;
         let mut result = self.solve_factory(project_id, factory_id)?;
-        // 回写前的决策随结果返回（见 SolveDiagnostics）。注意这些字段描述的是
-        // **规划这次 LP** 的剪枝，而不是回写后那次重解的（后者常常是 NotSolved，
-        // 会把字段留成默认 0）。
-        result.report.variables_before = auto_report.variables_before;
-        result.report.variables_after = auto_report.variables_after;
-        result.report.solver = auto_report.solver;
-        result.report.planning_optimization = auto_report.planning_optimization;
-        result.report.writeback_cutoff = auto_report.cutoff;
-        result.report.candidates_total = auto_report.candidates_total;
-        result.report.candidates_considered = auto_report.candidates_considered;
-        result.report.candidates_used = auto_report.candidates_used;
+        attach_auto_plan_report(&mut result, auto_report);
         Ok(result)
     }
 
@@ -834,7 +824,7 @@ impl Runtime {
         self.state
             .apply_universe_auto_plan(project_id, universe_id, mechanics)?;
         let mut result = self.solve_universe(project_id, universe_id)?;
-        attach_universe_plan_report(&mut result, &report);
+        attach_universe_plan_report(&mut result, report);
         Ok(result)
     }
 
@@ -989,13 +979,26 @@ impl std::ops::Deref for UniverseSnapshot {
 
 pub fn attach_universe_plan_report(
     result: &mut crate::universe::UniverseSolveResult,
-    report: &AutoPlanReport,
+    report: AutoPlanReport,
 ) {
-    result.report.planning_optimization = report.planning_optimization.clone();
-    result.report.candidates_total = report.candidates_total;
-    result.report.candidates_considered = report.candidates_considered;
-    result.report.candidates_used = report.candidates_used;
-    result.report.writeback_cutoff = report.cutoff;
+    attach_planning_diagnostics(&mut result.report, report);
+}
+
+/// Factory dimensions describe the candidate LP; universe dimensions retain
+/// the written-back solve. Neither path replaces its verification evidence.
+pub fn attach_auto_plan_report(result: &mut SolveResult, report: AutoPlanReport) {
+    result.report.variables_before = report.variables_before;
+    result.report.variables_after = report.variables_after;
+    result.report.solver = report.solver;
+    attach_planning_diagnostics(&mut result.report, report);
+}
+
+fn attach_planning_diagnostics(diagnostics: &mut SolveDiagnostics, report: AutoPlanReport) {
+    diagnostics.planning_optimization = report.planning_optimization;
+    diagnostics.candidates_total = report.candidates_total;
+    diagnostics.candidates_considered = report.candidates_considered;
+    diagnostics.candidates_used = report.candidates_used;
+    diagnostics.writeback_cutoff = report.cutoff;
 }
 pub fn plan_universe_with_progress(
     snapshot: &UniverseSnapshot,
@@ -2343,6 +2346,93 @@ mod tests {
     use metatorio_core::IdWithQuality;
     use metatorio_data::store::PrototypeStore;
     use serde_json::json;
+
+    #[test]
+    fn plan_reports_preserve_writeback_evidence_and_universe_dimensions() {
+        let factory_optimization = metatorio_solver::OptimizationReport {
+            optimality_proven: true,
+            termination_reason: metatorio_solver::OptimizationTermination::Optimal,
+            elapsed_seconds: 0.2,
+            time_limit_seconds: 30.0,
+            recent_pivot_cost_changes: vec![],
+            ..Default::default()
+        };
+        let planning_optimization = metatorio_solver::OptimizationReport {
+            optimality_proven: false,
+            termination_reason: metatorio_solver::OptimizationTermination::TimeLimit,
+            elapsed_seconds: 30.1,
+            time_limit_seconds: 30.0,
+            recent_pivot_cost_changes: vec![metatorio_solver::PivotCostChange {
+                pivot: 42,
+                cost_before: 10.0,
+                cost_after: 8.0,
+                decrease: 2.0,
+            }],
+            ..Default::default()
+        };
+        let mut result = crate::SolveResult {
+            revision: 0,
+            project: ProjectId(1),
+            factory: FactoryId(2),
+            report: crate::solve::SolveDiagnostics {
+                variables_before: 7,
+                variables_after: 3,
+                solver: metatorio_solver::LpSolver::Microlp,
+                exact_optimality_verified: true,
+                optimization: Some(factory_optimization.clone()),
+                ..Default::default()
+            },
+            status: SolveStatus::Solved {
+                cost: 8.0,
+                mechanics: vec![],
+                flows: vec![],
+            },
+        };
+        let report = crate::solve::AutoPlanReport {
+            variables_before: 100,
+            variables_after: 2,
+            solver: metatorio_solver::LpSolver::Soplex,
+            cutoff: 1e-6,
+            candidates_total: 100,
+            candidates_considered: 90,
+            candidates_used: 2,
+            planning_optimization: Some(planning_optimization.clone()),
+        };
+        let mut universe = crate::universe::UniverseSolveResult {
+            revision: 1,
+            project: result.project,
+            universe: crate::id::UniverseId(3),
+            status: crate::universe::UniverseSolveStatus::Solved {
+                cost: 8.0,
+                flows: vec![],
+                mechanics: vec![],
+            },
+            report: result.report.clone(),
+        };
+        attach_universe_plan_report(&mut universe, report.clone());
+        attach_auto_plan_report(&mut result, report);
+        assert_eq!(result.report.optimization, Some(factory_optimization));
+        assert_eq!(
+            result.report.planning_optimization,
+            Some(planning_optimization)
+        );
+        assert!(result.report.exact_optimality_verified);
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(
+            json["report"]["planning_optimization"]["termination_reason"],
+            "time-limit"
+        );
+        assert_eq!(json["report"]["variables_before"], 100);
+        assert_eq!(result.report.variables_after, 2);
+        assert_eq!(result.report.solver, metatorio_solver::LpSolver::Soplex);
+        let expected = SolveDiagnostics {
+            variables_before: 7,
+            variables_after: 3,
+            solver: metatorio_solver::LpSolver::Microlp,
+            ..result.report
+        };
+        assert_eq!(universe.report, expected);
+    }
 
     #[test]
     fn optimization_diagnostics_roundtrip_keeps_planning_and_factory_evidence_separate() {
