@@ -83,7 +83,7 @@ impl Default for ProjectDocument {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
-    /// Hidden per-prototype estimates, shared by fission and fusion; absent = 3.
+    /// Per-prototype estimates, shared by fission and fusion; absent = 3.
     pub reactor_neighbours: std::collections::BTreeMap<String, u8>,
     /// Estimated orbital logistics prices, independent of physical flow coefficients.
     pub orbital_transport_costs: OrbitalTransportCosts,
@@ -140,8 +140,8 @@ impl Default for ProjectSettings {
     }
 }
 
-/// Project-level estimates; future editors can expose these without changing
-/// transport mechanics or the LP model. Weights in prototype data are grams.
+/// Project-level estimates, editable independently of physical transport
+/// coefficients. Weights in prototype data are grams.
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]

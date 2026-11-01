@@ -1,5 +1,6 @@
 <script lang="ts">
   import AutoPlanProgress from "$lib/ui/AutoPlanProgress.svelte";
+  import ProjectEstimates from "$lib/ui/ProjectEstimates.svelte";
   import OptimizationSummary from "$lib/ui/OptimizationSummary.svelte";
   import RichText from "$lib/ui/RichText.svelte";
   import { flowName } from "$lib/display-labels";
@@ -1644,6 +1645,9 @@
           </p>
           <button class="btn block" title="编辑机器偏好、替代数量、枚举插件与插件塔" onclick={() => (prefsOpen = true)}>编辑规划偏好…</button>
         </section>
+        {#key project.id}
+          <ProjectEstimates {project} />
+        {/key}
       {:else}
         <div class="rail-empty">
           <strong>还没有选中的项目</strong>

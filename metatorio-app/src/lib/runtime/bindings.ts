@@ -2001,14 +2001,14 @@ export type OrbitalCargoMechanic_Serialize = {
 };
 
 /**
- *  Project-level estimates; future editors can expose these without changing
- *  transport mechanics or the LP model. Weights in prototype data are grams.
+ *  Project-level estimates, editable independently of physical transport
+ *  coefficients. Weights in prototype data are grams.
  */
 export type OrbitalTransportCosts = OrbitalTransportCosts_Serialize | OrbitalTransportCosts_Deserialize;
 
 /**
- *  Project-level estimates; future editors can expose these without changing
- *  transport mechanics or the LP model. Weights in prototype data are grams.
+ *  Project-level estimates, editable independently of physical transport
+ *  coefficients. Weights in prototype data are grams.
  */
 export type OrbitalTransportCosts_Deserialize = {
 	rocket_export_per_kg?: number | null,
@@ -2018,8 +2018,8 @@ export type OrbitalTransportCosts_Deserialize = {
 };
 
 /**
- *  Project-level estimates; future editors can expose these without changing
- *  transport mechanics or the LP model. Weights in prototype data are grams.
+ *  Project-level estimates, editable independently of physical transport
+ *  coefficients. Weights in prototype data are grams.
  */
 export type OrbitalTransportCosts_Serialize = {
 	rocket_export_per_kg: number | null,
@@ -2426,7 +2426,7 @@ export type ProjectOpenRequestedEvent = null;
 export type ProjectSettings = ProjectSettings_Serialize | ProjectSettings_Deserialize;
 
 export type ProjectSettings_Deserialize = {
-	/**  Hidden per-prototype estimates, shared by fission and fusion; absent = 3. */
+	/**  Per-prototype estimates, shared by fission and fusion; absent = 3. */
 	reactor_neighbours?: { [key in string]: number },
 	/**  Estimated orbital logistics prices, independent of physical flow coefficients. */
 	orbital_transport_costs?: OrbitalTransportCosts_Deserialize,
@@ -2463,7 +2463,7 @@ export type ProjectSettings_Deserialize = {
 };
 
 export type ProjectSettings_Serialize = {
-	/**  Hidden per-prototype estimates, shared by fission and fusion; absent = 3. */
+	/**  Per-prototype estimates, shared by fission and fusion; absent = 3. */
 	reactor_neighbours: { [key in string]: number },
 	/**  Estimated orbital logistics prices, independent of physical flow coefficients. */
 	orbital_transport_costs: OrbitalTransportCosts_Serialize,

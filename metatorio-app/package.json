@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:optimization": "node --test tests/optimization.test.mjs",
+    "test:project-estimates-browser": "node tests/project-estimates-browser.cjs",
     "test:auto-plan-progress-browser": "node tests/auto-plan-progress-browser.cjs",
     "test:universe-workspace": "node --test tests/universe-workspace.test.mjs",
     "test:universe-workspace-browser": "node tests/universe-workspace-browser.cjs",
