@@ -456,3 +456,150 @@ fn vanilla_tile_closure_reaches_foundations_without_importing_planet_terrain() {
     assert!(ground.contains("concrete"));
     assert!(!ground.contains("space-platform-foundation"));
 }
+
+#[test]
+fn tile_constraints_filter_preferred_machines_before_ranking_and_allow_paved_tiles() {
+    let mut dump = fixture();
+    dump["tile"]["water"]["collision_mask"] = json!({"layers": {"water_tile": true}});
+    dump["tile"]["lava"]["collision_mask"] = json!({"layers": {"water_tile": true}});
+    dump["utility-constants"]["default"] = json!({"default_collision_masks": {
+        "assembling-machine": {"layers": {"water_tile": true}},
+        "mining-drill": {"layers": {"water_tile": true}}
+    }});
+    // Explicit empty masks override the type default; the faster preferred machines
+    // inherit the default and cannot stand on this water-only surface.
+    dump["assembling-machine"]["slow"]["collision_mask"] = json!({"layers": {}});
+    dump["mining-drill"]["slow-drill"]["collision_mask"] = json!({"layers": {}});
+    let mut opts = options(Some("nauvis"), None);
+    opts.machine_preferences = vec![
+        IdWithQuality::new("fast", "normal"),
+        IdWithQuality::new("fast-drill", "normal"),
+    ];
+    let store = PrototypeStore::load(&dump).unwrap();
+    let candidates = enumerate(&store, &opts);
+    assert!(
+        candidates
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "slow"))
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|m| matches!(m, Mechanic::Mining(m) if m.machine.id == "slow-drill"))
+    );
+    assert!(
+        !candidates
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "fast"))
+    );
+    assert!(
+        !candidates
+            .iter()
+            .any(|m| matches!(m, Mechanic::Mining(m) if m.machine.id == "fast-drill"))
+    );
+    // A recursively reachable floor makes the default collision masks buildable.
+    dump["tile"]["floor"] = json!({"collision_mask": {"layers": {"ground_tile": true}}});
+    dump["item"]["floor"] = json!({"place_as_tile": {"result": "floor", "condition": {"layers": {}}, "tile_condition": ["water"]}});
+    let paved = PrototypeStore::load(&dump).unwrap();
+    let candidates = enumerate(&paved, &opts);
+    assert!(
+        candidates
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "fast"))
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|m| matches!(m, Mechanic::Mining(m) if m.machine.id == "fast-drill"))
+    );
+    // Without an environment the existing unrestricted enumeration is retained.
+    assert!(
+        enumerate(&store, &options(None, None))
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "fast"))
+    );
+}
+
+#[test]
+fn buildability_regions_require_compatible_tiles_in_each_region() {
+    let mut dump = fixture();
+    dump["tile"]["water"]["collision_mask"] = json!({"layers": {"wet": true, "shared": true}});
+    dump["tile"]["lava"]["collision_mask"] = json!({"layers": {"hot": true, "shared": true}});
+    dump["assembling-machine"]["fast"]["tile_buildability_rules"] = json!([
+        {"area": [[-1,-1],[0,0]], "required_tiles": {"layers": {"wet": true, "shared": true}}, "colliding_tiles": {"layers": {"hot": true}}},
+        {"area": [[0,0],[1,1]], "required_tiles": {"layers": {"hot": true}}}
+    ]);
+    let opts = options(Some("nauvis"), None);
+    let store = PrototypeStore::load(&dump).unwrap();
+    assert!(
+        enumerate(&store, &opts)
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "fast")),
+        "distinct regions can use distinct tiles"
+    );
+    dump["assembling-machine"]["fast"]["tile_buildability_rules"][0]["colliding_tiles"] =
+        json!({"layers": {"wet": true}});
+    let blocked = PrototypeStore::load(&dump).unwrap();
+    assert!(
+        enumerate(&blocked, &opts)
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "slow")),
+        "required and colliding masks must hold on the same tile within a region"
+    );
+    dump["assembling-machine"]["fast"]["tile_buildability_rules"][0]["colliding_tiles"] =
+        json!({"layers": {}});
+    dump["tile"]["water"]["collision_mask"] = json!({"layers": {"wet": true}});
+    let missing_layer = PrototypeStore::load(&dump).unwrap();
+    assert!(
+        enumerate(&missing_layer, &opts)
+            .iter()
+            .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "slow")),
+        "all required layers must exist on a matching tile"
+    );
+}
+
+#[test]
+fn tile_constraints_apply_to_beacons_energy_and_launch_infrastructure() {
+    let mut dump = fixture();
+    let forbidden = json!({"layers": {"unavailable": true}});
+    for kind in [
+        "beacon",
+        "generator",
+        "boiler",
+        "reactor",
+        "solar-panel",
+        "accumulator",
+        "rocket-silo",
+    ] {
+        for prototype in dump[kind].as_object_mut().unwrap().values_mut() {
+            prototype["tile_buildability_rules"] =
+                json!([{"area": [[-1,-1],[1,1]], "required_tiles": forbidden}]);
+        }
+    }
+    let store = PrototypeStore::load(&dump).unwrap();
+    let mut opts = options(Some("nauvis"), None);
+    opts.enumerate_beacons = vec![AutoBeaconPlan {
+        module_config: ModuleConfig {
+            beacons: vec![BeaconConfig {
+                beacon: IdWithQuality::new("beacon", "normal"),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    }];
+    let candidates = enumerate(&store, &opts);
+    assert!(candidates.iter().any(|m| matches!(m, Mechanic::Recipe(_))));
+    for candidate in candidates {
+        match candidate {
+            Mechanic::Recipe(m) => assert!(m.module_config.beacons.is_empty()),
+            Mechanic::Generator(_)
+            | Mechanic::Boiler(_)
+            | Mechanic::Reactor(_)
+            | Mechanic::Solar(_)
+            | Mechanic::ItemLaunch(_) => {
+                panic!("unbuildable equipment was enumerated: {candidate:?}")
+            }
+            _ => {}
+        }
+    }
+}

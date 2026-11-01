@@ -157,6 +157,18 @@ impl PrototypeStore {
         } else {
             dump
         };
+        // EntityPrototype.collision_mask 省略时按实体类型取 utility constants；
+        // 显式 layers = {} 必须保留，不能被默认掩码覆盖。
+        let default_collision_masks: std::collections::BTreeMap<
+            String,
+            crate::CollisionMaskConnector,
+        > = dump
+            .get("utility-constants")
+            .and_then(Value::as_object)
+            .and_then(|constants| constants.values().next())
+            .and_then(|constants| constants.get("default_collision_masks"))
+            .and_then(|masks| serde_json::from_value(masks.clone()).ok())
+            .unwrap_or_default();
         let mut records: AIndexMap<PrototypeGroup, AIndexMap<String, PrototypeRecord>> =
             AIndexMap::default();
         let mut failures: Vec<(String, String, String)> = Vec::new();
@@ -175,7 +187,13 @@ impl PrototypeStore {
                 let mut ok = true;
                 for comp in *component_list {
                     match deserialize_component(comp, value) {
-                        Ok(cv) => {
+                        Ok(mut cv) => {
+                            if let ComponentValue::EntityComponent(entity) = &mut cv
+                                && entity.collision_mask.is_none()
+                            {
+                                entity.collision_mask =
+                                    default_collision_masks.get(*typename).cloned();
+                            }
                             components.insert(comp, cv);
                         }
                         Err(e) => {

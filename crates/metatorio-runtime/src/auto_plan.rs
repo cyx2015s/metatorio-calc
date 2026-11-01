@@ -142,12 +142,13 @@ pub fn enumerate_all(
     ctx: &Context,
     options: &EnumerateOptions,
 ) -> Vec<Mechanic> {
+    let environment = SurfaceEnvironment::new(store, options);
     let mut out = Vec::new();
-    enumerate_recipes(store, ctx, options, &mut out);
-    enumerate_mining(store, ctx, options, &mut out);
-    enumerate_simple(store, ctx, options, &mut out);
-    enumerate_energy(store, ctx, options, &mut out);
-    enumerate_tiles(store, ctx, options, &mut out);
+    enumerate_recipes(store, ctx, options, &environment, &mut out);
+    enumerate_mining(store, ctx, options, &environment, &mut out);
+    enumerate_simple(store, ctx, options, &environment, &mut out);
+    enumerate_energy(store, ctx, options, &environment, &mut out);
+    enumerate_tiles(store, ctx, options, &environment, &mut out);
     out
 }
 
@@ -169,10 +170,10 @@ fn enumerate_tiles(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
+    environment: &SurfaceEnvironment,
     out: &mut Vec<Mechanic>,
 ) {
     let major_quality = quality_name(ctx, options.major_quality);
-    let properties = surface_properties(store, options);
     let generated = crate::planet::surface_available_tiles(
         store,
         options.planet.as_deref(),
@@ -205,7 +206,7 @@ fn enumerate_tiles(
             &major_quality,
             |machine| {
                 machine.component::<OffshorePumpComponent>().is_some()
-                    && entity_available(store, machine, options, properties.as_ref())
+                    && entity_available(store, machine, options, environment)
             },
             |machine| {
                 machine
@@ -232,34 +233,83 @@ fn enumerate_tiles(
     }
 }
 
-/// 当前工厂的表面属性（planet/surface 规则见 metatorio_runtime::planet）。
-fn surface_properties(
-    store: &PrototypeStore,
-    options: &EnumerateOptions,
-) -> Option<std::collections::BTreeMap<String, f64>> {
-    crate::planet::surface_properties_of(
-        store,
-        options.planet.as_deref(),
-        options.surface.as_deref(),
-    )
+/// 同一次枚举共享地形闭包，避免为每个机器/配方重复计算铺地可达性。
+struct SurfaceEnvironment {
+    properties: Option<std::collections::BTreeMap<String, f64>>,
+    tiles: Option<Vec<TileComponent>>,
 }
 
-/// 实体能否在当前表面建造（`surface_conditions` 判定；无表面属性/无条件时允许）。
-///
-/// 这是**硬约束**：星球上建不出来的机器不应进入候选（否则自动规划会给出
-/// 无法落地的方案，例如在 Nauvis 上枚举 foundry）。
+impl SurfaceEnvironment {
+    fn new(store: &PrototypeStore, options: &EnumerateOptions) -> Self {
+        Self {
+            properties: crate::planet::surface_properties_of(
+                store,
+                options.planet.as_deref(),
+                options.surface.as_deref(),
+            ),
+            // 未指定环境时保留原有的无环境枚举行为。
+            tiles: (options.planet.is_some() || options.surface.is_some()).then(|| {
+                crate::planet::surface_available_tiles(
+                    store,
+                    options.planet.as_deref(),
+                    options.surface.as_deref(),
+                )
+                .iter()
+                .filter_map(|name| {
+                    store
+                        .get(PrototypeGroup::Tile, name)
+                        .and_then(|record| record.component::<TileComponent>())
+                        .cloned()
+                })
+                .collect()
+            }),
+        }
+    }
+}
+
+/// 表面属性与地格放置限制都是硬约束；在候选排名/截取之前检查。
 fn buildable_on_surface(
     store: &PrototypeStore,
     record: &PrototypeRecord,
-    properties: Option<&std::collections::BTreeMap<String, f64>>,
+    environment: &SurfaceEnvironment,
 ) -> bool {
-    let Some(properties) = properties else {
-        return true;
-    };
     let Some(entity) = record.component::<EntityComponent>() else {
         return true;
     };
-    crate::planet::surface_condition_satisfied(store, &entity.surface_conditions, properties)
+    if let Some(properties) = &environment.properties
+        && !crate::planet::surface_condition_satisfied(
+            store,
+            &entity.surface_conditions,
+            properties,
+        )
+    {
+        return false;
+    }
+    let Some(tiles) = &environment.tiles else {
+        return true;
+    };
+    // collision_mask 只作用于建筑本体；不同 buildability rule 的区域可以使用
+    // 不同地格（如抽水机的岸边与取水区），不能要求同一地格满足所有区域。
+    let has_layers =
+        |tile: &TileComponent, layers: &std::collections::BTreeMap<String, serde_json::Value>| {
+            layers
+                .keys()
+                .any(|layer| tile.collision_mask.layers.contains_key(layer))
+        };
+    entity.collision_mask.as_ref().is_none_or(|mask| {
+        mask.layers.is_empty() || tiles.iter().any(|tile| !has_layers(tile, &mask.layers))
+    }) && entity.tile_buildability_rules.iter().all(|rule| {
+        tiles.iter().any(|tile| {
+            rule.required_tiles.as_ref().is_none_or(|mask| {
+                mask.layers
+                    .keys()
+                    .all(|layer| tile.collision_mask.layers.contains_key(layer))
+            }) && rule
+                .colliding_tiles
+                .as_ref()
+                .is_none_or(|mask| !has_layers(tile, &mask.layers))
+        })
+    })
 }
 
 /// 在排名/截取替代机器之前过滤，避免未解锁的高速机器占满候选名额。
@@ -267,9 +317,9 @@ fn entity_available(
     store: &PrototypeStore,
     record: &PrototypeRecord,
     options: &EnumerateOptions,
-    properties: Option<&std::collections::BTreeMap<String, f64>>,
+    environment: &SurfaceEnvironment,
 ) -> bool {
-    buildable_on_surface(store, record, properties)
+    buildable_on_surface(store, record, environment)
         && options.accessibility.as_ref().is_none_or(|accessibility| {
             accessibility.is_accessible(&Accessible::Entity(record.name.clone()))
         })
@@ -279,7 +329,7 @@ fn entity_available(
 fn buildable_beacon_plans<'a>(
     store: &PrototypeStore,
     options: &'a EnumerateOptions,
-    properties: Option<&std::collections::BTreeMap<String, f64>>,
+    environment: &SurfaceEnvironment,
 ) -> Vec<&'a crate::document::AutoBeaconPlan> {
     options
         .enumerate_beacons
@@ -288,7 +338,7 @@ fn buildable_beacon_plans<'a>(
             plan.module_config.beacons.iter().all(|bc| {
                 store
                     .get(PrototypeGroup::Entity, &bc.beacon.id)
-                    .is_some_and(|record| entity_available(store, record, options, properties))
+                    .is_some_and(|record| entity_available(store, record, options, environment))
             })
         })
         .collect()
@@ -595,20 +645,20 @@ fn enumerate_recipes(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
+    environment: &SurfaceEnvironment,
     out: &mut Vec<Mechanic>,
 ) {
     let quality_range = options.quality_limit + 1;
     let major_quality = quality_name(ctx, options.major_quality);
     // 表面条件：配方与机器都要满足当前星球/地表属性（自动规划才校验，
     // 手动模式认为所有配方可用）。
-    let properties = surface_properties(store, options);
     // 只在能建造的插件塔方案里枚举（插件塔实体本身也有表面条件）。
-    let beacons = buildable_beacon_plans(store, options, properties.as_ref());
+    let beacons = buildable_beacon_plans(store, options, environment);
     for record in store.group(PrototypeGroup::Recipe) {
         let Some(recipe) = record.component::<RecipeComponent>() else {
             continue;
         };
-        if let Some(properties) = &properties
+        if let Some(properties) = &environment.properties
             && !crate::planet::surface_condition_satisfied(
                 store,
                 &recipe.surface_conditions,
@@ -638,7 +688,7 @@ fn enumerate_recipes(
                 record
                     .component::<CraftingMachineComponent>()
                     .is_some_and(|machine| machine_fits_recipe(machine, recipe))
-                    && entity_available(store, record, options, properties.as_ref())
+                    && entity_available(store, record, options, environment)
             },
             |record| {
                 record
@@ -722,6 +772,7 @@ fn enumerate_mining(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
+    environment: &SurfaceEnvironment,
     out: &mut Vec<Mechanic>,
 ) {
     // 平台的星岩已作为星块物品输入，不存在下方星球的地面矿藏。
@@ -729,8 +780,7 @@ fn enumerate_mining(
         return;
     }
     let major_quality = quality_name(ctx, options.major_quality);
-    let properties = surface_properties(store, options);
-    let beacons = buildable_beacon_plans(store, options, properties.as_ref());
+    let beacons = buildable_beacon_plans(store, options, environment);
     for record in store.group(PrototypeGroup::Entity) {
         if record.type_ != "resource" {
             continue;
@@ -738,7 +788,7 @@ fn enumerate_mining(
         let Some(resource) = record.component::<ResourceEntityComponent>() else {
             continue;
         };
-        if !buildable_on_surface(store, record, properties.as_ref()) {
+        if !buildable_on_surface(store, record, environment) {
             continue;
         }
         let category = if resource.category.is_empty() {
@@ -756,7 +806,7 @@ fn enumerate_mining(
                 drill_record
                     .component::<MiningDrillComponent>()
                     .is_some_and(|drill| drill.resource_categories.contains(&category))
-                    && entity_available(store, drill_record, options, properties.as_ref())
+                    && entity_available(store, drill_record, options, environment)
             },
             |drill_record| {
                 drill_record
@@ -833,15 +883,15 @@ fn enumerate_simple(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
+    environment: &SurfaceEnvironment,
     out: &mut Vec<Mechanic>,
 ) {
     let quality_range = options.quality_limit + 1;
-    let properties = surface_properties(store, options);
     let ground = !crate::planet::is_space_platform(options.surface.as_deref());
     // 发射产物依赖可用的发射井，不能仅凭物品存在 rocket_launch_products 就枚举。
     let can_launch = store.group(PrototypeGroup::Entity).any(|record| {
         record.component::<RocketSiloComponent>().is_some()
-            && entity_available(store, record, options, properties.as_ref())
+            && entity_available(store, record, options, environment)
     });
     // 变质 / 种植 / 物品燃料 / 火箭发射
     let science_packs = metatorio_core::science::science_pack_names(store);
@@ -879,9 +929,9 @@ fn enumerate_simple(
                     options.planet.as_deref(),
                 );
                 if available
-                    && store.entity(plant_entity).is_some_and(|record| {
-                        buildable_on_surface(store, record, properties.as_ref())
-                    })
+                    && store
+                        .entity(plant_entity)
+                        .is_some_and(|record| buildable_on_surface(store, record, environment))
                 {
                     out.push(Mechanic::Plant(metatorio_core::PlantMechanic {
                         seed: id.clone(),
@@ -930,13 +980,13 @@ fn enumerate_energy(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
+    environment: &SurfaceEnvironment,
     out: &mut Vec<Mechanic>,
 ) {
     let fluid_temperatures = store.fluid_temperatures_with_reactors(&ctx.game.reactor_neighbours);
     let major_quality = quality_name(ctx, options.major_quality);
     let quality_range = options.quality_limit + 1;
     // 能量设备同样受表面条件约束（如只能建在特定星球的发电机/锅炉）。
-    let properties = surface_properties(store, options);
     for record in store.group(PrototypeGroup::Entity) {
         // 能量机器（发电机/锅炉/反应堆）可达性过滤：当前项目科技未解锁的机器不枚举。
         if let Some(accessibility) = &options.accessibility
@@ -945,7 +995,7 @@ fn enumerate_energy(
         {
             continue;
         }
-        if !buildable_on_surface(store, record, properties.as_ref()) {
+        if !buildable_on_surface(store, record, environment) {
             continue;
         }
         if let Some(generator) = record.component::<GeneratorComponent>() {
@@ -1162,7 +1212,7 @@ fn enumerate_energy(
             continue;
         }
         // 表面条件过滤（如某些星球不能建太阳能板）。
-        if !buildable_on_surface(store, record, properties.as_ref()) {
+        if !buildable_on_surface(store, record, environment) {
             continue;
         }
         if let Some(panel) = record.component::<SolarPanelComponent>() {
