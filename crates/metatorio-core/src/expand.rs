@@ -805,7 +805,7 @@ fn expand_tile_dispose(mechanic: &TileDisposeMechanic, ctx: &Context) -> Option<
         .prototype
         .get(PrototypeGroup::Tile, &mechanic.tile)
         .and_then(|record| record.component::<TileComponent>())?;
-    if !tile.destroys_dropped_items {
+    if mechanic.tile != "empty-space" && !tile.destroys_dropped_items {
         return None;
     }
     item_record(ctx, &mechanic.item.id)?;

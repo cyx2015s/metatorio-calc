@@ -186,6 +186,9 @@ fn enumerate_tiles(
     // 上有便宜的销毁途径——按地格展开只会让候选数乘上地格数，没有任何新信息。
     // 取到的那个地格再对所有物品展开（物品维度是必须的：销毁流要指名消耗什么）。
     let mut disposal_tile: Option<String> = None;
+    if environment.is_space_platform {
+        disposal_tile = Some("empty-space".to_string());
+    }
     for record in store.group(PrototypeGroup::Tile) {
         if !generated.contains(&record.name) {
             continue;
@@ -237,6 +240,7 @@ fn enumerate_tiles(
 struct SurfaceEnvironment {
     properties: Option<std::collections::BTreeMap<String, f64>>,
     tiles: Option<Vec<TileComponent>>,
+    is_space_platform: bool,
 }
 
 impl SurfaceEnvironment {
@@ -263,6 +267,7 @@ impl SurfaceEnvironment {
                 })
                 .collect()
             }),
+            is_space_platform: crate::planet::is_space_platform(options.surface.as_deref()),
         }
     }
 }
