@@ -509,28 +509,6 @@ fn expand_recipe(mechanic: &RecipeMechanic, ctx: &Context) -> Option<Flow> {
     base_speed *= (1.0 + effects.speed).max(0.0);
     let scale = base_speed * fulfillment;
 
-    // 组装机为 rocket-silo 时，配方额外产出火箭发射载荷（虚拟物品）：复刻旧实现
-    // recipe.rs:587-601（Space Age 重量火箭 → RocketWeightCapacity；堆叠火箭 →
-    // RocketSlotCapacity）。ItemLaunch 机制消耗该容量，二者在 LP 中配平。
-    // 注意：火箭需 `rocket_parts_required` 次配方合成才完成，故每次合成的载荷
-    // 应是整枚火箭容量 ÷ rocket_parts_required（旧版直接加满容量是错的）。
-    if let Some(silo) = crafter.component::<RocketSiloComponent>() {
-        let parts = silo.rocket_parts_required.max(1) as f64;
-        if silo.launch_to_space_platforms {
-            let lift_weight = if silo.lift_weight > 0.0 {
-                silo.lift_weight
-            } else {
-                ctx.prototype.weight_constants().default_rocket_lift_weight
-            };
-            temp.add(DualVar::RocketWeightCapacity, lift_weight / parts);
-        } else {
-            let slots = silo
-                .to_be_inserted_to_rocket_inventory_size
-                .unwrap_or_default() as f64;
-            temp.add(DualVar::RocketSlotCapacity, slots / parts);
-        }
-    }
-
     for ingredient in &recipe.ingredients {
         match ingredient {
             Ingredient::Item(item) => {
@@ -567,37 +545,55 @@ fn expand_recipe(mechanic: &RecipeMechanic, ctx: &Context) -> Option<Flow> {
 
     let quality_distribution =
         calc_quality_distribution(ctx, effects.quality, recipe_quality, quality_limit(ctx));
-    for result in &recipe.results {
-        match result {
-            Product::Item(item) => {
-                let output = item.normalized_output();
-                let amount = (output.base + output.productivity * effects.productivity) * scale;
-                for (level, probability) in quality_distribution.iter().copied().enumerate() {
-                    if probability == 0.0 {
-                        continue;
+    if let Some(silo) = crafter.component::<RocketSiloComponent>() {
+        let parts = silo.rocket_parts_required.max(1) as f64;
+        if silo.launch_to_space_platforms {
+            let lift_weight = if silo.lift_weight > 0.0 {
+                silo.lift_weight
+            } else {
+                ctx.prototype.weight_constants().default_rocket_lift_weight
+            };
+            temp.add(DualVar::RocketWeightCapacity, lift_weight / parts * scale * (1.0 + effects.productivity));
+        } else {
+            let slots = silo
+                .to_be_inserted_to_rocket_inventory_size
+                .unwrap_or_default() as f64;
+            temp.add(DualVar::RocketSlotCapacity, slots / parts * scale * (1.0 + effects.productivity));
+        }
+    } else {
+        for result in &recipe.results {
+            match result {
+                Product::Item(item) => {
+                    let output = item.normalized_output();
+                    let amount = (output.base + output.productivity * effects.productivity) * scale;
+                    for (level, probability) in quality_distribution.iter().copied().enumerate() {
+                        if probability == 0.0 {
+                            continue;
+                        }
+                        let output_quality =
+                            recipe_output_quality(ctx, recipe_quality, item, level);
+                        temp.add(
+                            DualVar::Item(IdWithQuality::new(
+                                &item.name,
+                                quality_name(ctx, output_quality),
+                            )),
+                            amount * probability,
+                        );
                     }
-                    let output_quality = recipe_output_quality(ctx, recipe_quality, item, level);
-                    temp.add(
-                        DualVar::Item(IdWithQuality::new(
-                            &item.name,
-                            quality_name(ctx, output_quality),
-                        )),
-                        amount * probability,
+                }
+                Product::Fluid(fluid) => {
+                    let temperature = fluid
+                        .temperature
+                        .unwrap_or_else(|| fluid_temperature(ctx, &fluid.name));
+                    let output = fluid.normalized_output();
+                    add_fluid_interval(
+                        &mut temp,
+                        &fluid.name,
+                        (output.base + output.productivity * effects.productivity) * scale,
+                        temperature,
+                        temperature,
                     );
                 }
-            }
-            Product::Fluid(fluid) => {
-                let temperature = fluid
-                    .temperature
-                    .unwrap_or_else(|| fluid_temperature(ctx, &fluid.name));
-                let output = fluid.normalized_output();
-                add_fluid_interval(
-                    &mut temp,
-                    &fluid.name,
-                    (output.base + output.productivity * effects.productivity) * scale,
-                    temperature,
-                    temperature,
-                );
             }
         }
     }
