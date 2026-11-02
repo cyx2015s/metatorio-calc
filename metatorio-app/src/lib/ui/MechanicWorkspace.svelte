@@ -32,14 +32,13 @@
     if (!networkStates.has(scope)) networkStates.set(scope, createNetworkViewState());
     return networkStates.get(scope)!;
   });
+  const environmentKey = $derived(actions ? runtime.mechanicEnvironmentKey(actions.commands.scope) : '');
   const workspace = new MechanicWorkspaceState(() => {
-    const document = runtime.document?.projects.find(entry => entry.id === project);
     return {project, factory, entries, scopeKey: scope, expanded: filterOpen, needsAllFlows: view === 'network',
-      environmentKey: JSON.stringify([document?.context_id, runtime.effectiveContextId, document?.settings,
-        actions?.commands.scope.kind === "universe" ? document?.universes?.find(entry => entry.id === factory) : document?.factories.find(entry => entry.id === factory)?.settings])};
+      environmentKey};
   }, (project, factory, id, mechanic) => actions!.loadFlow(id, mechanic));
   $effect(() => { workspace.syncScope(); });
-  $effect(() => workspace.loadIndex());
+  $effect(() => { void runtime.flowRevision; return workspace.loadIndex(); });
   let visibleIds = $derived(workspace.visibleIds);
   let filterActive = $derived(workspace.active);
   $effect(() => { onFilterActiveChange(filterActive); });

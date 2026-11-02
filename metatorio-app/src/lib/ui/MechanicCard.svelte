@@ -1,6 +1,7 @@
 <script lang="ts">
   import {transportLabel} from "$lib/mechanics/located";
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { untrack } from 'svelte';
   import { mechanicPrototype } from "$lib/display-labels";
   import { mechanicKindLabels as kindLabel } from "$lib/mechanics/presentation";
   import type { MechanicEntry } from "$lib/runtime/types";
@@ -25,13 +26,14 @@
   // 依赖 entry.mechanic 整体：配方/机器/插件配置变化时重新加载。
   let loadingFlows = $state(true);
   let mechanicFlows = $state<import("$lib/mechanic-filter").ExpandedFlow[]>([]);
+  const environmentKey = $derived(runtime.mechanicEnvironmentKey(actions.commands.scope));
   $effect(() => {
     const mechanic = entry.mechanic;
     void entry.location;
-    void runtime.selectedProject?.settings;
+    void environmentKey; void runtime.flowRevision;
     loadingFlows = true;
     let alive = true;
-    actions.loadFlow(entry.id, mechanic)
+    untrack(() => actions.loadFlow(entry.id, mechanic))
       .then((flows) => {
         if (!alive) return;
         mechanicFlows = flows;

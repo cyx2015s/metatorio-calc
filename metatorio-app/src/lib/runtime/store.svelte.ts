@@ -1,6 +1,8 @@
 import {onUniverseSolveResult,onUniverseSolveError} from './client';
 import {universeSolveSignatures} from '$lib/mechanics/universe-signature';
 import {factoryImplicitSignature, factorySolveSignatures} from '$lib/mechanics/factory-signature';
+import { reconcileSnapshot } from './snapshot';
+import { mechanicFlowSettings } from './flow-settings';
 import { universeView } from "$lib/mechanics/located";
 import { universePreview, type UniversePreview } from "./client";
 import { MechanicCommands, type MechanicScope } from "./mechanic-commands";
@@ -125,6 +127,8 @@ function fontStack(name: string, fallback: string): string {
 
 class RuntimeStore {
   document = $state<AppDocument | null>(null);
+  private factorySignatures = $derived(factorySolveSignatures(this.document));
+  private universeSignatures = $derived(universeSolveSignatures(this.document));
   // 前端持有 UI 选择态（后端不再存储任何选择）。选中 id 为 0 时表示未选；
   // 用独立的 *Id 字段承担 id，`selectedProject`/`selectedFactory` getter 仍
   // 返回文档对象，便于模板直接读取。
@@ -302,6 +306,7 @@ class RuntimeStore {
    *  MechanicCard 都重新拉取展开流。按机制**内容哈希**缓存，内容不变时不重发
    *  IPC；卡片和筛选共享已完成及进行中的请求，失败可重试。 */
   private mechanicFlowCache = new MechanicFlowCache();
+  flowRevision = $state(0);
 
   /** 当前上下文的全量目录索引（前端本地筛选）。 */
   catalogIndex = $state<CatalogIndex | null>(null);
@@ -433,15 +438,16 @@ class RuntimeStore {
     if (generation !== this.refreshGeneration) return;
     // Events and dispatch completion can request the same snapshot. Preserve
     // component identity/focus instead of redrawing an unchanged document.
-    if (JSON.stringify(document) === JSON.stringify(this.document)) return;
-    const beforeFactory = factorySolveSignatures(this.document);
+    const shared = reconcileSnapshot(this.document, document);
+    if (shared === this.document) return;
+    const beforeFactory = this.factorySignatures;
     const beforeImplicit = factoryImplicitSignature(this.document, this.selectedProjectId, this.selectedFactoryId);
     const beforeReads = projectReadKeys(this.selectedProject);
-    const beforeUniverse = universeSolveSignatures(this.document);
+    const beforeUniverse = this.universeSignatures;
     const previousProject = this.selectedProjectId;
     const previousFactory = this.selectedFactoryId;
-    this.document = document;
-    const afterFactory = factorySolveSignatures(this.document);
+    this.document = shared;
+    const afterFactory = this.factorySignatures;
     for (const key of new Set([...beforeFactory.keys(), ...afterFactory.keys()])) if (beforeFactory.get(key) !== afterFactory.get(key)) {
       this.solveCache.delete(key);
       if (afterFactory.has(key)) this.factoryInputRevisions.set(key, this.revision);
@@ -449,7 +455,7 @@ class RuntimeStore {
     }
     const factoryChanged = beforeFactory.get(`${previousProject}:${previousFactory}`) !== afterFactory.get(`${previousProject}:${previousFactory}`);
     if (factoryChanged) { this.solve = null; this.solveError = null; this.solveDiagnostic = null; }
-    const afterUniverse = universeSolveSignatures(this.document);
+    const afterUniverse = this.universeSignatures;
     for(const key of new Set([...beforeUniverse.keys(), ...afterUniverse.keys()]))if(beforeUniverse.get(key)!==afterUniverse.get(key)){
       this.universeSolveCache.delete(key);
       if(afterUniverse.has(key))this.universeInputRevisions.set(key,this.revision);
@@ -926,7 +932,7 @@ class RuntimeStore {
     const document = this.document?.projects.find(entry => entry.id === project);
     const environment = document?.factories.find(entry => entry.id === factory)?.settings;
     const key = JSON.stringify([document?.context_id ?? this.effectiveContextId, project, factory, mechanicId]);
-    const hash = JSON.stringify([mechanic, document?.settings, environment]);
+    const hash = JSON.stringify([mechanic, mechanicFlowSettings(document?.settings), environment]);
     return this.mechanicFlowCache.get(key, hash, async () => {
       const flows = await mechanicFlow(project, factory, mechanicId);
       return flows.map(([flow, amount]) => ({flow, amount: amount ?? NaN}));
@@ -936,6 +942,7 @@ class RuntimeStore {
   /** 换上下文/项目后清空机制流缓存（同一 id 在不同上下文含义可能不同）。
    *  具体缓存按 (项目, 工厂, id) 隔离，故仅在幂等上有益。 */
   clearMechanicFlowCache(): void {
+    this.flowRevision++;
     this.universePreviewCache.clear(); this.universeSolveCache.clear();
     this.universeOperationVersion++; this.universeSolveGeneration++;
     this.universeSolve = null; this.universeSolving = false;
@@ -1771,16 +1778,27 @@ class RuntimeStore {
   private universeOperationVersion = 0;
 
   universeAddLocation = $state<Location>({kind: 'planet', name: 'nauvis'});
-  private universePreviewCache = new Map<string, Promise<UniversePreview>>();
+  /** Stable physical identity for cards and filters; numerical changes remain observable. */
+  mechanicEnvironmentKey(scope: MechanicScope): string {
+    if (scope.kind === 'universe') return this.universeSignatures.get(`${scope.project}:${scope.factory}`) ?? '';
+    const project = this.document?.projects.find(p => p.id === scope.project);
+    return JSON.stringify([project?.context_id ?? this.effectiveContextId, mechanicFlowSettings(project?.settings),
+      project?.factories.find(f => f.id === scope.factory)?.settings]);
+  }
+
+  private universePreviewCache = new Map<string, { signature: string | undefined; promise: Promise<UniversePreview> }>();
   loadUniversePreview(project: number, universe: number): Promise<UniversePreview> {
-    const key = JSON.stringify([project, universe, this.effectiveContextId, universeSolveSignatures(this.document).get(`${project}:${universe}`)]);
-    let pending = this.universePreviewCache.get(key);
-    if (!pending) {
-      if (this.universePreviewCache.size > 8) this.universePreviewCache.clear();
-      pending = universePreview(project, universe).catch(error => {this.universePreviewCache.delete(key); throw error;});
-      this.universePreviewCache.set(key, pending);
-    }
-    return pending;
+    const key = JSON.stringify([project, universe, this.effectiveContextId]);
+    const signature = this.universeSignatures.get(`${project}:${universe}`);
+    const cached = this.universePreviewCache.get(key);
+    if (cached && cached.signature === signature) return cached.promise;
+    if (this.universePreviewCache.size > 8) this.universePreviewCache.clear();
+    const entry = { signature, promise: universePreview(project, universe).catch(error => {
+      if (this.universePreviewCache.get(key) === entry) this.universePreviewCache.delete(key);
+      throw error;
+    }) };
+    this.universePreviewCache.set(key, entry);
+    return entry.promise;
   }
   mechanicFactory({project, factory, kind}: MechanicScope) {
     const p = this.document?.projects.find(p => p.id === project);

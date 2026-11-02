@@ -55,7 +55,7 @@ export class MechanicWorkspaceState {
     void (async () => {
       for (let offset = 0; offset < snapshot.length && alive; offset += 6) {
         const batch = await Promise.allSettled(snapshot.slice(offset, offset + 6).map(async entry => ({
-          id: entry.id, flows: await this.loadFlow(project, factory, entry.id, entry.mechanic),
+          id: entry.id, flows: await untrack(() => this.loadFlow(project, factory, entry.id, entry.mechanic)),
         })));
         if (!alive) return;
         const next = new Map(untrack(() => this.index));

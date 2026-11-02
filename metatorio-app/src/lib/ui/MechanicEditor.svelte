@@ -4,6 +4,7 @@
   import { iconTypeForKind } from "./icon-types";
   // Shared mechanism configuration and actions; no flow expansion or flow UI.
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { untrack } from 'svelte';
   import { solarBalance } from "$lib/runtime/client";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
@@ -43,21 +44,20 @@
 
   // 太阳能配平信息（平均出力 / 周期溢出总电量 / 蓄电器配比）
   let solarBalanceInfo = $state<import("$lib/runtime/types").SolarBalance | null>(null);
+  const environmentKey = $derived(runtime.mechanicEnvironmentKey(actions.commands.scope));
   $effect(() => {
     if (entry.mechanic.type !== "solar") {
       solarBalanceInfo = null;
       return;
     }
     // Environment changes must invalidate the displayed solar calculation too.
-    const settings = runtime.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.settings;
-    void settings;
+    void environmentKey; void runtime.flowRevision;
     void entry.location; void entry.mechanic.solar_panel; void entry.mechanic.accumulator;
-    void runtime.selectedProject?.settings;
     let alive = true;
     solarBalanceInfo = null;
-    const request = actions.commands.scope.kind === "universe"
+    const request = untrack(() => actions.commands.scope.kind === "universe"
       ? runtime.loadUniversePreview(project, factory).then(preview => preview.mechanics.find(m=>m.id===entry.id)?.solar_balance ?? null)
-      : solarBalance(project, factory, entry.id);
+      : solarBalance(project, factory, entry.id));
     request.then((info) => {
         if (alive) solarBalanceInfo = info;
       })
