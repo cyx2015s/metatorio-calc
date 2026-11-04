@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { reorderIds } from '$lib/reorder';
   import {dndzone} from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
   import type { DualVar, LocatedDualVar, Location, UniverseAction, UniverseDocument } from '$lib/runtime/types';
@@ -51,7 +52,9 @@
   {#if open}
     <div class="shortcuts"><button class="btn" onclick={()=>freeEnergy().catch(()=>{})} disabled={hasFreeEnergy||!!pending[`energy:${project}:${universe.id}`]}>+ 免费电力与热量</button><LocationPicker value={runtime.universeAddLocation} label="外部输入默认地点" onChange={location=>runtime.universeAddLocation=location}/></div>
     <div use:dndzone={{items:dragInputs,type:`universe-inputs-${project}-${universe.id}`,flipDurationMs:120}} onconsider={e=>dragInputs=e.detail.items} onfinalize={async e=>{
-      dragInputs=e.detail.items;const send=writer(),order=dragInputs.map(i=>i.id);for(let position=order.length-1;position>=0;position--)await send({'reorder-external-input':{input:order[position],position}});
+      dragInputs=e.detail.items;const send=writer(),p=project,u=universe.id,order=dragInputs.map(i=>i.id);
+      await reorderIds(order, () => runtime.document?.projects.find(e=>e.id===p)?.universes?.find(e=>e.id===u)?.external_inputs ?? [],
+        (input,position) => send({'reorder-external-input':{input,position}}));
     }}>
     {#each dragInputs as input (input.id)}
       <div class="input-row">

@@ -1,3 +1,4 @@
+import { reorderIds } from '../reorder.ts';
 import type { AppMessage, FactoryDocument, FactoryId, MechanicId, MechanicKind, ProjectId } from './types';
 
 export interface MechanicScope { readonly project: ProjectId; readonly factory: FactoryId; readonly kind?: "universe" }
@@ -57,15 +58,9 @@ export class MechanicCommands {
     });
   }
 
-  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
-  async reorderMechanics(order: MechanicId[]): Promise<void> {
-    for (let i = order.length - 1; i >= 0; i--) {
-      const current = this.host.getFactory(this.scope)?.mechanics ?? [];
-      const currentIndex = current.findIndex((entry) => entry.id === order[i]);
-      if (currentIndex >= 0 && currentIndex !== i) {
-        await this.reorderMechanic(order[i], i);
-      }
-    }
+  reorderMechanics(order: MechanicId[]): Promise<void> {
+    return reorderIds(order, () => this.host.getFactory(this.scope)?.mechanics ?? [],
+      (mechanic, position) => this.reorderMechanic(mechanic, position));
   }
 
   async setMechanicEnabled(mechanic: MechanicId, enabled: boolean): Promise<void> {

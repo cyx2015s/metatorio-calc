@@ -6,6 +6,7 @@
   "scripts": {
     "test:optimization": "node --test tests/optimization.test.mjs",
     "test:project-estimates-browser": "node tests/project-estimates-browser.cjs",
+    "test:reorder-browser": "node tests/reorder-browser.cjs",
     "test:catalog-cache-browser": "node tests/catalog-cache-browser.cjs",
     "test:planning-actions-browser": "node tests/planning-actions-browser.cjs",
     "test:project-edit-browser": "node tests/project-edit-browser.cjs",

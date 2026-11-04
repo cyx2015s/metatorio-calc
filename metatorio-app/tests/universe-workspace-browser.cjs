@@ -86,8 +86,10 @@ withBrowser({ port: 5214 }, async (browser, url) => {
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.length===2));
   assert.ok(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs.every(i=>i.penalty===0&&i.flow.location.name==='nauvis')));
   assert.equal(await inputsPanel.getByRole('button',{name:'+ 免费电力与热量',exact:true}).isDisabled(),true);
+  const beforeInputReorder=await page.evaluate(()=>window.__universeWrites.filter(w=>w.action.action['reorder-external-input']).length);
   const inputRows=inputsPanel.locator('.input-row:not(.implicit)');await waitFor(async()=>(await inputRows.count())===2);await inputRows.first().focus();await page.keyboard.press('Space');await page.keyboard.press('ArrowDown');await page.keyboard.press('Space');
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs[0].flow.flow==='Heat'));
+  assert.equal(await page.evaluate(()=>window.__universeWrites.filter(w=>w.action.action['reorder-external-input']).length),beforeInputReorder+1);
   const card=page.locator('[data-mechanic-id="101"]');
   const ordinaryBeforeModuleEdit=await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories));
   await card.locator('button[title^="编辑插件与插件塔"]').click();
@@ -109,8 +111,10 @@ withBrowser({ port: 5214 }, async (browser, url) => {
   const before=await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories));
   await page.getByLabel('期望温度下限（℃）').fill('120');await page.getByLabel('期望温度下限（℃）').press('Tab');
   await waitFor(async()=>page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].universes[0].targets[0].flow.flow.Fluid.temperature)==='[100,120]'));
+  const beforeTargetReorder=await page.evaluate(()=>window.__universeWrites.filter(w=>w.action.action['reorder-target']).length);
   await page.locator('.targets-panel .rows > .row-item').first().focus();await page.keyboard.press('Space');await page.keyboard.press('ArrowDown');await page.keyboard.press('Space');
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].targets[0].id===202));
+  assert.equal(await page.evaluate(()=>window.__universeWrites.filter(w=>w.action.action['reorder-target']).length),beforeTargetReorder+1);
   await page.locator('.targets-panel .flow-ref').first().locator('.hover-icon').click();
   await page.getByRole('textbox',{name:'搜索原型'}).waitFor();await page.keyboard.press('Escape');
   await page.mouse.move(1200,80);await page.getByRole('tooltip').waitFor({state:'detached'});

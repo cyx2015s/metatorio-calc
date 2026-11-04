@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { reorderIds } from '$lib/reorder';
   import { dndzone } from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
   import type { FactoryAction, UniverseAction, FlowTarget, TargetExpression, DualVar, Location } from '$lib/runtime/types';
@@ -19,6 +20,10 @@
   let exprRows=$state<TargetExpression[]>([]);
   $effect(()=>{exprRows=expressions.map(e=>({...e,terms:[...e.terms]}));});
   const factor=$derived(runtime.selectedProject?.settings.time_scale === 'minutes' ? 60 : runtime.selectedProject?.settings.time_scale === 'hours' ? 3600 : 1);
+  function reader() {
+    const destination = {...scope};
+    return () => runtime.mechanicFactory(destination);
+  }
   function writer() {
     const destination={...scope};
     return (normal: FactoryAction, universe: UniverseAction) => (destination.kind === 'universe'
@@ -50,8 +55,9 @@
   }
   async function reorder(event:CustomEvent<{items:FlowTarget[]}>) {
     rows=event.detail.items;
-    const send=writer(),order=event.detail.items.map(t=>t.id);
-    for (let position=order.length-1;position>=0;position--) await send({target:{reorder:{target:order[position],position}}},{'reorder-target':{target:order[position],position}});
+    const send=writer(),read=reader(),order=event.detail.items.map(t=>t.id);
+    await reorderIds(order, () => read()?.targets ?? [],
+      (target,position) => send({target:{reorder:{target,position}}},{'reorder-target':{target,position}}));
   }
 </script>
 <section class="panel targets-panel">
@@ -79,14 +85,18 @@
   <button class="title panel-toggle" aria-expanded={expressionsOpen} onclick={()=>expressionsOpen=!expressionsOpen}><span>{expressionsOpen?'▾':'▸'}　目标表达式</span><span class="count">{expressions.length}</span></button>
   {#if expressionsOpen}
     <div use:dndzone={{items:exprRows,type:`expressions-${scope.kind??'factory'}-${scope.factory}`,flipDurationMs:120}} onconsider={e=>exprRows=e.detail.items} onfinalize={async e=>{
-      exprRows=e.detail.items;const send=writer(),order=exprRows.map(e=>e.id); for(let position=order.length-1;position>=0;position--)await send({'target-expression':{reorder:{expression:order[position],position}}},{'reorder-target-expression':{expression:order[position],position}});
+      exprRows=e.detail.items;const send=writer(),read=reader(),order=exprRows.map(e=>e.id);
+      await reorderIds(order, () => read()?.target_expressions ?? [],
+        (expression,position) => send({'target-expression':{reorder:{expression,position}}},{'reorder-target-expression':{expression,position}}));
     }}>
     {#each exprRows as expression (expression.id)}
       <div class="expr-card">
         <div class="row-item"><label>常数 <input class="num" type="number" aria-label="目标表达式常数" value={expression.constant} onchange={e=>{const constant=Number(e.currentTarget.value);if(Number.isFinite(constant))writer()({'target-expression':{'set-constant':{expression:expression.id,constant}}},{'set-target-expression-constant':{expression:expression.id,constant}})}} /></label>
           <button class="icon-btn" title="移除表达式" onclick={()=>writer()({'target-expression':{remove:{expression:expression.id}}},{'remove-target-expression':{expression:expression.id}})}>×</button></div>
         <div use:dndzone={{items:expression.terms,type:`expression-terms-${expression.id}`,flipDurationMs:120}} onconsider={e=>expression.terms=e.detail.items} onfinalize={async e=>{
-          expression.terms=e.detail.items; const send=writer(),order=expression.terms.map(t=>t.id); for(let position=order.length-1;position>=0;position--)await send({'target-expression':{'reorder-term':{expression:expression.id,term:order[position],position}}},{'reorder-target-expression-term':{expression:expression.id,term:order[position],position}});
+          expression.terms=e.detail.items; const send=writer(),read=reader(),id=expression.id,order=expression.terms.map(t=>t.id);
+          await reorderIds(order, () => read()?.target_expressions.find(e=>e.id===id)?.terms ?? [],
+            (term,position) => send({'target-expression':{'reorder-term':{expression:id,term,position}}},{'reorder-target-expression-term':{expression:id,term,position}}));
         }}>
         {#each expression.terms as term (term.id)}
           <div class="row-item expr-term">

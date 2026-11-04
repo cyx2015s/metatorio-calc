@@ -1,3 +1,4 @@
+import { reorderIds } from '../reorder.ts';
 import {onUniverseSolveResult,onUniverseSolveError} from './client';
 import {universeSolveSignatures} from '$lib/mechanics/universe-signature';
 import {factoryImplicitSignature, factorySolveSignatures} from '$lib/mechanics/factory-signature';
@@ -1504,28 +1505,13 @@ class RuntimeStore {
     });
   }
 
-  /** 外部输入排序（position 为目标位置）。 */
-  async reorderExternalInput(input: ExternalInputId, position: number): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: { "external-input": { reorder: { input, position } } },
-      },
-    });
-  }
-
-  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
   async reorderExternalInputs(order: ExternalInputId[]): Promise<void> {
-    for (let i = order.length - 1; i >= 0; i--) {
-      const current = this.selectedFactory?.external_inputs ?? [];
-      const currentIndex = current.findIndex((input) => input.id === order[i]);
-      if (currentIndex >= 0 && currentIndex !== i) {
-        await this.reorderExternalInput(order[i], i);
-      }
-    }
+    const {project, factory} = this.requireFactory();
+    await reorderIds(order,
+      () => this.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.external_inputs ?? [],
+      (input, position) => this.send({scope: 'factory', action: {
+        project, factory, action: {'external-input': {reorder: {input, position}}},
+      }}));
   }
 
   async setExternalInputPenalty(input: ExternalInputId, penalty: number): Promise<void> {
