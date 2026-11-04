@@ -521,7 +521,7 @@ fn weighted_launch_uses_resolved_weight_and_whole_items_at_every_quality() {
     }
 }
 
-/// 回归：组装机为 rocket-silo 时，配方应额外产出火箭发射载荷（虚拟物品）。
+/// 回归：组装机为 rocket-silo 时，配方产物转化为火箭发射载荷（虚拟物品）。
 /// 此前 expand_recipe 只按普通机器展开，导致 ItemLaunch 消耗的容量无来源。
 #[test]
 fn recipe_in_rocket_silo_produces_launch_capacity() {
@@ -560,7 +560,10 @@ fn recipe_in_rocket_silo_produces_launch_capacity() {
     );
     // 每次合成产出 整枚火箭容量(10) / rocket_parts_required(5) = 2.
     assert_eq!(flow[&DualVar::RocketSlotCapacity], 2.0);
-    assert_eq!(flow[&DualVar::Item(id("space-part"))], 1.0);
+    assert!(
+        !flow.contains_key(&DualVar::Item(id("space-part"))),
+        "rocket parts are consumed by the silo, not available as output items"
+    );
     assert_eq!(flow[&DualVar::Item(id("rocket-part"))], -5.0);
 }
 

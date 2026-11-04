@@ -263,7 +263,6 @@ fn vanilla_planets_keep_their_ground_resources_out_of_orbit_candidates() {
             !space.iter().any(|m| matches!(
                 m,
                 Mechanic::TileExtract(_)
-                    | Mechanic::TileDispose(_)
                     | Mechanic::Mining(_)
                     | Mechanic::Plant(_)
                     | Mechanic::ItemLaunch(_)
@@ -274,6 +273,16 @@ fn vanilla_planets_keep_their_ground_resources_out_of_orbit_candidates() {
             space
                 .iter()
                 .any(|m| matches!(m, Mechanic::Recipe(m) if m.machine.id == "crusher"))
+        );
+        assert!(
+            space
+                .iter()
+                .any(|m| matches!(m, Mechanic::TileDispose(m) if m.tile == "empty-space"))
+        );
+        assert!(
+            !space
+                .iter()
+                .any(|m| matches!(m, Mechanic::TileDispose(m) if m.tile != "empty-space"))
         );
         assert!(space.iter().any(|m| matches!(m, Mechanic::Solar(_))));
     }
@@ -389,7 +398,7 @@ fn tile_reachability_recurses_on_ground_and_platform_without_crossing_environmen
         assert!(
             mechanics
                 .iter()
-                .any(|m| matches!(m, Mechanic::TileDispose(m) if m.tile == "chute"))
+                .any(|m| matches!(m, Mechanic::TileDispose(m) if m.tile == "empty-space"))
         );
     }
     assert_eq!(
