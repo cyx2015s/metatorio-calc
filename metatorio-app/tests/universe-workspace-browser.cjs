@@ -44,6 +44,7 @@ withBrowser({ port: 5214 }, async (browser, url) => {
      if(a['clone-mechanic']){const e=structuredClone(find(a['clone-mechanic'].mechanic));e.id=next++;u.mechanics.push(e);}
      if(a['remove-mechanic'])u.mechanics=u.mechanics.filter(e=>e.id!==a['remove-mechanic'].mechanic);
      if(a.mechanic){const e=find(a.mechanic.mechanic),edit=a.mechanic.action.recipe;if(edit?.['set-recipe'])e.mechanic.mechanic.recipe=edit['set-recipe'].recipe;if(edit?.['set-machine'])e.mechanic.mechanic.machine=edit['set-machine'].machine;}
+     if(a.mechanic?.action.recipe?.module?.['remove-beacon-module']){const {beacon,module}=a.mechanic.action.recipe.module['remove-beacon-module'];find(a.mechanic.mechanic).mechanic.mechanic.module_config.beacons[beacon].modules.splice(module,1);}
      if(a['set-transport-item']){const v=a['set-transport-item'];find(v.mechanic).mechanic.item=v.item;}
      if(a['set-target-flow']){const v=a['set-target-flow'];u.targets.find(t=>t.id===v.target).flow=v.flow;}
      if(a['set-target-amount']){const v=a['set-target-amount'];u.targets.find(t=>t.id===v.target).amount=v.amount;}
@@ -88,6 +89,14 @@ withBrowser({ port: 5214 }, async (browser, url) => {
   const inputRows=inputsPanel.locator('.input-row:not(.implicit)');await waitFor(async()=>(await inputRows.count())===2);await inputRows.first().focus();await page.keyboard.press('Space');await page.keyboard.press('ArrowDown');await page.keyboard.press('Space');
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].external_inputs[0].flow.flow==='Heat'));
   const card=page.locator('[data-mechanic-id="101"]');
+  const ordinaryBeforeModuleEdit=await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories));
+  await card.locator('button[title^="编辑插件与插件塔"]').click();
+  await page.getByTitle('移除塔内插件',{exact:true}).click();
+  await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics[0].mechanic.mechanic.module_config.beacons[0].modules.length===0));
+  const moduleWrite=await page.evaluate(()=>window.__universeWrites.find(w=>w.action.action.mechanic?.action.recipe?.module?.['remove-beacon-module']));
+  assert.deepEqual(moduleWrite,{scope:'universe',action:{project:1,universe:7,action:{mechanic:{mechanic:101,action:{recipe:{module:{'remove-beacon-module':{beacon:0,module:0}}}}}}}});
+  assert.equal(await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories)),ordinaryBeforeModuleEdit);
+  await page.keyboard.press('Escape');
   const solvesBefore=await page.evaluate(()=>window.__universeSolves);
   await card.getByRole('switch').click();
   await waitFor(async()=>page.evaluate(()=>window.__universeWrites.some(w=>w.action.action['set-mechanic-enabled'])));

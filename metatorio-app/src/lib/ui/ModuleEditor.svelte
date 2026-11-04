@@ -225,7 +225,7 @@
                   class="btn ghost danger"
                   title="移除塔内插件"
                   onclick={() =>
-                    runtime
+                    actions.commands
                       .moduleMessage(entry.id, { "remove-beacon-module": { beacon: bi, module: mi } })
                       .catch(() => {})}
                 >×</button>

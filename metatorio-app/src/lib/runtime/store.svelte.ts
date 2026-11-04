@@ -64,7 +64,6 @@ import type {
   UniverseDocument,
   UniverseSolveResult,
   UniverseAction,
-  LocatedDualVar,
   Location,
   HistoryFocus,
   HistoryStatus,
@@ -72,7 +71,6 @@ import type {
   InfiniteTechLevel,
   LpSolver,
   MechanicId,
-  MechanicKind,
   Milestone,
   ProductivityView,
   ProjectId,
@@ -82,8 +80,6 @@ import type {
   SolveResult,
   RuntimeDiagnostic,
   TargetId,
-  TargetExpressionId,
-  TargetTermId,
   DualVar,
   TimeScale,
   ExternalInputId,
@@ -1102,83 +1098,11 @@ class RuntimeStore {
     await this.dispatchUniverse(project, universe, action);
   }
 
-  async addUniverseLocal(location: Location, kind: MechanicKind): Promise<void> {
-    await this.universeAction({ "add-local-mechanic": { location, kind } });
-  }
-
   async addUniverseOrbitalDrop(location: Location, item: IdWithQuality): Promise<void> {
     await this.universeAction({ "add-orbital-drop": { location, item } });
   }
   async addUniverseRocketExport(location: Location, item: IdWithQuality): Promise<void> {
     await this.universeAction({ "add-rocket-export": { location, item } });
-  }
-
-  async removeUniverseMechanic(mechanic: MechanicId): Promise<void> {
-    await this.universeAction({ "remove-mechanic": { mechanic } });
-  }
-
-  async setUniverseMechanicEnabled(mechanic: MechanicId, enabled: boolean): Promise<void> {
-    await this.universeAction({ "set-mechanic-enabled": { mechanic, enabled } });
-  }
-
-  async updateUniverseMechanic(mechanic: MechanicId, action: import("./types").MechanicAction): Promise<void> {
-    await this.universeAction({ mechanic: { mechanic, action } });
-  }
-
-  async setUniverseMechanicJson(mechanic: MechanicId, mechanicJson: string): Promise<void> {
-    await this.universeAction({ "set-local-mechanic": { mechanic, mechanic_json: mechanicJson } });
-  }
-
-  async setUniverseStrictSource(strict: boolean): Promise<void> {
-    await this.universeAction({ "set-strict-source": { strict } });
-  }
-
-  async setUniverseStrictSink(strict: boolean): Promise<void> {
-    await this.universeAction({ "set-strict-sink": { strict } });
-  }
-
-  async setUniverseMechanicLocation(mechanic: MechanicId, location: Location): Promise<void> {
-    await this.universeAction({ "set-mechanic-location": { mechanic, location } });
-  }
-
-  async addUniverseTarget(flow: LocatedDualVar, amount: number): Promise<void> {
-    await this.universeAction({ "add-target": { flow, amount } });
-  }
-
-  async removeUniverseTarget(target: TargetId): Promise<void> {
-    await this.universeAction({ "remove-target": { target } });
-  }
-
-  async setUniverseTargetAmount(target: TargetId, amount: number): Promise<void> {
-    await this.universeAction({ "set-target-amount": { target, amount } });
-  }
-
-  async addUniverseTargetExpression(): Promise<void> {
-    await this.universeAction("add-target-expression");
-  }
-
-  async removeUniverseTargetExpression(expression: TargetExpressionId): Promise<void> {
-    await this.universeAction({ "remove-target-expression": { expression } });
-  }
-
-  async setUniverseTargetExpressionConstant(expression: TargetExpressionId, constant: number): Promise<void> {
-    await this.universeAction({ "set-target-expression-constant": { expression, constant } });
-  }
-
-  async addUniverseTargetExpressionTerm(expression: TargetExpressionId, flow: LocatedDualVar): Promise<void> {
-    await this.universeAction({ "add-target-expression-term": { expression, flow } });
-  }
-
-  async removeUniverseTargetExpressionTerm(expression: TargetExpressionId, term: TargetTermId): Promise<void> {
-    await this.universeAction({ "remove-target-expression-term": { expression, term } });
-  }
-
-  async setUniverseTargetExpressionTermFlow(expression: TargetExpressionId, term: TargetTermId, flow: LocatedDualVar): Promise<void> {
-    await this.universeAction({ "set-target-expression-term-flow": { expression, term, flow } });
-  }
-
-  async setUniverseTargetExpressionTermCoefficient(expression: TargetExpressionId, term: TargetTermId, coefficient: number): Promise<void> {
-    await this.universeAction({ "set-target-expression-term-coefficient": { expression, term, coefficient } });
   }
 
   async autoPlanSelectedUniverse(): Promise<void> {
@@ -1470,16 +1394,6 @@ class RuntimeStore {
     });
   }
 
-  /** 克隆机制（追加到列表末尾）。 */
-  async cloneMechanic(mechanic: MechanicId): Promise<void> {
-    return this.mechanicCommands().cloneMechanic(mechanic);
-  }
-
-  /** 求解后清理：移除未用/无解机制，或按流量重排。 */
-  async cleanup(action: import("./types").CleanupAction): Promise<void> {
-    return this.mechanicCommands().cleanup(action);
-  }
-
   /** 采纳建议：新增对应机制并设置主项（机器由兼容回退自动推断）。 */
   async addSuggestion(candidate:{kind:string;name:string},destination?:MechanicScope,location?:Location):Promise<void>{
     const scope:MechanicScope=destination??(this.selectedUniverseId!=null?{project:this.requireProject(),factory:this.selectedUniverseId,kind:'universe' as const}:this.requireFactory());
@@ -1493,108 +1407,6 @@ class RuntimeStore {
     else if(candidate.kind==='generator'||candidate.kind==='fusion-generator')await commands.setGenerator(id,candidate.name);
     else if(candidate.kind==='fusion-reactor')await commands.setReactor(id,candidate.name);
     else await commands.setItem(id,candidate.name);
-  }
-
-  // ── 目标表达式（常数 + 线性项求和） ──────────────────────────────
-
-  async addTargetExpression(): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: {
-          "target-expression": {
-            add: { expression: { id: 0, constant: 1, terms: [] } },
-          },
-        },
-      },
-    });
-  }
-
-  async removeTargetExpression(expression: number): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: { "target-expression": { remove: { expression } } },
-      },
-    });
-  }
-
-  async setTargetExpressionConstant(expression: number, constant: number): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: { "target-expression": { "set-constant": { expression, constant } } },
-      },
-    });
-  }
-
-  async addTargetExpressionTerm(expression: number, flow: import("./types").DualVar): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: {
-          "target-expression": {
-            "add-term": { expression, term: { id: 0, flow, coefficient: 1 } },
-          },
-        },
-      },
-    });
-  }
-
-  async removeTargetExpressionTerm(expression: number, term: number): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: { "target-expression": { "remove-term": { expression, term } } },
-      },
-    });
-  }
-
-  async setTargetExpressionTermCoefficient(
-    expression: number,
-    term: number,
-    coefficient: number,
-  ): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: { "target-expression": { "set-term-coefficient": { expression, term, coefficient } } },
-      },
-    });
-  }
-
-  async setTargetExpressionTermFlow(
-    expression: number,
-    term: number,
-    flow: import("./types").DualVar,
-  ): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: {
-        project,
-        factory,
-        action: { "target-expression": { "set-term-flow": { expression, term, flow } } },
-      },
-    });
   }
 
   /** 克隆工厂（整份追加为新工厂）。 */
@@ -1642,22 +1454,6 @@ class RuntimeStore {
     });
   }
 
-  async setTargetAmount(target: TargetId, amount: number): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: { project, factory, action: { target: { "set-amount": { target, amount } } } },
-    });
-  }
-
-  async removeTarget(target: TargetId): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: { project, factory, action: { target: { remove: { target } } } },
-    });
-  }
-
   /** 更改已有目标的流（不改变数量）。 */
   async setTargetFlow(target: TargetId, flow: import("./types").DualVar): Promise<void> {
     const { project, factory } = this.requireFactory();
@@ -1685,12 +1481,6 @@ class RuntimeStore {
         await this.reorderTarget(order[i], i);
       }
     }
-  }
-
-  // ── 外部输入 ────────────────────────────────────────────────────
-
-  async addExternalInput(itemId: string, penalty: number): Promise<void> {
-    await this.addExternalInputFlow({ Item: { id: itemId, quality: "normal" } }, penalty);
   }
 
   /** 外部输入支持任意 DualVar 流（物品/流体/实体/电/热/火箭运力…）。 */
@@ -1840,165 +1630,6 @@ class RuntimeStore {
         throw new Error('宇宙工厂不支持该操作');
       },
     }, scope);
-  }
-
-  // ── 机制 ────────────────────────────────────────────────────────
-
-  async addMechanic(kind: MechanicKind): Promise<void> {
-    return this.mechanicCommands().addMechanic(kind);
-  }
-
-  async removeMechanic(mechanic: MechanicId): Promise<void> {
-    return this.mechanicCommands().removeMechanic(mechanic);
-  }
-
-  /** 机制排序（position 为目标位置）。 */
-  async reorderMechanic(mechanic: MechanicId, position: number): Promise<void> {
-    return this.mechanicCommands().reorderMechanic(mechanic, position);
-  }
-
-  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
-  async reorderMechanics(order: MechanicId[]): Promise<void> {
-    return this.mechanicCommands().reorderMechanics(order);
-  }
-
-  async setMechanicEnabled(mechanic: MechanicId, enabled: boolean): Promise<void> {
-    return this.mechanicCommands().setMechanicEnabled(mechanic, enabled);
-  }
-
-  async mechanicMessage(mechanic: MechanicId, action: import("./types").MechanicAction): Promise<void> {
-    return this.mechanicCommands().mechanicMessage(mechanic, action);
-  }
-
-  /** 当前机制的类型（来自文档快照）；用于构造按类型标签的 action。 */
-  mechanicKind(mechanic: MechanicId): import("./types").MechanicKind {
-    return this.mechanicCommands().mechanicKind(mechanic);
-  }
-
-  async setRecipe(mechanic: MechanicId, recipe: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setRecipe(mechanic, recipe, quality);
-  }
-
-  async setMachine(mechanic: MechanicId, machine: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setMachine(mechanic, machine, quality);
-  }
-
-  async setResource(mechanic: MechanicId, resource: string): Promise<void> {
-    return this.mechanicCommands().setResource(mechanic, resource);
-  }
-
-  async setItem(mechanic: MechanicId, item: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setItem(mechanic, item, quality);
-  }
-
-  async setGenerator(mechanic: MechanicId, generator: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setGenerator(mechanic, generator, quality);
-  }
-
-  async setBoiler(mechanic: MechanicId, boiler: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setBoiler(mechanic, boiler, quality);
-  }
-
-  /** 锅炉 heat-fluid-inside 模式的输出温度；null = 流体最高温度。 */
-  async setBoilerOutputTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
-    return this.mechanicCommands().setBoilerOutputTemperature(mechanic, temperature);
-  }
-
-  /** 流体燃料机制：选择热值流体。 */
-  async setFluidFuel(mechanic: MechanicId, fluid: string): Promise<void> {
-    return this.mechanicCommands().setFluidFuel(mechanic, fluid);
-  }
-
-  /** 流体热机制：选择提热流体。 */
-  async setFluidHeat(mechanic: MechanicId, fluid: string): Promise<void> {
-    return this.mechanicCommands().setFluidHeat(mechanic, fluid);
-  }
-
-  /** 地格抽取：选择地格（**地格决定产出哪种流体**）。 */
-  async setTileExtractTile(mechanic: MechanicId, tile: string): Promise<void> {
-    return this.mechanicCommands().setTileExtractTile(mechanic, tile);
-  }
-
-  /** 地格抽取：选择抽取机械（决定速率 pumping_speed）。 */
-  async setTileExtractMachine(
-    mechanic: MechanicId,
-    machine: string,
-    quality = "normal",
-  ): Promise<void> {
-    return this.mechanicCommands().setTileExtractMachine(mechanic, machine, quality);
-  }
-
-  /** 地格销毁：选择可销毁物品的地格（后端要求 destroys_dropped_items）。 */
-  async setTileDisposeTile(mechanic: MechanicId, tile: string): Promise<void> {
-    return this.mechanicCommands().setTileDisposeTile(mechanic, tile);
-  }
-
-  /** 地格销毁：选择被销毁的物品。 */
-  async setTileDisposeItem(
-    mechanic: MechanicId,
-    item: string,
-    quality = "normal",
-  ): Promise<void> {
-    return this.mechanicCommands().setTileDisposeItem(mechanic, item, quality);
-  }
-
-  /** 设置流体类机制的温度（流体热/发电机/锅炉）。流体燃料只看热值，没有温度可编辑。 */
-  async setMechanicTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
-    return this.mechanicCommands().setMechanicTemperature(mechanic, temperature);
-  }
-
-  /** 指定机制燃料（配方/采矿/锅炉/反应堆）；null = 自动（燃料类别抽象）。 */
-  async setFuel(mechanic: MechanicId, fuel: import("./types").Fuel | null): Promise<void> {
-    return this.mechanicCommands().setFuel(mechanic, fuel);
-  }
-
-  /** 指定机制燃料温度（配方/采矿/锅炉）；null = 默认温度。 */
-  async setFuelTemperature(mechanic: MechanicId, temperature: number | null): Promise<void> {
-    return this.mechanicCommands().setFuelTemperature(mechanic, temperature);
-  }
-
-  /** 反应堆相邻数；null 继承项目估计。 */
-  async setNeighbours(mechanic: MechanicId, neighbours: number | null): Promise<void> {
-    return this.mechanicCommands().setNeighbours(mechanic, neighbours);
-  }
-
-  /** 火箭发射重量模式（true = 按重量；false = 按堆叠槽位）。 */
-  async setWeightMode(mechanic: MechanicId, weight_mode: boolean): Promise<void> {
-    return this.mechanicCommands().setWeightMode(mechanic, weight_mode);
-  }
-
-  async setReactor(mechanic: MechanicId, reactor: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setReactor(mechanic, reactor, quality);
-  }
-
-  async setSolarPanel(mechanic: MechanicId, solarPanel: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setSolarPanel(mechanic, solarPanel, quality);
-  }
-
-  async setAccumulator(mechanic: MechanicId, accumulator: string, quality = "normal"): Promise<void> {
-    return this.mechanicCommands().setAccumulator(mechanic, accumulator, quality);
-  }
-
-  async setFluid(mechanic: MechanicId, fluid: string): Promise<void> {
-    return this.mechanicCommands().setFluid(mechanic, fluid);
-  }
-
-  /** 模块配置消息（按机制类型包装 recipe/mining）。 */
-  async moduleMessage(mechanic: MechanicId, action: import("./types").ModuleAction): Promise<void> {
-    return this.mechanicCommands().moduleMessage(mechanic, action);
-  }
-
-  async setModuleSlot(
-    mechanic: MechanicId,
-    slot: number,
-    module: string | null,
-    quality = "normal",
-  ): Promise<void> {
-    return this.mechanicCommands().setModuleSlot(mechanic, slot, module, quality);
-  }
-
-  async clearModules(mechanic: MechanicId): Promise<void> {
-    return this.mechanicCommands().clearModules(mechanic);
   }
 
   // ── 自动规划偏好（项目级全局） ──────────────────────────────────

@@ -70,7 +70,7 @@ withBrowser({ port: 5224 }, async (browser, url) => {
   await waitFor(async()=>await page.getByRole('region',{name:'机制网络视图'}).getAttribute('data-network-ready')==='true');
   assert.equal(await page.getByLabel('网络显示大小').inputValue(),'0.75');
   assert.equal(await page.getByLabel('搜索网络节点').inputValue(),'ordinary marker');
-  await page.evaluate(async()=>{const {runtime:r}=await import('/src/lib/runtime/store.svelte.ts');await r.addMechanic('item-fuel');});
+  await page.evaluate(async()=>{const {runtime:r}=await import('/src/lib/runtime/store.svelte.ts');await r.mechanicCommands().addMechanic('item-fuel');});
   await waitFor(async()=>canvas.evaluate(el=>el._cyreg.cy.nodes('[kind="mechanic"]').length===2));
   assert.deepEqual(errors,[]);
   console.log('Network scope switch passed: immediate mechanism/target/external-input edits and independent view settings across repeated universe/factory switches.');
