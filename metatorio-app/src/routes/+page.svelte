@@ -14,8 +14,7 @@
   import { relaunch } from "@tauri-apps/plugin-process";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { pickGameExecutable, pickModDir, suggest } from "$lib/runtime/client";
-  import { itemOf, accessibleKind, accessibleName } from "$lib/runtime/types";
-  import { signedCompactNumber } from "$lib/format";
+  import { accessibleKind, accessibleName } from "$lib/runtime/types";
   import type {
     Accessible,
     CatalogKind,
@@ -40,6 +39,7 @@
   import FlowRef from "$lib/ui/FlowRef.svelte";
   import DiagnosticView from "$lib/ui/DiagnosticView.svelte";
   import { diagnosticFrom, diagnosticText } from "$lib/diagnostic";
+  import { flowSelectionInitial } from '$lib/mechanics/flow-selection';
   import { isEnergyFlow, presentFlow } from "$lib/dual-var";
 
   const mechKinds: { kind: import("$lib/runtime/types").MechanicKind; label: string }[] = [
@@ -475,8 +475,6 @@
       selectFlow: request => flowSelector = request,
       notice: showNotice,
     }) : null);
-  // 拖拽排序的本地镜像（文档变化时同步；拖拽期间由 dndzone 更新）
-  let dragTargets = $state<import("$lib/runtime/types").FlowTarget[]>([]);
   let dragInputs = $state<import("$lib/runtime/types").ExternalInput[]>([]);
   /** 插件塔原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
   async function beaconModuleSlots(beaconId: string | undefined): Promise<number> {
@@ -504,20 +502,8 @@
   let filterActive = $state(false);
 
   $effect(() => {
-    dragTargets = targets;
-  });
-  $effect(() => {
     dragInputs = externalInputs;
   });
-  function handleTargetsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").FlowTarget[] }>) {
-    dragTargets = event.detail.items;
-  }
-  function handleTargetsFinalize(event: CustomEvent<{ items: import("$lib/runtime/types").FlowTarget[] }>) {
-    dragTargets = event.detail.items;
-    runtime
-      .reorderTargets(event.detail.items.map((target) => target.id))
-      .catch(() => {});
-  }
   function handleInputsConsider(event: CustomEvent<{ items: import("$lib/runtime/types").ExternalInput[] }>) {
     dragInputs = event.detail.items;
   }
@@ -533,37 +519,6 @@
     : solve && "solved" in solve.status ? solve.status.solved.mechanics.map(m => [m.mechanic,{amount:m.amount ?? NaN,cost:m.cost ?? NaN}] as const) : []
   ));
   let solved = $derived(universe ? runtime.universeSolve?.status.status === "solved" : solve != null && "solved" in solve.status);
-  let notSolved = $derived(solve != null && "not-solved" in solve.status);
-
-  /** 瓦特 → 可读功率文本（数值为 J/s，直接换算，不乘 60）。 */
-  function formatPowerValue(watts: number): string {
-    if (watts >= 1e6) return `${(watts / 1e6).toFixed(2)} MW`;
-    if (watts >= 1e3) return `${(watts / 1e3).toFixed(1)} kW`;
-    return `${watts.toFixed(0)} W`;
-  }
-
-  /** 解析功率输入：支持 "1.5MW" / "90kW" / "500"（纯数字 = 瓦特）；无法解析返回 null。 */
-  function parsePowerInput(raw: string): number | null {
-    const text = raw.trim();
-    const match = /^([+-]?\d*\.?\d+)\s*(MW|kW|W)?$/i.exec(text);
-    if (!match) return null;
-    const value = Number(match[1]);
-    if (!Number.isFinite(value)) return null;
-    const unit = (match[2] ?? "W").toUpperCase();
-    if (unit === "MW") return value * 1e6;
-    if (unit === "KW") return value * 1e3;
-    return value;
-  }
-
-  /** 能量流数值显示：能量流用功率文本，否则普通数字（复刻 egui compact）。 */
-  function formatFlowAmount(flow: DualVar, amount: number): string {
-    if (isEnergyFlow(flow)) return formatPowerValue(Math.abs(amount));
-    // 非能量流：按项目时间刻度（秒/分/时）缩放，并带单位（/s /min /h）。
-    const scale = project?.settings.time_scale ?? "seconds";
-    const factor = scale === "minutes" ? 60 : scale === "hours" ? 3600 : 1;
-    const unit = scale === "minutes" ? "/min" : scale === "hours" ? "/h" : "/s";
-    return `${signedCompactNumber(amount * factor)}${unit}`;
-  }
 
   /** 项目时间刻度的数值因子（秒=1、分=60、时=3600）。内部一律按每秒，显示按当前刻度。 */
   function currentTimeFactor(): number {
@@ -574,42 +529,6 @@
   /** 流的显示名：物品/流体/实体优先本地化名，否则内部 id。 */
   function flowLabel(flow: DualVar): string {
     return presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description;
-  }
-
-
-  /** 流 → 流选择器初始页签（编辑目标/外部输入时预选）。 */
-  function flowTabOf(flow: DualVar): string {
-    if (typeof flow === "object" && "VirtualScience" in flow) return "virtual-science";
-    const item = itemOf(flow);
-    if (item) return "item";
-    if (flow !== null && typeof flow === "object") {
-      if ("Fluid" in flow) return "fluid";
-      if ("Entity" in flow) return "entity";
-      if ("Electricity" in flow) return "electricity";
-      if ("Heat" in flow) return "heat";
-      if ("RocketSlotCapacity" in flow) return "rocket-slot";
-      if ("RocketWeightCapacity" in flow) return "rocket-weight";
-      if ("Pollution" in flow || "Custom" in flow) return "custom";
-    }
-    return "item";
-  }
-
-  /** 流 → 初始选中条目/品质（物品/实体/流体类）。 */
-  function flowInitialOf(flow: DualVar): { initialName?: string; initialQuality?: string } {
-    if (typeof flow === "object" && "VirtualScience" in flow) return { initialName: String(flow.VirtualScience) };
-    const item = itemOf(flow);
-    if (item) return { initialName: item.id, initialQuality: item.quality };
-    if (flow !== null && typeof flow === "object") {
-      if ("Entity" in flow) {
-        const entity = (flow as { Entity: { id: string; quality?: string } }).Entity;
-        return { initialName: entity.id, initialQuality: entity.quality };
-      }
-      if ("Fluid" in flow) {
-        const fluid = (flow as { Fluid: { name: string } }).Fluid;
-        return { initialName: fluid.name };
-      }
-    }
-    return {};
   }
 
   /** 流体流的期望温度区间；非流体返回 null。 */
@@ -644,16 +563,6 @@
     apply({ Fluid: { name, temperature: [Math.min(low, high), Math.max(low, high)] } });
   }
 
-  function setTargetFluidRange(
-    target: import("$lib/runtime/types").FlowTarget,
-    low: number,
-    high: number,
-  ) {
-    setFluidRange(target.flow, low, high, (flow) =>
-      runtime.setTargetFlow(target.id, flow).catch(() => {}),
-    );
-  }
-
   function setExternalInputFluidRange(
     input: import("$lib/runtime/types").ExternalInput,
     low: number,
@@ -664,22 +573,22 @@
     );
   }
 
-  function editTarget(target: import("$lib/runtime/types").FlowTarget) {
+  function editExternalInput(input?: import("$lib/runtime/types").ExternalInput) {
+    if (!project || !factory) return;
+    const destination = {project: project.id, factory: factory.id};
     flowSelector = {
-      title: "更改目标流",
-      initialTab: flowTabOf(target.flow),
-      ...flowInitialOf(target.flow),
-      onSelectFlow: (flow) => runtime.setTargetFlow(target.id, flow).catch(() => {}),
-    };
-  }
-
-  function editExternalInput(input: import("$lib/runtime/types").ExternalInput) {
-    flowSelector = {
-      title: "更改外部输入流",
+      title: input ? "更改外部输入流" : "添加外部输入流",
       respectAccessibility: false,
-      initialTab: flowTabOf(input.flow),
-      ...flowInitialOf(input.flow),
-      onSelectFlow: (flow) => runtime.setExternalInputFlow(input.id, flow).catch(() => {}),
+      ...flowSelectionInitial(input?.flow),
+      onSelectFlow: (flow) => runtime.send({
+        scope: 'factory',
+        action: {
+          ...destination,
+          action: {'external-input': input
+            ? {'set-flow': {input: input.id, flow}}
+            : {add: {input: {id: 0, flow, penalty: 1}}}},
+        },
+      }).catch(() => {}),
     };
   }
 
@@ -1293,12 +1202,7 @@
         {/if}
         <button
           class="btn block"
-          onclick={() =>
-            (flowSelector = {
-              title: "添加外部输入流",
-              respectAccessibility: false,
-              onSelectFlow: (flow) => runtime.addExternalInputFlow(flow, 1).catch(() => {}),
-            })}
+          onclick={() => editExternalInput()}
           disabled={!runtime.activeContext}
         >+ 添加外部输入</button>
           {/if}

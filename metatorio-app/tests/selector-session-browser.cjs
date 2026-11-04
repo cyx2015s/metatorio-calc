@@ -116,6 +116,37 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5200) }, async (browser, 
     assert.equal(shared.requests, 2, 'a stale asynchronous picker must not open');
     assert.ok(shared.messages.every(message => message.action.project === 1 && message.action.factory === 2));
     assert.deepEqual(shared.messages.map(message => Object.keys(message.action.action.mechanic.action)[0]), ['tile-extract', 'tile-dispose']);
+    await page.keyboard.press('Escape');
+    // External input editing uses the same flow tabs and captures the opening scope.
+    await page.evaluate(async () => {
+      const {runtime} = await import('/src/lib/runtime/store.svelte.ts');
+      const project = window.__layoutDocument.projects[0];
+      project.factories[0].external_inputs = [{id: 700, flow: 'Electricity', penalty: 1}];
+      project.factories.push({...structuredClone(project.factories[0]), id: 99, name: 'Other factory'});
+      await runtime.refresh();
+    });
+    const inputPanel = page.getByRole('region', {name: '外部输入', exact: true});
+    await inputPanel.locator('.rows .flow-ref').first().locator('.hover-icon').click();
+    assert.equal(await modal.locator('.kind-tabs .active').textContent(), '电');
+    await page.evaluate(async () => {
+      const {runtime} = await import('/src/lib/runtime/store.svelte.ts');
+      await runtime.selectFactory(99);
+    });
+    await modal.locator('.kind-tabs').getByRole('button', {name: '热', exact: true}).click();
+    await modal.getByRole('button', {name: '添加', exact: true}).click();
+    await waitFor(async () => page.evaluate(() => window.__layoutCalls.some(c => c.command === 'dispatch' && c.args.message.action?.action?.['external-input']?.['set-flow']?.input === 700)));
+    const inputWrite = await page.evaluate(() => window.__layoutCalls.find(c => c.command === 'dispatch' && c.args.message.action?.action?.['external-input']?.['set-flow']?.input === 700).args.message);
+    assert.deepEqual(inputWrite, {scope: 'factory', action: {project: 1, factory: 2, action: {'external-input': {'set-flow': {input: 700, flow: 'Heat'}}}}});
+    await inputPanel.getByRole('button', {name: '+ 添加外部输入', exact: true}).click();
+    await page.evaluate(async () => {
+      const {runtime} = await import('/src/lib/runtime/store.svelte.ts');
+      await runtime.selectFactory(2);
+    });
+    await modal.locator('.kind-tabs').getByRole('button', {name: '热', exact: true}).click();
+    await modal.getByRole('button', {name: '添加', exact: true}).click();
+    await waitFor(async () => page.evaluate(() => window.__layoutCalls.some(c => c.command === 'dispatch' && c.args.message.action?.action?.['external-input']?.add)));
+    const inputAdd = await page.evaluate(() => window.__layoutCalls.find(c => c.command === 'dispatch' && c.args.message.action?.action?.['external-input']?.add).args.message);
+    assert.deepEqual(inputAdd, {scope: 'factory', action: {project: 1, factory: 99, action: {'external-input': {add: {input: {id: 0, flow: 'Heat', penalty: 1}}}}}});
     assert.deepEqual(errors, []);
     console.log('Selector sessions passed: draft lifecycle, shared editor policies, tile purposes, scoped callbacks and stale asynchronous requests.');
 }).catch(error => { console.error(error); process.exitCode = 1; });

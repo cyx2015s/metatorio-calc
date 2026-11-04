@@ -79,7 +79,6 @@ import type {
   PrototypeDetail,
   SolveResult,
   RuntimeDiagnostic,
-  TargetId,
   DualVar,
   TimeScale,
   ExternalInputId,
@@ -1452,35 +1451,6 @@ class RuntimeStore {
       scope: "factory",
       action: { project, factory, action: { flow: { "add-to-target": { flow, amount } } } },
     });
-  }
-
-  /** 更改已有目标的流（不改变数量）。 */
-  async setTargetFlow(target: TargetId, flow: import("./types").DualVar): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: { project, factory, action: { target: { "set-flow": { target, flow } } } },
-    });
-  }
-
-  /** 目标排序（position 为目标位置）。 */
-  async reorderTarget(target: TargetId, position: number): Promise<void> {
-    const { project, factory } = this.requireFactory();
-    await this.send({
-      scope: "factory",
-      action: { project, factory, action: { target: { reorder: { target, position } } } },
-    });
-  }
-
-  /** 拖拽后的整表重排（从末尾往前逐个移动到目标位置，保证稳定）。 */
-  async reorderTargets(order: TargetId[]): Promise<void> {
-    for (let i = order.length - 1; i >= 0; i--) {
-      const current = this.selectedFactory?.targets ?? [];
-      const currentIndex = current.findIndex((target) => target.id === order[i]);
-      if (currentIndex >= 0 && currentIndex !== i) {
-        await this.reorderTarget(order[i], i);
-      }
-    }
   }
 
   /** 外部输入支持任意 DualVar 流（物品/流体/实体/电/热/火箭运力…）。 */
