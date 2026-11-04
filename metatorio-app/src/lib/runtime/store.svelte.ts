@@ -854,6 +854,7 @@ class RuntimeStore {
 
   /** 目录索引：一次拉取当前上下文的全量目录（前端本地筛选/分组）。 */
   private catalogLoads = new Map<string, Promise<CatalogIndex | null>>();
+  private catalogGeneration = 0;
 
   async loadCatalogIndex(): Promise<CatalogIndex | null> {
     const contextId = this.effectiveContextId || this.activeContext?.id || "";
@@ -863,23 +864,26 @@ class RuntimeStore {
     // 合并并发加载（init 的 await 与上下文切换的 fire-and-forget 可能同时触发）。
     const pending = this.catalogLoads.get(contextId);
     if (pending) return pending;
+    const generation = this.catalogGeneration;
+    const isCurrent = () => generation === this.catalogGeneration
+      && (this.effectiveContextId || this.activeContext?.id || "") === contextId;
     const request = (async () => {
       try {
         const index = await catalogIndex(contextId);
         // 目录（含该上下文图标）就绪后，让已渲染的 <Icon> 重新拉取，
         // 修复"首屏/上下文未就绪时图标被瞬时 null 缓存"导致的占位。
-        if ((this.effectiveContextId || this.activeContext?.id || "") === contextId) {
+        if (isCurrent()) {
           this.catalogIndex = index;
           this.iconRevision++;
         }
         return index;
       } catch (error) {
-        if ((this.effectiveContextId || this.activeContext?.id || "") === contextId) this.setOperationError(error);
+        if (isCurrent()) this.setOperationError(error);
         return null;
-      } finally {
-        this.catalogLoads.delete(contextId);
       }
-    })();
+    })().finally(() => {
+      if (this.catalogLoads.get(contextId) === request) this.catalogLoads.delete(contextId);
+    });
     this.catalogLoads.set(contextId, request);
     return request;
   }
@@ -983,6 +987,8 @@ class RuntimeStore {
 
   /** 换上下文后清空索引/详情缓存。 */
   clearCatalogCache(): void {
+    this.catalogGeneration++;
+    this.catalogLoads.clear();
     this.catalogIndex = null;
     this.localizedNameMap.clear();
     this.localizedNameIndex = null;

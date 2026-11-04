@@ -259,3 +259,9 @@ python scripts/count-sloc.py --output local/sloc-current-partition.json
 验证：完整 Rust 工作区 78 个目标执行结束，首轮 782 通过、3 失败、26 忽略。三项失败均为此前 `f3c3305`/`d23c44a` 调整火箭产物和平台销毁后未同步的旧断言，已在独立提交 `63f993e` 对齐现行行为，并用相同 workspace/all-targets 特性配置定向重跑全部通过；保留容量/原料断言和地表资源隔离检查，新增平台只选 empty-space 的断言。原子插件塔用例与绑定一致性首轮通过。重跑曾与仍运行的 shell 测试争用 Windows exe，链接失败；两进程结束后重跑成功，此构建冲突不计作测试结果。
 
 146 项前端单元测试、类型检查、生产构建、新增的并发插件塔浏览器回归通过。日志：`local/beacon-atomic-{rust,unit,check,build,browser,bindings}.log`、`local/updated-mechanic-contracts-final.log`。生成文件保留生成器原始格式（包括其尾随空白），手写文件 diff 检查通过。
+
+## 在途目录缓存失效（2026-11-04）
+
+独立浏览器探针复现：`clearCatalogCache()` 后再次加载仍复用旧请求，只发出一次 IPC；旧响应随后把已失效目录重新发布。修复为清空时递增代次、移除在途请求表，只有当前代次且当前上下文的结果/错误才能发布，finally 仅移除仍属于自己的请求。
+
+专门浏览器回归覆盖旧响应先/后到达、旧失败、并发请求复用、图标刷新次数、有效错误仍可见且可重试。另有更新链、选择器、本地化显示和项目编辑四项浏览器回归，以及 146 项单元测试、类型检查、生产构建通过。原子插件塔阶段与本阶段分开提交；本阶段仅修改前端，不额外重跑 Rust。复现：`local/catalog-invalidation-before.log`；验证：`local/catalog-cache-*.log`。
