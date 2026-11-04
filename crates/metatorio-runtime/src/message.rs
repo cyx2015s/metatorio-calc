@@ -793,6 +793,10 @@ pub enum PlanningAction {
         quality: String,
     },
     AddEnumeratedBeacon,
+    /// Create a populated plan in one history entry, without a transient empty plan.
+    AddEnumeratedBeaconWithPrototype {
+        beacon: IdWithQuality,
+    },
     RemoveEnumeratedBeacon {
         beacon: usize,
     },

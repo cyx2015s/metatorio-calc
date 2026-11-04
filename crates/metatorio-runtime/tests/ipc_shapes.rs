@@ -485,3 +485,78 @@ fn frontend_json_supports_all_dual_var_flow_kinds() {
         metatorio_core::DualVar::Electricity
     );
 }
+
+#[test]
+fn frontend_json_add_beacon_plan_is_atomic_and_matches_legacy_defaults() {
+    let mut runtime = load_demo_runtime();
+    dispatch(
+        &mut runtime,
+        json!({"scope":"application","action":{"new-project":{"name":"beacon plans"}}}),
+    );
+    let project = runtime.state.document.projects[0].id;
+    let before = runtime.state.clone();
+    let message = |beacon: serde_json::Value| {
+        serde_json::from_value::<AppMessage>(json!({
+            "scope":"project", "action":{"project":project,"action":{"planning":{
+                "add-enumerated-beacon-with-prototype":{"beacon":beacon}
+            }}}
+        }))
+        .unwrap()
+    };
+    assert!(
+        runtime
+            .dispatch(message(json!({"id":"","quality":"rare"})))
+            .is_err()
+    );
+    assert_eq!(
+        runtime.state, before,
+        "invalid input must not leave an empty plan or history entry"
+    );
+    let beacon = json!({"id":"beacon","quality":"rare"});
+    let added = runtime.dispatch(message(beacon.clone())).unwrap();
+    assert!(added.changed);
+    assert_eq!(added.revision, before.revision + 1);
+    let populated = runtime.state.document.clone();
+    let mut legacy = before.clone();
+    for planning in [
+        json!("add-enumerated-beacon"),
+        json!({
+            "enumerated-beacon-module":{"beacon":0,"action":{"add-beacon":{"beacon":beacon}}}
+        }),
+    ] {
+        legacy
+            .dispatch(
+                serde_json::from_value(json!({
+                    "scope":"project","action":{"project":project,"action":{"planning":planning}}
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        populated, legacy.document,
+        "retain existing count/share/quality defaults"
+    );
+    runtime.state.undo().unwrap();
+    assert_eq!(
+        runtime.state.document, before.document,
+        "one undo removes the complete plan"
+    );
+    runtime.state.redo().unwrap();
+    assert_eq!(runtime.state.document, populated);
+    runtime
+        .dispatch(message(json!({"id":"beacon","quality":"legendary"})))
+        .unwrap();
+    let plans = &runtime
+        .state
+        .project(project)
+        .unwrap()
+        .planning
+        .enumerate_beacons;
+    assert_eq!(plans.len(), 2);
+    assert_eq!(plans[0].module_config.beacons[0].beacon.quality, "rare");
+    assert_eq!(
+        plans[1].module_config.beacons[0].beacon.quality,
+        "legendary"
+    );
+}

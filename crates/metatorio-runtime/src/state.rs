@@ -2996,6 +2996,12 @@ fn apply_planning_action(
             planning.enumerate_beacons.push(AutoBeaconPlan::default());
             Ok(true)
         }
+        PlanningAction::AddEnumeratedBeaconWithPrototype { beacon } => {
+            let mut plan = AutoBeaconPlan::default();
+            apply_module_action(&mut plan.module_config, ModuleAction::AddBeacon { beacon })?;
+            planning.enumerate_beacons.push(plan);
+            Ok(true)
+        }
         PlanningAction::RemoveEnumeratedBeacon { beacon } => {
             if beacon >= planning.enumerate_beacons.len() {
                 return Err(RuntimeError::InvalidValue("枚举插件塔下标越界".to_string()));

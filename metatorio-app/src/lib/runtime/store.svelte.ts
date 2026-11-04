@@ -1659,13 +1659,9 @@ class RuntimeStore {
     await this.planningMessage({ "use-best-modules": { quality } });
   }
 
-  /** 添加枚举插件塔方案：先加空方案，再把所选插件塔写入新方案的插件配置。 */
-  async addEnumeratedBeacon(beacon: { id: string; quality: string }): Promise<void> {
-    await this.planningMessage("add-enumerated-beacon");
-    const index = (this.selectedProject?.planning.enumerate_beacons.length ?? 1) - 1;
-    await this.planningMessage({
-      "enumerated-beacon-module": { beacon: index, action: { "add-beacon": { beacon } } },
-    });
+  /** Create the selected beacon plan atomically; no positional follow-up write. */
+  addEnumeratedBeacon(beacon: IdWithQuality): Promise<void> {
+    return this.planningMessage({ "add-enumerated-beacon-with-prototype": { beacon } });
   }
 
   async removeEnumeratedBeacon(index: number): Promise<void> {
