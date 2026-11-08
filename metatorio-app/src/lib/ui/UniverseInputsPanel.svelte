@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { reorderIds } from '$lib/reorder';
   import {dndzone} from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
@@ -16,15 +17,20 @@
   let pending=$state<Record<string,boolean>>({});
   const key=(flow:LocatedDualVar)=>JSON.stringify([locationKey(flow.location),flow.flow]);
   const inputs=$derived(universe.external_inputs??[]);
+  const inputKeys=$derived(new Set(inputs.map(input=>key(input.flow))));
+  const projectId=$derived(project);
+  const universeId=$derived(universe.id);
+  const environmentKey=$derived(runtime.mechanicEnvironmentKey({project:projectId,factory:universeId,kind:'universe'}));
   let dragInputs=$state<typeof universe.external_inputs>([]);
   $effect(()=>{dragInputs=inputs;});
   const hasFreeEnergy=$derived(["Electricity","Heat"].every(flow=>inputs.some(i=>key(i.flow)===key({location:runtime.universeAddLocation,flow:flow as DualVar})&&i.penalty===0)));
-  const implicit=$derived(sources.filter(flow=>!inputs.some(input=>key(input.flow)===key(flow))));
+  const implicit=$derived(sources.filter(flow=>!inputKeys.has(key(flow))));
   const factor=$derived(runtime.selectedProject?.settings.time_scale==='minutes'?60:runtime.selectedProject?.settings.time_scale==='hours'?3600:1);
   $effect(()=>{
-    void universe; void runtime.selectedProject?.settings; void runtime.effectiveContextId;
+    const p=projectId,u=universeId;
+    void environmentKey; void runtime.flowRevision;
     let alive=true;loading=true;error='';sources=[];
-    runtime.loadUniversePreview(project,universe.id).then(preview=>{if(alive)sources=preview.sources;}).catch(e=>{if(alive)error=String(e);}).finally(()=>{if(alive)loading=false;});
+    untrack(()=>runtime.loadUniversePreview(p,u)).then(preview=>{if(alive)sources=preview.sources;}).catch(e=>{if(alive)error=String(e);}).finally(()=>{if(alive)loading=false;});
     return ()=>{alive=false;};
   });
   function writer(){const p=project,u=universe.id;return (action:UniverseAction)=>runtime.dispatchUniverse(p,u,action);}
@@ -38,7 +44,7 @@
   }
   async function promote(flow:LocatedDualVar,penalty:number){
     const token=`${project}:${universe.id}:${key(flow)}`;
-    if(pending[token]||inputs.some(i=>key(i.flow)===key(flow)))return;
+    if(pending[token]||inputKeys.has(key(flow)))return;
     pending[token]=true;try{await writer()({'add-external-input':{flow,penalty}});}finally{delete pending[token];}
   }
   async function freeEnergy(){
