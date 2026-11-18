@@ -83,9 +83,9 @@ impl Default for ProjectDocument {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ProjectSettings {
-    /// Per-prototype estimates, shared by fission and fusion; absent = 3.
+    /// 按建筑原型名覆盖邻居数估算，核反应堆与聚变反应堆共用；缺省为 3。
     pub reactor_neighbours: std::collections::BTreeMap<String, u8>,
-    /// Estimated orbital logistics prices, independent of physical flow coefficients.
+    /// 星际物流估算价格，独立于物理流量系数。
     pub orbital_transport_costs: OrbitalTransportCosts,
     pub time_scale: TimeScale,
     /// 里程碑（可达性节点级，默认是各科技瓶物品；`unlocked` 是**强制覆盖**——
@@ -140,15 +140,14 @@ impl Default for ProjectSettings {
     }
 }
 
-/// Project-level estimates, editable independently of physical transport
-/// coefficients. Weights in prototype data are grams.
+/// 项目级星际运输估算成本，可独立于物理运输系数编辑。原型数据中重量单位为克。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct OrbitalTransportCosts {
     pub rocket_export_per_kg: f64,
     pub orbital_drop_per_stack: f64,
-    /// Extra drop cost is this coefficient divided by effective spoil time in ticks.
+    /// 额外空投惩罚 = 该系数 / 有效变质时间（tick）。
     pub orbital_drop_spoil_penalty: f64,
 }
 
@@ -276,9 +275,9 @@ impl Default for UniverseMechanicEntry {
     }
 }
 
-/// A universe target retains location as part of its flow identity.
+/// 宇宙工厂目标：在流身份中保留所属空间位置。
 pub type LocatedTarget = FlowTarget<LocatedDualVar>;
-/// Terms may use different locations within one expression.
+/// 目标表达式中的每一项可各自指向不同空间位置。
 pub type LocatedTargetExpression = TargetExpression<LocatedDualVar>;
 pub type LocatedTargetTerm = TargetTerm<LocatedDualVar>;
 
@@ -445,8 +444,7 @@ impl Default for MechanicEntry {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PlanningPreferences {
-    /// Include enabled manual mechanisms as candidates, and append results
-    /// without replacing existing entries. Manual surface exceptions are kept.
+    /// 将已启用的手动机制纳入候选并追加结果，不替换现有条目；保留手动地表例外。
     pub preserve_existing_mechanics: bool,
     pub alternative_count: usize,
     pub machine_preferences: Vec<IdWithQuality>,

@@ -481,7 +481,7 @@ pub struct BoilerMechanic {
 #[serde(default)]
 pub struct ReactorMechanic {
     pub reactor: IdWithQuality,
-    /// None inherits the project estimate, falling back to 3.
+    /// 为 `None` 时继承项目级邻居估算，缺省回退为 3。
     pub neighbours: Option<u8>,
     /// 明确燃料（反应堆通常使用物品）；None = 自动选择/无需燃料。
     pub fuel: Option<Fuel>,
@@ -622,7 +622,7 @@ mod tests {
     }
 }
 
-/// Fusion reactors share reactor identity, fuel and neighbour editing semantics.
+/// 聚变反应堆复用反应堆的建筑身份、燃料与邻居数编辑语义。
 pub type FusionReactorMechanic = ReactorMechanic;
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

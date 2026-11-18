@@ -1,5 +1,5 @@
-//! Factorio 2.1.23 item-weight algorithm. Raw ItemComponent::weight is preserved;
-//! resolved weights (grams, independent of quality) live in the store's cache.
+//! Factorio 2.1.23 物品重量推导算法。保留原始 `ItemComponent::weight`，
+//! 推导后的重量（单位：克，与品质无关）缓存在原型仓库中。
 use crate::store::{AIndexMap, PrototypeGroup, PrototypeRecord, PrototypeStore};
 use crate::types::{Ingredient, Product};
 use crate::{ItemComponent, PrototypeBaseComponent, RecipeComponent};
@@ -12,7 +12,7 @@ pub struct WeightConstants {
 }
 impl Default for WeightConstants {
     fn default() -> Self {
-        // Base-game utility constants; also support small dumps without utilities.
+        // 原版实用常数；也用于缺少 utility-constants 的小型测试 dump。
         Self {
             default_item_weight: 100.0,
             default_rocket_lift_weight: 1_000_000.0,
@@ -151,7 +151,7 @@ fn calculate(store: &PrototypeStore) -> AIndexMap<String, ItemWeight> {
         .map(|r| r.name.clone())
         .collect();
     names.sort();
-    // Explicit stack avoids overflowing the Rust stack on long modded chains.
+    // 使用显式栈，避免大型模组长依赖链导致 Rust 调用栈溢出。
     for root in names {
         let mut stack = vec![(root, false)];
         let mut path: Vec<String> = Vec::new();
@@ -191,8 +191,7 @@ fn calculate(store: &PrototypeStore) -> AIndexMap<String, ItemWeight> {
                 } else if product_count <= 0.0 {
                     fallback("zero-product-count", Some(record))
                 } else {
-                    // The engine's intermediate is an integer number of grams,
-                    // unlike explicitly specified Weight and the stack division.
+                    // 游戏引擎的中间重量取整克数，区别于显式重量与最终整组除法。
                     let intermediate = (recipe_weight / product_count
                         * item.ingredient_to_weight_coefficient)
                         .floor();

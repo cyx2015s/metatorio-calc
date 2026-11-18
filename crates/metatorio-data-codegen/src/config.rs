@@ -715,8 +715,7 @@ pub const DEFAULT_IGNORED_TYPES: &[&str] = &[
     // "uint8",
 ];
 
-/// 默认关注的原型类型（dump 顶层键）。
-/// 基于 metatorio_egui 的 DataContext 字段对应的计算相关类型。
+/// 默认关注的原型类型（dump 顶层键，对应计算所需的游戏原型集合）。
 pub const DEFAULT_CONCERNED_TYPENAMES: &[&str] = &[
     "accumulator",
     // "achievement",

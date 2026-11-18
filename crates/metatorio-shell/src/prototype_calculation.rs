@@ -1,5 +1,5 @@
-//! Calculation facts, in SI units, shared by hover views and cached per prototype.
-//! The wire format carries values and stable keys, never HTML or presentation layout.
+//! 悬停详情视图共用的国际单位制计算事实，按原型缓存。
+//! 线协议只传数值与稳定语义键，不携带 HTML 或排版布局。
 use metatorio_core::{
     IdWithQuality,
     mechanic::module_effect_at_quality,

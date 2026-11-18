@@ -93,9 +93,8 @@ export function networkRate(flow: DualVar, amount: number, timeScale: TimeScale)
   return `${compactNumber(value * factor)}${timeScale === 'hours' ? '/h' : timeScale === 'minutes' ? '/min' : '/s'}`;
 }
 
-/** Display only these zero-cost compatibility relations from runtime/add_conversion_flows.
- * These are possible conversions, not solved transfer quantities. Cooling/heat extraction
- * requires prototype data and is deliberately not reconstructed here. */
+/** 仅展示来自 runtime `add_conversion_flows` 的零成本兼容关系。
+ * 这些边表示潜在可转换关系，而非求解得到的实际转运量；降温和抽热依赖原型数据，此处刻意不重建。 */
 export function networkCompatible(from: DualVar, to: DualVar): boolean {
   if (typeof from === 'string' || typeof to === 'string') return false;
   if ('Fluid' in from && 'Fluid' in to) {
@@ -129,7 +128,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
   const visible = source.visibleIds === null ? null : new Set(source.visibleIds);
   const scopedKey = (flow: DualVar, location?: Location) => `${locationKey(location)}|${networkFlowKey(flow)}`;
   const targetKeys = new Set([...source.targets.map(flow => scopedKey(flow)), ...(source.locatedTargets ?? []).map(f => scopedKey(f.flow, f.location))]);
-  // Power/heat goals are the main chain for that factory, not optional clutter.
+  // 若电力或热量本身是生产目标，则属于该工厂主生产链，不按可选公共流隐藏。
   const isUtility = (flow: DualVar, location?: Location) => utility(flow) && !targetKeys.has(scopedKey(flow, location));
   const flowNode = (flow: DualVar, location?: Location) => {
     const id = `f:${location ? locationKey(location) + "|" : ""}${networkFlowKey(flow)}`;
@@ -161,7 +160,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     }
     node.entries.push(entry);
     for (const item of source.index.get(entry.id) ?? []) {
-      // Filter before collapse so remote transport legs cannot reconnect sites.
+      // 先按地点隔离过滤，再做中间节点折叠，避免跨地点运输边重新把不同分区连起来。
       if (source.isolateLocations && locationKey(item.location ?? entry.location) !== locationKey(entry.location)) continue;
       if (!Number.isFinite(item.amount) || item.amount === 0 || !source.showUtilities && isUtility(item.flow, item.location ?? entry.location)) continue;
       const flow = flowNode(item.flow, item.location ?? entry.location);
@@ -185,7 +184,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     const machine = node.entries[0].mechanic.machine;
     if (machine) node.label += `\n${source.localize('entity', machine.id)}`;
   }
-  // Keep isolated goals in the full graph so missing production is visible.
+  // 完整视图保留孤立目标，使缺少供给的生产缺口保持可见。
   if (source.visibleIds === null) for (const flow of source.targets) {
     if (source.showUtilities || !isUtility(flow)) flowNode(flow);
   }
@@ -207,7 +206,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
       search: `${input.location ? locationLabel(input.location,source.localize) : ''} ${info.description} ${input.implicit ? '隐式' : '外部'}`, utility: flow.utility, entries: [], ...input});
     edge(id, flow.id, input.flow, 'external');
   }
-  // Do not union overlapping temperature intervals or fuel category sets.
+  // 不合并互相重叠的温度区间或燃料类别集合。
   const flows = [...nodes.values()].filter(node => node.kind === 'flow');
   const families = new Map<string, NetworkNode[]>();
   for (const node of flows) {

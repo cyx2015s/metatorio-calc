@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
-/// Retain OS requests until the frontend has subscribed and finished booting.
+/// 暂存系统文件打开请求，直到前端完成启动并订阅事件。
 #[derive(Default)]
 pub struct OpenRequests(Mutex<Vec<String>>);
 

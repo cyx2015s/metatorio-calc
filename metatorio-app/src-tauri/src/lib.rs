@@ -273,7 +273,7 @@ fn project_save_path(host: HostState<'_>, project: ProjectId) -> Option<String> 
 
 // ── 纯 GUI：文件对话框（留在 Tauri 外壳）────────────────────────────
 
-/// OS file dialog for the Factorio executable (game-context loading).
+/// 打开系统文件对话框，选择 Factorio 可执行文件（用于导出游戏上下文）。
 #[tauri::command]
 #[specta::specta]
 async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> {
@@ -294,7 +294,7 @@ async fn pick_game_executable(app: AppHandle) -> Result<Option<String>, String> 
     .map_err(|error| error.to_string())?
 }
 
-/// OS file dialog for a pre-generated `data-raw-dump.json`.
+/// 打开系统文件对话框，选择预生成的 `data-raw-dump.json`。
 #[tauri::command]
 #[specta::specta]
 async fn pick_dump_file(app: AppHandle) -> Result<Option<String>, String> {
@@ -312,7 +312,7 @@ async fn pick_dump_file(app: AppHandle) -> Result<Option<String>, String> {
     .map_err(|error| error.to_string())?
 }
 
-/// OS folder dialog for a Factorio mod directory.
+/// 打开系统目录对话框，选择 Factorio 模组目录。
 #[tauri::command]
 #[specta::specta]
 async fn pick_mod_dir(app: AppHandle) -> Result<Option<String>, String> {
@@ -367,7 +367,7 @@ async fn pick_project_save_path(app: AppHandle) -> Result<Option<String>, String
     .map_err(|error| error.to_string())?
 }
 
-/// The dialog is shown once; subsequent tiles stream into a native PNG encoder.
+/// 打开一次保存对话框；后续画布分块流式写入原生 PNG 编码器。
 #[tauri::command]
 #[specta::specta]
 async fn begin_network_png(
@@ -493,7 +493,7 @@ pub fn run_with_project_files(options: Options, files: Vec<PathBuf>) {
         .manage(metatorio_shell::network_png::NetworkPngExports::default());
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     if !options.headless {
-        // First plugin: a second GUI launch only forwards files to this window.
+        // 首要注册单实例插件：再次启动 GUI 时只把文件路径转交给已有窗口。
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             match launch::requested_paths(args, std::path::Path::new(&cwd)) {
                 Ok(files) => project_files::request(app, files),

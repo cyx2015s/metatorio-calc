@@ -86,7 +86,7 @@ headless **刻意不链接 tauri**（Linux 上因此不需要 GTK/xvfb），所�
 
 ## 加一个新的前端 / 新产物
 
-1. 给它选一个不会与别人冲突的 target 键（例如 `gui-egui-windows-x86_64`）；
+1. 给它选一个不会与别人冲突的 target 键（例如 `gui-custom-windows-x86_64`）；
 2. CI 里构建 + 用同一把密钥签名 + 上传资产；
 3. 合并进 `latest.json` 的 `platforms`；
 4. 客户端用对应 target 去查（tauri 端用 `UpdaterBuilder::target(...)`，非 tauri

@@ -1,4 +1,4 @@
-//! Event payload contracts shared by producers and desktop binding generation.
+//! 生产端与桌面端绑定生成共用的事件载荷契约。
 use metatorio_runtime::{Diagnostic, FactoryId, ProjectId, UniverseId, solve::AutoPlanProgress};
 use serde::Serialize;
 
@@ -33,7 +33,7 @@ pub struct UniverseSolveError {
     pub message: String,
 }
 
-/// Legacy string errors and structured domain diagnostics share an event channel.
+/// 传统字符串错误与结构化领域诊断共用同一个事件通道。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]

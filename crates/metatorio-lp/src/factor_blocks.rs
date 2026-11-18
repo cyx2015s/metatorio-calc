@@ -1,4 +1,4 @@
-//! Exact block triangular factorization after structural row matching.
+//! 结构行匹配后的精确分块上三角分解。
 use crate::{Rational, SolveControl, factor::Factorization};
 use num_traits::Zero;
 

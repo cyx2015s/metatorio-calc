@@ -43,8 +43,7 @@ pub fn calc_quality_distribution(
     }
 
     if quality_bonus > 0.0 && maximum_quality > base_quality {
-        // Do not clamp this probability. Factorio lets the excess borrow
-        // lower-quality results and pays that debt back from the bottom.
+        // 这里不能提前钳制概率：Factorio 允许溢出部分向低品质借位，后续再从低到高扣回。
         let initial = qualities[base_quality].next_probability * quality_bonus;
         let mut cumulative = vec![0.0; qualities.len()];
         cumulative[base_quality] = initial;
@@ -78,10 +77,9 @@ pub fn calc_quality_distribution(
     result
 }
 
-/// Settle an upgrade distribution.
+/// 结算升级品质分布。
 ///
-/// An upgrade overflow borrows low-quality items. The game pays that debt
-/// back from low to high, so high-quality results are retained first.
+/// 升级概率溢出时会向低品质借位；游戏从低到高扣回差额，因此优先保留高品质结果。
 fn settle_upgrade_distribution(result: &mut [f64], base_quality: usize) {
     let mut sum = 0.0;
     for level in 0..result.len() {
@@ -109,11 +107,9 @@ fn settle_upgrade_distribution(result: &mut [f64], base_quality: usize) {
     }
 }
 
-/// Settle a downgrade distribution.
+/// 结算降级品质分布。
 ///
-/// A downgrade overflow borrows high-quality items. Unlike an upgrade, the
-/// excess must therefore be removed from high to low, retaining the lower
-/// quality results first.
+/// 降级概率溢出时会向高品质借位；与升级相反，需从高到低扣回溢额，优先保留低品质结果。
 fn settle_downgrade_distribution(result: &mut [f64], base_quality: usize) {
     let mut sum = 0.0;
     for level in (0..result.len()).rev() {

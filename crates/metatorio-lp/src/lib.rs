@@ -267,9 +267,8 @@ impl Model {
         }
     }
 
-    /// An exact Farkas alternative for x>=0, Ax<=b and equality rows:
-    /// y<=0 on inequalities, A^T y<=0, and b^T y>0 contradict feasibility.
-    /// Original objective coefficients do not participate in this proof.
+    /// 验证针对 `x >= 0`、`Ax <= b` 与等式约束的精确 Farkas 不可行性替代解：
+    /// 不等式行 `y <= 0`、`A^T y <= 0` 且 `b^T y > 0` 与可行性矛盾；原目标系数不参与该证明。
     pub fn verify_infeasibility(
         &self,
         row_duals: &[Rational],
@@ -319,8 +318,8 @@ impl Model {
     pub fn solve(&self, max_pivots: usize) -> Result<TwoPhaseResult, String> {
         self.solve_with_observer(max_pivots, |_, _| true)
     }
-    /// Exact two-phase simplex from zero, with no floating solver or basis hint.
-    /// The observer receives true during Phase I; limits leave status undetermined.
+    /// 从零开始的精确两阶段单纯形法，不依赖浮点求解器或基提示。
+    /// 观察者回调在 Phase I 期间收到 `true`；若因限额提前中止，状态保持未确定。
     pub fn solve_with_observer(
         &self,
         max_pivots: usize,
@@ -392,9 +391,8 @@ impl Model {
             return Err("invalid negative artificial objective".into());
         }
         let mut basis = phase1.basis.clone();
-        // Each artificial column has exactly one signed unit entry. If basic,
-        // deleting it and its corresponding active row leaves a nonsingular
-        // cofactor. Promote that row slack (fixed at zero for equality rows).
+        // 每个人工列只有一个带符号的单位项；若它仍在基内，删除该列及其对应有效行后
+        // 余子式仍非奇异，可把该行松弛变量升入基内（等式行固定取 0）。
         for (column, row) in artificial {
             if basis.columns[column] == BasisStatus::Basic {
                 if basis.rows[row] == BasisStatus::Basic {
@@ -414,9 +412,8 @@ impl Model {
         })
     }
 
-    /// Exact primal simplex for the application's nonnegative, unbounded-above
-    /// continuous columns. Requires a feasible basis hint; phase I comes later.
-    /// Dantzig pricing starts fast; a repeated basis activates Bland pricing.
+    /// 面向非负、无上界连续列的精确原始单纯形法：要求传入可行基提示（两阶段 Phase I 见 `solve`）。
+    /// 初始采用 Dantzig 定价，检测到重复基时切换 Bland 规则防退化循环。
     pub fn optimize_from_basis(
         &self,
         basis: Basis,
@@ -424,8 +421,7 @@ impl Model {
     ) -> Result<Optimization, String> {
         self.optimize_from_basis_with_observer(basis, max_pivots, |_| true)
     }
-    /// Returning false preserves the current feasible basis with a nonterminal
-    /// stop reason. A limit never proves infeasibility or discards the candidate.
+    /// 观察者返回 `false` 时保留当前可行基并附带非终结停止原因；限额停止不会误判不可行，也不会丢弃候选解。
     pub fn optimize_from_basis_with_observer(
         &self,
         basis: Basis,
@@ -434,8 +430,7 @@ impl Model {
     ) -> Result<Optimization, String> {
         self.optimize_inner(basis, max_pivots, observer, true, &SolveControl::default())
     }
-    /// Compatibility entry point using the same sparse incremental basis as
-    /// optimize_from_basis; neither entry point constructs an exact inverse.
+    /// 兼容入口：与 [`Self::optimize_from_basis`] 共用稀疏增量基更新路径，同样不构造完整显式逆矩阵。
     pub fn optimize_without_inverse_with_observer(
         &self,
         basis: Basis,
@@ -763,8 +758,7 @@ impl Model {
         Ok(())
     }
 
-    /// Eliminate basic row slacks and solve the remaining structural basis.
-    /// Reconstruct nonbasic columns at their actual bounds, not rounded values.
+    /// 消去基内行松弛变量并求解剩余结构基；非基列按实际精确边界（而非舍入值）重构。
     pub fn reconstruct(&self, basis: &Basis) -> Result<ExactSolution, String> {
         self.reconstruct_factored(basis)
             .map(|(solution, _)| solution)
@@ -775,7 +769,7 @@ impl Model {
     ) -> Result<(ExactSolution, basis::Factored), String> {
         self.reconstruct_factored_with_control(basis, &SolveControl::default())
     }
-    /// Interrupted reconstruction returns an error, never a partial solution.
+    /// 重构过程被协作式取消时返回错误，绝不返回残缺解。
     pub fn reconstruct_with_control(
         &self,
         basis: &Basis,
@@ -866,8 +860,7 @@ impl Model {
             .iter()
             .map(|i| rational(self.columns[*i].cost))
             .collect::<Result<Vec<_>, _>>()?;
-        // The primal solve already checked nonsingularity. A zero objective
-        // has exactly zero duals and needs no second factorization.
+        // 原始方程组求解已验证基阵非奇异；零目标函数对偶全为 0，无需二次分解。
         let dual = if costs.iter().all(|c| c.is_zero()) {
             vec![Rational::zero(); columns.len()]
         } else {
@@ -892,10 +885,8 @@ impl Model {
         ))
     }
 
-    /// For nonnegative costs and nonnegative unbounded-above variables, shrink
-    /// a dual witness toward zero to obtain an exact lower bound. This keeps
-    /// the original costs unchanged. It does not prove primal feasibility or
-    /// optimality; callers must check the returned solution's certificate/gap.
+    /// 在成本非负且变量非负无上界的模型上，将一组对偶见证向零缩放以获得精确下界（保持原成本不变）。
+    /// 该操作本身不证明原始可行性或最优性，调用方须检查返回解的证书与对偶间隙。
     pub fn scale_to_dual_feasible(
         &self,
         solution: &ExactSolution,
@@ -904,8 +895,7 @@ impl Model {
             .map(|(adjusted, scale, _)| (adjusted, scale))
     }
 
-    /// Reuse the full certificate already required to validate dual scaling.
-    /// This is the certificate of the returned adjusted solution, not the hint.
+    /// 复用校验对偶缩放时生成的完整证书（对应缩放后的解，而非初始提示解）。
     pub(crate) fn scale_to_dual_feasible_certified(
         &self,
         solution: &ExactSolution,
@@ -952,8 +942,7 @@ impl Model {
         Ok((adjusted, scale, certificate))
     }
 
-    /// Exact primal feasibility and weak-duality bound against every original
-    /// row and column, including columns omitted from the candidate support.
+    /// 针对原模型的**所有**行与列（含候选支撑集之外的列）校验精确原始可行性与弱对偶界。
     pub fn certify(&self, solution: &ExactSolution) -> Result<Certificate, String> {
         self.check()?;
         if solution.values.len() != self.columns.len()

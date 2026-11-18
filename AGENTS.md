@@ -70,19 +70,17 @@ Metatorio 是一个针对《异星工厂》（Factorio 2.0+ 及 Space Age 太空
 
 ### 3.1 生产单元：`Mechanic`
 定义在 `crates/metatorio-core/src/mechanic.rs`，代表工厂中 1 个具体的生产单元（不是工厂整体）：
-- `Recipe(RecipeMechanic)`：配方生产（机器、配方、燃料、插件配置）；
-- `Mining(MiningMechanic)`：资源开采（采矿机、采矿目标、采掘液、硬度倍率）；
-- `Spoil(SpoilMechanic)`：物品变质物理过程；
-- `Plant(PlantMechanic)`：农业温室/人工种植周期；
-- `Boiler(BoilerMechanic)` / `Reactor(ReactorMechanic)` / `FusionGenerator(FusionGeneratorMechanic)`：能量转换与发电；
+- `Recipe(RecipeMechanic)` / `Mining(MiningMechanic)` / `Plant(PlantMechanic)` / `Spoil(SpoilMechanic)`：配方、采矿、种植与变质；
+- `ItemFuel(ItemFuelMechanic)` / `FluidFuel(FluidFuelMechanic)` / `FluidHeat(FluidHeatMechanic)` / `ItemLaunch(ItemLaunchMechanic)`：燃料转换、流体热量与火箭单件发射；
+- `Generator(GeneratorMechanic)` / `Boiler(BoilerMechanic)` / `Reactor(ReactorMechanic)` / `FusionReactor(FusionReactorMechanic)` / `FusionGenerator(FusionGeneratorMechanic)` / `Solar(SolarMechanic)`：各类发电与供热装置；
 - `TileExtract(TileExtractMechanic)` / `TileDispose(TileDisposeMechanic)`：地表流体抽取与物品倾倒；
 - `VirtualScience(VirtualScienceMechanic)`：虚拟科研容量折算。
 
 ### 3.2 对偶变量与流平衡：`DualVar`
 定义在 `crates/metatorio-core/src/dual_var.rs`，对应 LP 模型中的每条守恒约束行：
-- `Item(IdWithQuality)` / `Fluid { name, temperature }`：标准物品与流体；
-- `Electricity` / `Heat` / `Pollution`：能量与污染；
-- `RocketWeightCapacity` / `RocketSlotCapacity`：火箭发射运力；
+- `Item(IdWithQuality)` / `Entity(IdWithQuality)` / `Fluid { name, temperature }`：标准物品、实体与带温度区间流体；
+- `Electricity` / `Heat` / `FluidHeat { filter }` / `FluidFuel { filter }` / `ItemFuel` / `ItemFuelSupply` / `Pollution { name }`：能源、燃料与污染；
+- `RocketWeightCapacity` / `RocketSlotCapacity` / `VirtualScience(String)`：火箭运力与虚拟科研；
 - `Custom { name }`：用户自定义流（用于任意线性表达式）；
 - 跨星球坐标包装：`LocatedDualVar { location, flow }`，其中 `Location` 为 `Planet(name)` 或 `Space`。
 
@@ -178,5 +176,6 @@ pnpm bindings:check
 > 任何在 `metatorio-core`、`metatorio-solver`、`metatorio-runtime` 中引入 Tauri、Svelte、GTK 或 Webview 相关依赖的行为均属严重违规。纯计算层必须保持无副作用与高可复用性。
 
 > [!NOTE]
-> **红线 4：Windows 下 CMake/Ninja 构建规则**
-> Windows 下默认构建依赖 C++17、CMake 与 Ninja。若遇到生成器不匹配报错，优先在当前会话设置 `$env:CMAKE_GENERATOR = 'Ninja'`，详见 [docs/windows-native-build.md](docs/windows-native-build.md)。
+> **红线 4：Rust 工具链与 Windows 原生构建规则**
+> - 由于 `metatorio-data` 使用了 `#![feature(mut_restriction)]`，Rust 构建需使用 **nightly** 工具链（与 CI 一致）。
+> - Windows 下默认构建依赖 C++17、CMake 与 Ninja。若遇到生成器不匹配报错，优先在当前会话设置 `$env:CMAKE_GENERATOR = 'Ninja'`，详见 [docs/windows-native-build.md](docs/windows-native-build.md)。

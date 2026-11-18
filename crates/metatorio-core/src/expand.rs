@@ -32,7 +32,7 @@ use metatorio_data::{
     SolarPanelComponent, TileComponent,
 };
 
-/// Expand all mechanisms in the caller-provided order.
+/// 按调用方传入顺序展开全部机制。
 pub fn expand<'a, C>(
     mechanics: impl IntoIterator<Item = (C, &'a Mechanic)>,
     ctx: &Context,
@@ -1256,7 +1256,7 @@ pub fn solar_balance(ctx: &Context, mechanic: &SolarMechanic) -> Option<SolarBal
     })
 }
 
-/// Custom panel properties override the ordinary ground/orbit solar multiplier.
+/// 自定义面板属性会覆盖常规地面/轨道太阳能倍率。
 fn solar_coefficient(ctx: &Context, panel: &SolarPanelComponent) -> f64 {
     if panel.solar_coefficient_property == "solar-power" {
         return ctx.game.solar_power_multiplier;
@@ -1727,7 +1727,7 @@ mod tests {
     }
 }
 
-/// An invalid explicit fuel must never turn a reactor into free heat/plasma.
+/// 无效的显式燃料绝不能让反应堆变成免费产热/等离子体。
 fn valid_burner_fuel(
     ctx: &Context,
     source: &metatorio_data::types::BurnerEnergySource,
@@ -1816,7 +1816,7 @@ fn expand_fusion_reactor(mechanic: &ReactorMechanic, ctx: &Context) -> Option<Fl
         f64::from(temperature),
         f64::from(temperature),
     );
-    // Quality scales plasma/coolant and fusion fuel, but not the sustaining power.
+    // 品质缩放等离子体/冷却液流量与聚变燃料消耗，但不缩放维持运行的基础电耗。
     temp.scale(default_quality_multiplier(ctx, &mechanic.reactor.quality));
     add_energy(
         ctx,
@@ -1861,7 +1861,7 @@ fn expand_fusion_generator(mechanic: &FusionGeneratorMechanic, ctx: &Context) ->
     if lower < minimum || upper > maximum || lower > upper {
         return None;
     }
-    // Unlike ordinary steam generators this uses absolute temperature, not ΔT.
+    // 与普通蒸汽发电机不同，聚变发电机按绝对温度（而非温差 ΔT）核算能量。
     let energy = if generator.burns_fluid {
         fluid.fuel_value().amount
     } else {

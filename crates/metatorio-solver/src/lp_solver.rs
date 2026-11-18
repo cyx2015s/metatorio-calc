@@ -1,9 +1,8 @@
-//! Project-level LP backend selection.
+//! 项目级 LP 后端选择。
 //!
-//! This type lives in the solver crate so the document model, MCP schema and
-//! the LP adapter all use one spelling. Availability depends on the Cargo
-//! features compiled into the binary; an unavailable choice is reported as a
-//! solve error instead of being silently replaced by another backend.
+//! 定义在求解器 crate 内，使文档模型、MCP schema 与 LP 适配层共用同一拼写。
+//! 可用性取决于二进制编译时启用的 Cargo feature；若所选后端未编译，
+//! 直接报求解错误，而不静默替换为其他后端。
 use serde::{Deserialize, Serialize};
 
 #[cfg_attr(feature = "specta", derive(specta::Type))]
@@ -14,16 +13,15 @@ pub enum LpSolver {
     Highs,
     Microlp,
     Soplex,
-    /// Legacy Rust path. The serialized id remains `rust-certified` so existing
-    /// project files keep loading; `rust-based` is accepted as an alias.
+    /// 传统纯 Rust 认证后端。序列化 ID 仍保留 `rust-certified` 以兼容已有工程文件，
+    /// 同时也接受别名 `rust-based`。
     #[serde(rename = "rust-certified", alias = "rust-based")]
     RustBased,
 }
 
 impl Default for LpSolver {
     fn default() -> Self {
-        // Prefer a mature solver whenever it is compiled in; fall back to the
-        // legacy Rust path only in a Rust-only build.
+        // 只要编译了成熟后端就优先作为默认选项；仅纯 Rust 构建时回落到旧版 Rust 后端。
         if cfg!(feature = "highs") {
             Self::Highs
         } else if cfg!(feature = "clarabel") {

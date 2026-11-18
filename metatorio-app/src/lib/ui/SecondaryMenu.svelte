@@ -44,7 +44,7 @@
     function outside(event: PointerEvent) {
       const target = event.target as Element;
       if (panel?.contains(target) || anchor?.contains(target)) return;
-      // A prototype selector is a child interaction, even though it lives elsewhere in the DOM.
+      // 原型选择器虽挂载在 DOM 其他位置，仍属于当前二级菜单的子交互。
       if (target.closest('[aria-modal="true"], .backdrop')) return;
       close();
     }

@@ -53,5 +53,4 @@ item-weight / stack-weight，以及使用默认火箭运力的 rocket-item-capac
 cargo test -p metatorio-data --test item_weight game_export -- --ignored --nocapture
 ```
 
-本次实验在 `local/item-weight-validation` 中，对比通过 350 个物品，包含原版与专用边界样本。
-不修改安装目录、常用模组配置或用户存档。游戏相关测试默认忽略，常规测试不要求安装 Factorio。
+游戏对照测试默认忽略，常规测试不要求安装 Factorio。

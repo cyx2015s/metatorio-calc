@@ -111,8 +111,7 @@
     "rocket-weight": "RocketWeightCapacity",
   };
 
-  // A mounted selector is one editing session. Props seed its draft once;
-  // callers must remount (keyed session) when opening a different request.
+  // 每次挂载的选择器对应一次独立编辑会话：props 仅初始化一次本地草稿，切换编辑对象需通过 {#key} 重建。
   let activeKind = $state<CatalogKind>(untrack(() => kind));
   let flowTab = $state<FlowTab>(
     untrack(() => (flowTabs.some((tab) => tab.id === initialTab) ? initialTab : "item") as FlowTab),
@@ -148,11 +147,11 @@
   );
   let groups = $derived([...new Set(entries.map((entry) => entry.group))]);
   let searching = $derived(query.trim().length > 0);
-  // Build once per catalog/filter context, not once per keystroke and entry.
+  // 仅在目录或筛选上下文变化时重建索引，避免每次按键重复遍历。
   let searchIndex = $derived(entries.map((entry) => ({ entry, keys: [
     normalizeSearch(entry.name),
     normalizeSearch(entry.localized_name, (kind, name) => runtime.localizedName(kind, name)),
-    normalizeSearch(entry.localized_name), // Embedded prototype IDs are aliases too.
+    normalizeSearch(entry.localized_name), // 内嵌原型 ID 也作为别名参与检索。
     entry.tile?.fluid ? normalizeSearch(`${entry.tile.fluid} ${runtime.localizedName("fluid", entry.tile.fluid)}`) : "",
   ] })));
   let searchNeedle = $derived(normalizeSearch(query));

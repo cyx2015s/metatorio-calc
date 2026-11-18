@@ -32,7 +32,7 @@
   const searchResultsId = $derived(`network-search-${project}-${factory}`);
   let ready = $state(false), busy = $state(false), error = $state('');
   let exporting = $state(false), exportCancelled = $state(false), exportStatus = $state(''), exportError = $state('');
-  // This renderer is keyed by scope; keep its state owner stable during teardown.
+  // 本渲染器按作用域通过 {#key} 挂载；在组件销毁阶段保持自身状态对象引用稳定。
   const ownerState = untrack(() => viewState);
   let collapse = $state(untrack(() => ownerState.collapse));
   let showUtilities = $state(untrack(() => ownerState.showUtilities));
@@ -69,16 +69,14 @@
     mergeRecipes, collapse, showUtilities, onlyEnabled, isolateLocations:groupLocations}));
   const needle = $derived(normalizeSearch(query));
   const matches = $derived(model.nodes.filter(node => !needle || normalizeSearch(node.search).includes(needle)));
-  // Recipe/machine edits change a merged node's ID. Keep the editor attached to
-  // the stable mechanism identity, including when it moves to another group.
+  // 配方或机器编辑会改变合并后节点的 ID；即使节点移到另一分组，编辑器仍跟随稳定机制 ID。
   const selectedNode = $derived(selectedMechanic === null
     ? model.nodes.find(node => node.id === selected)
     : model.nodes.find(node => node.entries.some(entry => entry.id === selectedMechanic)));
   const selectedId = $derived(selectedNode?.id ?? (selectedMechanic === null ? selected : undefined));
   const selectedEdge = $derived(selectedMechanic === null ? model.edges.find(edge => edge.id === selected) : undefined);
   const editing = $derived(selectedNode?.entries.find(entry => entry.id === selectedMechanic) ?? selectedNode?.entries[0]);
-  // Persist while the component is live. Teardown must not evaluate parent
-  // derived props/model after the scope has already changed.
+  // 仅在组件存活期间持久保存视图状态；销毁钩子不得在作用域已切换后读取父级派生属性或模型。
   $effect(() => {
     Object.assign(ownerState, {collapse, showUtilities, onlyEnabled, query, iconScale, selected: selectedId, selectedMechanic});
   });
@@ -254,7 +252,7 @@
     observer.observe(detailsPanel);
     return () => observer.disconnect();
   });
-  // Size changes only restyle the existing canvas; no layout, pan or zoom reset.
+  // 图标大小调整只更新画布样式，不重新布局，也不重置平移或缩放。
   $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); schedulePosition(); } });
 
   async function draw(snapshot: typeof model, revision: number, reset = false, grouping = groupLocations) {
@@ -263,8 +261,7 @@
     if(renderedGrouping !== grouping){reset=true;ownerState.positions.clear();ownerState.zoom=undefined;}
     if (!reset) {
       saveViewport(true);
-      // A renamed group should stay where the user was editing it. Existing
-      // destination groups retain their own position.
+      // 被重命名的分组尽量停留在用户当前编辑位置；若目标分组已存在则保留其原有位置。
       const oldPosition = cy.$(':selected').nodes().first().position();
       if (selectedId && oldPosition && !ownerState.positions.has(selectedId)) {
         ownerState.positions.set(selectedId, {...oldPosition});
@@ -275,8 +272,7 @@
       'elk.algorithm': 'layered', 'elk.direction': 'RIGHT', 'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.nodeNode': '45', 'elk.layered.spacing.nodeNodeBetweenLayers': '100',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-    // Reserve the largest supported icon plus its multiline caption up front,
-    // so changing icon size remains layout-free without covering other labels.
+    // 预先按最大图标尺寸与多行标签预留节点占位，确保调节图标大小时无需重排且不遮挡文字。
     }, children: material.map(node => ({id: node.id, width: node.kind === 'mechanic' ? 145 : 115,
       height: Math.max(100, (node.kind === 'mechanic' ? 48 : 38) * 2 + 16 + node.label.split('\n').length * 26)})),
       edges: snapshot.edges.filter(edge => !edge.utility).map(edge => ({id: edge.id, sources: [edge.source], targets: [edge.target]}))});
@@ -288,8 +284,7 @@
     if (!cy || !mounted || revision !== generation) return;
     if(clustered) {
       positions = clustered.positions;
-      // A moved/new node must join its new location rather than stretch that
-      // location's box back to a saved position in another cluster.
+      // 新增或移入其他地点的节点应加入新分区，而不是把新地点外框拉扯回旧聚类里保存过的位置。
       if(clustered.owner.size!==renderedOwners.size || [...clustered.owner].some(([id,owner])=>renderedOwners.get(id)!==owner)) ownerState.positions.clear();
       renderedOwners = clustered.owner;
     } else renderedOwners.clear();
@@ -317,8 +312,7 @@
     if (selectedId) cy.getElementById(selectedId).select();
     schedulePosition();
     renderRevision++;
-    // Icon requests are deduplicated by the existing runtime cache. Old generations
-    // cannot add icons after a document, context, factory or view change.
+    // 图标请求由 runtime 缓存统一去重；文档、上下文、工厂或视图切换后，旧代数请求不得再写入画布。
     for (let offset = 0; offset < snapshot.nodes.length && revision === generation && mounted; offset += 8) {
       await Promise.all(snapshot.nodes.slice(offset, offset + 8).map(async node => {
         const info = node.flow ? presentFlow(node.flow, (k, n) => runtime.localizedName(k, n)) : undefined;

@@ -1,12 +1,11 @@
-//! Exact sparsity-ordered LU shared by primal and transpose solves.
+//! 供原始与转置求解共用的稀疏有序精确 LU 分解。
 use crate::{Rational, SolveControl};
 use num_bigint::BigInt;
 use num_integer::Integer;
 use num_traits::Zero;
 
-/// Bareiss elimination avoids rational normalization inside the cubic loop.
-/// The recorded row transformations also solve the transpose, so pricing and
-/// primal reconstruction use exactly the same integer factorization.
+/// Bareiss 消元避免在三重循环内做有理数约分；记录的行变换同时用于转置求解，
+/// 确保定价与原始解重构使用完全一致的整数分解。
 struct FractionFree {
     upper: Vec<Vec<BigInt>>,
     scales: Vec<BigInt>,

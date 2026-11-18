@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use crate::app::AppState;
 
-/// GUI 外壳能力。实现者通常是 Tauri app（持有 AppHandle + Arc<AppState>）或 headless 顶层。
+/// GUI 外壳能力。实现者通常是 Tauri 应用（持有 `AppHandle` + `Arc<AppState>`）或 headless 顶层。
 pub trait Host: Send + Sync + 'static {
     /// 进程内共享的应用状态。
     fn state(&self) -> &AppState;

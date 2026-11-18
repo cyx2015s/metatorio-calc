@@ -1,4 +1,4 @@
-//! Restricted-master search, with every terminal certificate lifted to self.
+//! 受限主问题列生成搜索：所有终态证书均提升并在完整原模型 `self` 上重新认证。
 use crate::{
     AnytimeResult, Basis, BasisStatus, CertifiedResult, ExactSolution, FloatOptions, Model,
     PivotCostChange, Rational, SolveControl,
@@ -9,8 +9,7 @@ use std::{
     time::Instant,
 };
 
-/// Families only influence admission order. Even a hash collision must never
-/// remove a column from exact pricing or from the eventual admission fallback.
+/// 列族哈希只影响准入顺序；即使发生哈希碰撞，也不会把任何列从精确定价或最终兜底准入中剔除。
 struct ColumnSelectionPolicy {
     families: Vec<u64>,
     admitted_families: HashSet<u64>,

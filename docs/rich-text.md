@@ -52,6 +52,4 @@
 
 浏览器脚本沿用 `PLAYWRIGHT_MODULE` / `BROWSER_EXECUTABLE`；`UI_TEST_URL` 可显式使用已有测试服务器，未设置时自行启动和关闭 Vite。`RICH_TEXT_SCREENSHOT` 可指定截图路径。
 
-2026-10-19 本次验证：前端纯函数/图标测试 32 项通过；shell 常规测试 49 项通过、1 项忽略，过滤 94 项自动规划资产测试；富文本浏览器回归与 1000 行布局回归通过；前端检查、生产构建与工作区编译通过。前端保留 4 条既有 Selector 初始值捕获警告。没有完成完整 LP 压力矩阵，也没有将 mocked IPC 的浏览器截图当作真实游戏数据验证。
-
 依据：[Factorio Rich text](https://wiki.factorio.com/Rich_text)。游戏存档交互标签的降级属于本应用策略，不能据此推断原游戏行为。

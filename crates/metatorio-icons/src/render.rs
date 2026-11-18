@@ -5,7 +5,7 @@
 //! - **`icon_size`**：该层自己的方形边长（默认 64）；图标文件是「mipmap 横排」，
 //!   level 0 就是左上角的 `icon_size × icon_size`；
 //! - **`scale`**：显式缩放；没有显式给定时官方默认 `(expected_icon_size / 2) / icon_size`
-//!   （见 [`layer_scale`]，实测口径以官方导出为准）；
+//!   （见 `layer_scale`，实测口径以官方导出为准）；
 //! - **`shift`**：以「整体图标被假定为 `expected_icon_size / 2` 像素宽高」为单位，
 //!   从中心偏移（`{0, expected/2}` = 整整往下挪一个图标高度 ⇒ 1 单位 = 2 像素）；
 //! - **`tint`**：整层乘色（含 alpha）；

@@ -1,5 +1,5 @@
-//! Human-readable reasons plus machine-readable flow identities. Never require
-//! a GUI or MCP consumer to recover objects from Display/Debug output.
+//! 人类可读的诊断原因与机器可读的流身份标识。
+//! 绝不要求 GUI 或 MCP 调用方从 Display/Debug 文本中反向解析对象。
 use metatorio_core::DualVar;
 use serde::{Deserialize, Serialize};
 

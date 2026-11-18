@@ -1,5 +1,4 @@
-//! Sparse exact Gaussian LU. Row and column permutations are represented by
-//! pivot identities; no dense matrix or dense triangular factor is allocated.
+//! 稀疏精确高斯 LU 分解：行列置换通过主元身份表示，不分配稠密矩阵或稠密三角因子。
 use crate::{Rational, SolveControl};
 use num_traits::Zero;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,15 +15,14 @@ pub(crate) struct SparseExactFactor {
     steps: Vec<Step>,
 }
 
-/// Relative rational-arithmetic cost: growing numerators/denominators make
-/// normalization superlinear. Saturation affects maintenance timing only.
+/// 相对有理数算术开销估算（分子分母比特数增长呈超线性），仅用于控制重建维护时机。
 pub(crate) fn rational_work(value: &Rational) -> u64 {
     let bits = value.numer().bits().saturating_add(value.denom().bits());
     bits.saturating_mul(bits)
 }
 
 impl SparseExactFactor {
-    /// A relative maintenance cost estimate, never a model acceptance limit.
+    /// 相对维护开销估算，绝不作为模型接受上限。
     pub(crate) fn arithmetic_weight(&self, control: &SolveControl) -> Result<u64, String> {
         let mut weight = 0u64;
         for step in &self.steps {

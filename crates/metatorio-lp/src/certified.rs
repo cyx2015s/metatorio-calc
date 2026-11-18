@@ -1,4 +1,4 @@
-//! Complete-model feasibility and exact objective-gap certification.
+//! 完整原模型的可行性与精确目标间隙认证。
 use crate::{
     Basis, BasisStatus, Certificate, ExactSolution, FloatCandidate, InfeasibilityCertificate,
     Model, Rational, Row, rational,
@@ -7,7 +7,7 @@ use num_traits::{Signed, ToPrimitive, Zero};
 
 pub struct CertifiedResult {
     pub solution: ExactSolution,
-    /// Reconstructs the primal values; the certified dual may be independent.
+    /// 用于重构原始解向量；经过认证的对偶解可来自另一组基。
     pub primal_basis: Basis,
     pub certificate: Certificate,
     pub relative_gap: Option<Rational>,
@@ -16,11 +16,11 @@ pub struct CertifiedResult {
     pub support_search_pivots: usize,
     pub support_columns: usize,
     pub stop_reason: Option<String>,
-    /// Verified for the complete original model, never only a restriction.
+    /// 在完整原模型上验证，绝不仅仅针对缩减子问题。
     pub infeasibility: Option<InfeasibilityCertificate>,
 }
 impl Certificate {
-    /// Exact normalization: gap / max(1, |primal objective|).
+    /// 精确归一化：`gap / max(1, |primal objective|)`。
     pub fn relative_gap(&self) -> Result<Option<Rational>, String> {
         if !self.primal_feasible || !self.dual_feasible {
             return Ok(None);
@@ -40,7 +40,7 @@ impl Certificate {
         }
         Ok(Some(gap / objective.abs().max(rational(1.0)?)))
     }
-    /// Round upward for reporting. Acceptance always uses the rational value.
+    /// 向上取整供外部报告展示；内部接受判定始终以精确有理数为准。
     pub fn relative_gap_upper_bound(&self) -> Result<Option<f64>, String> {
         let Some(gap) = self.relative_gap()? else {
             return Ok(None);

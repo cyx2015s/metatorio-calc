@@ -1,4 +1,4 @@
-//! Fusion temperatures and project-independent default estimates.
+//! 聚变温度表与项目无关的默认邻居估算。
 use crate::store::{AIndexMap, PrototypeGroup, PrototypeStore};
 use crate::{FluidComponent, FusionReactorComponent};
 use std::collections::BTreeMap;
@@ -10,7 +10,7 @@ pub fn reactor_neighbours(estimates: &BTreeMap<String, u8>, entity: &str) -> u8 
         .copied()
         .unwrap_or(DEFAULT_REACTOR_NEIGHBOURS)
 }
-/// Keep the same truncation policy as existing fluid temperature identities.
+/// 与既有流体温度身份保持一致的截断策略。
 pub fn fusion_temperature(
     reactor: &FusionReactorComponent,
     output: &FluidComponent,
@@ -24,8 +24,8 @@ pub fn fusion_temperature(
         .then_some(value as i32)
 }
 impl PrototypeStore {
-    /// Static prototype temperatures plus project overrides. Connection counts
-    /// only broaden the temperature vocabulary; they do not promise a layout.
+    /// 静态原型温度表叠加项目级邻居数覆盖。连接端口数只用于扩展可选温度集合，
+    /// 不代表实际工厂布局。
     pub fn fluid_temperatures_with_reactors(
         &self,
         estimates: &BTreeMap<String, u8>,

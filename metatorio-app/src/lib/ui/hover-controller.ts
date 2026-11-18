@@ -1,4 +1,4 @@
-// One dismissal listener for every mounted hover source, rather than one per icon.
+// 所有已挂载悬停源共用一个关闭监听器，而非每个图标各挂一个。
 const dismissers = new Set<() => void>();
 export function dismissHover() { for (const dismiss of dismissers) dismiss(); }
 function pointerDown(event: PointerEvent) {

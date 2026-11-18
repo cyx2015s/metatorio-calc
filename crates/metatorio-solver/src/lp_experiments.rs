@@ -1,5 +1,5 @@
-//! Opt-in, bit-preserving LP capture and independent replay diagnostics.
-//! Snapshots describe the f64 model, not the game's exact rational coefficients.
+//! 按比特保真的可选 LP 快照捕获与独立重放诊断工具。
+//! 快照记录的是传入求解器的 `f64` 模型，而非游戏原始有理数系数。
 
 use std::{
     fs, io,
@@ -9,8 +9,7 @@ use std::{
 
 use crate::lp_model::VariableDefinition;
 
-/// Isolated replay of the existing row-frontier recovery, without waiting for
-/// failed dense hints or column pricing. This is diagnostic, not backend policy.
+/// 隔离重放既有行前沿恢复算法，不等待稠密提示或列定价失败；仅作诊断，不改变后端策略。
 #[cfg(feature = "rust-lp")]
 pub fn replay_row_frontier(
     snapshot: &Snapshot,
@@ -20,7 +19,7 @@ pub fn replay_row_frontier(
     replay_row_frontier_inner(snapshot, source, seconds, None)
 }
 
-/// Diagnostic-only override; does not change the production recovery policy.
+/// 仅用于诊断覆盖轮数上限，不改变生产恢复策略。
 #[cfg(feature = "rust-lp")]
 pub fn replay_row_frontier_with_round_limit(
     snapshot: &Snapshot,

@@ -19,7 +19,7 @@
     onFilterClose: () => void;
   } = $props();
 
-  // Filters live outside the renderer: changing views must not reset the query.
+  // 筛选条件保存在渲染器之外：切换列表/网络视图时保留当前筛选条件。
   let scope = $derived(`${actions?.commands.scope.kind ?? "factory"}:${project ?? 0}:${factory ?? 0}`);
   const networkStates = new Map<string, NetworkViewState>();
   const scrollStates = new Map<string, MechanicScrollState>();

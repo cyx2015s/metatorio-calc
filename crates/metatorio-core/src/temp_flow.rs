@@ -1,4 +1,4 @@
-//! Sparse flow builder for one mechanism's algebraic variable.
+//! 单个机制代数变量的稀疏流构造器。
 use crate::dual_var::DualVar;
 use crate::prim_var::Flow;
 
@@ -12,7 +12,7 @@ impl TempFlow {
         Self::default()
     }
 
-    /// Add a coefficient, removing exact cancellations to keep the flow sparse.
+    /// 累加系数，若正负精确抵消则移除键以保持流稀疏。
     pub fn add(&mut self, var: DualVar, amount: f64) {
         if amount == 0.0 {
             return;

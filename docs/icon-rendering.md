@@ -308,36 +308,12 @@ cargo run -p metatorio-icons --example compare -- \
 **这就是「数字过关 + 看着一致」两道关**：`scale` 口径那条就是先看图、再用 `--sweep-multiplier`
 量出来的。
 
-## 下一步
+## 已知边界
 
-1. **实现画布的并集包围盒规则**（事实 3 最后一条）：画布 = 所有层绘制矩形（含 `shift`）的
-   并集、取偶数。这一条能同时修掉 `space-connection`（66×66）与 py 那批 66×68 的配方
-   （合计 py 有 3926 张落在 50~80% 档，多数是这类画布错位）。
-2. 地格生成与目录索引已补齐（见上方实现补充）；后续可继续与官方导出定标取帧、裁切和颜色口径。
-3. 修**数据层的 Sprite 图标**：`airborne-pollutant` / `burner-usage` 的 `icon` 是 `Sprite`
-   而不是文件名，现在被当成「没有图标定义」（vanilla 3 张、py 1 张；同样不在目录索引里）。
-4. 查 py 那 97 张 `<50%` 的：`*-pyvoid` 已经查清（底层 `icon_size = 1`、官方就是 1×1，
-   我们的居中取整与官方差一个像素，属于退化情形）。
-5. 用更好的重采样（或按 mipmap 级别选择）收敛缩放层的偏差（vanilla 上两种核打平，py 待测）。
-6. ~~把「游戏根目录 / mod 目录」写进上下文元数据~~ **改成了记录「启用的 mod + 版本号」**
-   （路径只在导出那一刻有意义，图标当时就渲染完了；把路径存进上下文，换机器/换 mod 目录后
-   只会误导）。`context.json` 现在写 `game_version` 与 `mods: [{name, version}]`，
-   版本号取**游戏实际会加载的那份文件**的版本；`mod-list.json` 读不到、或内嵌 dump /
-   用户自备 dump 的情况下留空**不猜**。旧缓存没有这两个字段也能载入（`#[serde(default)]`），
-   UI 显示「版本未知 / 无 mod」。
-7. **mod 目录的挑法**（Factorio 的约定，用户给的规则 + 在本机实测）：
-   - **留空 mod 目录 = 不加载 mod**（原版 + DLC）：导出时我们给游戏写了自己的 `config.ini`，
-     游戏**不会**再去它的用户数据目录找 mod，所以「不给 mod 目录」是**故意**的语义，
-     代码里也**不允许**去猜 `<游戏>/mods`（`IconSources::from_game_root(game, None)` =
-     只注册 `data/*`；元数据 `mods` 为空表）。
-   - **目录形态**：目录名必须**正好是 mod 的 id**（**带版本号的目录不接受**），`info.json`
-     直接躺在目录下（不像 zip 会嵌一层 `<名字>_<版本>/`）；版本取 `info.json.version`，
-     没有 `info.json` 的不算 mod。本机的 3 个目录 mod 都是这个形态。
-   - **zip 形态**：**文件名必须带版本号**（`<名字>_<版本>.zip`），包内是 `<名字>_<版本>/…`；
-     文件名没有版本号的（`.modpack.zip`、`some_mod.zip`）一概不收。
-   - **同名多个候选**：`mod-list.json` 里锁定了版本就用那个版本（同版本时**目录形态优先**）；
-     没锁定就用**能查到的最新版本**（按版本号逐段比，不是字符串比），无论目录还是 zip。
-   - 实测本机：104 条 mod-list（启用 5、锁定版本 0）、**99 个会被加载**；`tanvec-ai-cn`
-     装了 5 个版本 → 取 `2026.09.12`；`ForGavin` 4 个 → `2.1.7`；`tanvec-tweaks` 3 个 zip +
-     1 个目录 → 目录 `2.1.3`（最新）。**这条以前是看 `read_dir` 顺序的**（谁生效看运气），
-     现在确定。想自己核对用 `cargo run -p metatorio-icons --example compare -- --mods-report <mod 目录>`。
+1. `airborne-pollutant` / `burner-usage` 的 `icon` 在 schema 中是 `Sprite` 对象而非文件名字符串，当前按字符串读取时不会渲染图标；
+2. 带显式 `scale` 的叠加层采用面积平均重采样，缩放边缘与游戏导出存在少量像素偏差（构图与尺寸一致）；
+3. **mod 目录的解析规则**：
+   - 留空 mod 目录 = 不加载 mod（只读游戏 `<游戏>/data/*`）；
+   - 目录形态：目录名必须正好是 mod 的 id，且 `info.json` 直接位于目录下；
+   - zip 形态：文件名必须带版本号（`<名字>_<版本>.zip`）；
+   - 同名多候选：`mod-list.json` 锁定版本时优先使用对应版本（同版本目录优先），未锁定时按语义版本号选取最新版本。可用 `cargo run -p metatorio-icons --example compare -- --mods-report <mod 目录>` 核对。

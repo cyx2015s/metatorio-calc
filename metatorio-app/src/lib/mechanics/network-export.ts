@@ -1,5 +1,4 @@
-// Explicit original dimensions avoid Cytoscape's implicit device-pixel-ratio
-// multiplier. Rendering uses small tiles rather than a full-image canvas.
+// 显式使用原始尺寸，避免 Cytoscape 隐式乘以设备像素比；渲染按小块分区而非整图大画布。
 export function networkPngSize(width: number, height: number) {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     throw new Error('网络图像边界无效，请先重排布局');

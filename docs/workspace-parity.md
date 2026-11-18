@@ -60,10 +60,4 @@ pnpm test:dual-var-browser
 pnpm build
 ```
 
-`universe_parity` 将审计的最小模型转成正向回归，包含精确后端下 `1e-12` 的必需机制。
-shell 测试验证实际持久化、规划期间锁可用、机器修复、品质扫描与缓存重试。
-浏览器测试使用真实 Svelte/Cytoscape 与模拟 IPC，不代替原生桌面或全量真实 dump 规划测试。
-
-本次额外抽跑真实数据 `base_accumulator` 时，microlp 在回写后的重算中返回
-`Singular matrix`。在修改前 `91fc9ec` 的独立源码快照和独立 target 目录中复跑同一命令，
-也出现同样失败。这是已有后端数值问题，本次未修改 LP，也不将该用例记为通过。
+`universe_parity` 覆盖最小宇宙模型的精确求解与 `1e-12` 级微量必需机制；shell 测试覆盖持久化、锁并发、机器修复、品质扫描与缓存重试；浏览器测试使用真实 Svelte/Cytoscape 与模拟 IPC，不代替原生桌面或全量真实 dump 规划测试。

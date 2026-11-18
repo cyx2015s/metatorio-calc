@@ -353,7 +353,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     }
     out.push_str("];\n");
 
-    // 5.5 生成 ComponentValue 枚举 + deserialize_component 分发（Phase 3）
+    // 5.5 生成 ComponentValue 枚举 + deserialize_component 分发
     // （all_components 已在第 5 步提前收集：关注组件集合）
     out.push_str("/// 全部组件变体（原型继承链层 + 组合组件）。\n");
     out.push_str("#[derive(Debug, Clone)]\npub enum ComponentValue {\n");
@@ -361,7 +361,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
         out.push_str(&format!("    {n}({n}),\n"));
     }
     out.push_str("}\n\n");
-    out.push_str("/// 按组件名反序列化（Phase 3 分发表）。\n");
+    out.push_str("/// 按组件名反序列化分发表。\n");
     out.push_str(
         "pub fn deserialize_component(\n    name: &str,\n    value: &serde_json::Value,\n) -> Result<ComponentValue, serde_json::Error> {\n    match name {\n",
     );
@@ -372,7 +372,7 @@ pub fn generate(schema: &Schema, config: &Config) -> (String, GenStats) {
     }
     out.push_str("        _ => Err(serde::de::Error::custom(format!(\"未知组件名: {name}\"))),\n    }\n}\n\n");
 
-    // 5.6 Component trait：组件类型安全的类型名 + 提取（Phase 3 强类型索引）
+    // 5.6 Component trait：组件类型安全的类型名 + 提取
     out.push_str("/// 组件 trait：类型安全的组件名（&'static str）与提取。\n");
     out.push_str("pub trait Component: Sized {\n");
     out.push_str("    /// 组件名（COMPONENT_LIST 条目，也是 components map 的键）。\n");
@@ -608,14 +608,14 @@ fn emit_struct(
             stats.skipped_fields += 1;
             continue;
         }
-        // 文档注释（描述第一行 + schema 默认说明）
+        // 文档注释（描述第一行 + schema 默认说明；清洗 Factorio wiki 链接与尖括号避免 rustdoc 警告）
         let mut doc = String::new();
-        let desc_first = prop.base.description.lines().next().unwrap_or("").trim();
+        let desc_first = sanitize_schema_doc(prop.base.description.lines().next().unwrap_or("").trim());
         if !desc_first.is_empty() {
             doc.push_str(&format!("    /// {desc_first}\n"));
         }
         if let Some(DefaultValue::Text(text)) = &prop.default {
-            let t = text.lines().next().unwrap_or("").trim();
+            let t = sanitize_schema_doc(text.lines().next().unwrap_or("").trim());
             if !t.is_empty() {
                 doc.push_str(&format!("    /// 默认(schema): {t}\n"));
             }
@@ -837,6 +837,41 @@ fn default_expr(v: &Value, ty: &str) -> Option<String> {
         (Value::String(s), "String") => Some(format!("{s:?}.to_string()")),
         _ => None,
     }
+}
+
+/// 清洗 Factorio schema 描述中的 wiki 链接（`[text](prototype:...)`）与未加反引号的 `<Tag>`，
+/// 避免生成到 `metatorio-data` 的文档注释触发 rustdoc 断链或无效 HTML 标签告警。
+fn sanitize_schema_doc(input: &str) -> String {
+    let mut s = input.to_string();
+    for prefix in ["](prototype:", "](runtime:", "](auxiliary:"] {
+        while let Some(mid) = s.find(prefix) {
+            let Some(open) = s[..mid].rfind('[') else {
+                break;
+            };
+            let Some(close_rel) = s[mid..].find(')') else {
+                break;
+            };
+            let close = mid + close_rel;
+            let label = s[open + 1..mid].to_string();
+            s.replace_range(open..=close, &label);
+        }
+    }
+    // 转义非反引号内的 `<...>` 占位符（例如 `"Made in: <Machine>"`）。
+    let mut out = String::with_capacity(s.len());
+    let mut in_code = false;
+    let mut chars = s.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '`' {
+            in_code = !in_code;
+            out.push(ch);
+        } else if !in_code && (ch == '<' || ch == '>') {
+            out.push('\\');
+            out.push(ch);
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// 字段名 → Rust 合法标识符（Rust 关键字加 r#）。

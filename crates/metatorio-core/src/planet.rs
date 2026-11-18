@@ -570,7 +570,7 @@ mod tests {
     }
 }
 
-/// Shared physical tile capabilities for UI filtering and command validation.
+/// 供界面过滤与命令校验共用的地格物理能力。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct TileCapabilities {

@@ -1,4 +1,4 @@
-//! Exact dual-feasible basis repair for nonnegative planning models.
+//! 面向非负成本规划模型的精确对偶可行基修复算法。
 use super::{
     Basis, BasisStatus, BigInt, ExactSolution, InfeasibilityCertificate, Model, PivotProgress,
     Rational, SolveControl, basis, rational,
@@ -24,9 +24,8 @@ pub struct DualRepair {
     pub infeasibility: Option<InfeasibilityCertificate>,
 }
 impl Model {
-    /// Start without a candidate basis or artificial variables. Nonnegative
-    /// costs make the zero structural solution dual feasible; fixed equality
-    /// slacks can initially violate either side of zero.
+    /// 无需候选基或人工变量直接冷启动：非负成本使全零结构解天然满足对偶可行性，
+    /// 固定等式松弛变量初始时可能偏向零的任意一侧。
     pub fn solve_dual_with_observer(
         &self,
         max_pivots: usize,
@@ -42,7 +41,7 @@ impl Model {
     ) -> Result<DualRepair, String> {
         self.solve_dual_with_control(rule, max_pivots, observer, &SolveControl::default())
     }
-    /// Cold start with the same cooperative control as warm basis repair.
+    /// 带协作取消控制的对偶冷启动（与热修复共用控制接口）。
     pub fn solve_dual_with_control(
         &self,
         rule: DualPivotRule,

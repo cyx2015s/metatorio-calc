@@ -6,7 +6,7 @@
 //!   - `SoPlex`：支持严格有理数运算的高精度单纯形求解器（借助本地 Boost 补丁消除数值误差）；
 //!   - `Clarabel`：现代化内点法（Interior Point Method）二次锥规划求解器；
 //!   - `microlp`：纯 Rust 轻量级单纯形求解器；
-//!   - `rust-certified`（[`metatorio-lp`]）：自研纯 Rust 精确重构与基验证引擎；
+//!   - `rust-certified`（`metatorio-lp`）：纯 Rust 精确重构与基验证引擎；
 //! - **数据模型解耦**：
 //!   - 求解输入（[`SolverData`]）与求解产物（[`SolverSolution`]）为纯数据结构，
 //!     与前端渲染及外壳环境完全解耦，可在无头环境独立测试；

@@ -1,5 +1,5 @@
-//! Exact domains for solutions no more expensive than a verified incumbent.
-//! These are search restrictions, never original-model infeasibility proofs.
+//! 针对「成本不超过已验证当前最优解」的精确变量界推导。
+//! 仅作搜索剪枝用，绝不作为原模型不可行性证明。
 use crate::{
     ExactSolution, FloatCandidate, FloatOptions, Model, Rational, Row, SolveControl, rational,
 };
@@ -7,16 +7,16 @@ use num_traits::{Signed, ToPrimitive, Zero};
 
 #[derive(Debug)]
 pub struct CostBounds {
-    /// Objective without the constant offset.
+    /// 不含常数偏移的目标预算。
     pub budget: Rational,
     pub lower: Vec<Rational>,
-    /// None denotes an upper bound not established (not a large sentinel).
+    /// `None` 表示尚未建立有限上界（不用大数哨兵代替）。
     pub upper: Vec<Option<Rational>>,
 }
 
 impl Model {
-    /// Bound x_j by (budget - sum_{k != j} c_k lower_k) / c_j, then
-    /// propagate exact row intervals. Zero costs are allowed and never divided by.
+    /// 按 `(budget - sum_{k != j} c_k lower_k) / c_j` 约束 `x_j`，随后精确传播行区间；
+    /// 零成本列允许保留且不作除法。
     pub fn cost_bounds_with_control(
         &self,
         incumbent: &[Rational],

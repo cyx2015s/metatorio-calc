@@ -1,15 +1,12 @@
-//! Tauri adapter for the framework-independent `metatorio-runtime` layer.
+//! 框架无关的 `metatorio-runtime` 业务外壳适配层。
 //!
-//! The frontend sends `AppMessage` values as JSON through the `dispatch`
-//! command.  The runtime reducer returns a [`DispatchResult`]; side effects
-//! (`RuntimeCommand`) are executed here — solving runs on a blocking worker
-//! and its outcome is pushed to the frontend as a `solve-result` event.
+//! 前端或 MCP 通过 `dispatch` 提交 `AppMessage` JSON；运行时 reducer 返回
+//! [`DispatchResult`]，再由此处执行副作用（[`RuntimeCommand`]）——长耗时求解在
+//! 阻塞工作线程池运行，结果通过宿主 `emit` 推送（如 `solve-result` 事件）。
 //!
-//! This layer also owns the game-context cache (multiple exported data sets,
-//! each with its own prototype store + icon directory) and project file
-//! persistence.  Contexts are cached under
-//! `<app_data>/contexts/<content-hash>/`; projects pin the context they were
-//! planned against via `ProjectDocument::context_id`.
+//! 本层同时管理游戏上下文缓存（多份独立导出的原型仓库与图标目录，缓存于
+//! `<app_data>/contexts/<content-hash>/`）以及工程文件持久化；项目通过
+//! `ProjectDocument::context_id` 绑定其规划时所用的上下文。
 
 use std::{
     collections::HashMap,
@@ -51,13 +48,11 @@ use serde::{Deserialize, Serialize};
 // 求解任务调度（长求解移出 `Mutex<Runtime>`）；实现已抽到 `metatorio-shell`。
 use crate::solve_jobs;
 
-/// Minimal embedded game-data dump so the app can solve out of the box.
-/// Replace with a real Factorio dump once data loading is wired to a
-/// file dialog.
+/// 内嵌最小游戏数据 dump，保证应用开箱即可测试求解；实际使用可通过界面加载真实游戏数据。
 pub(crate) const DEMO_DUMP: &str =
     include_str!("../../../metatorio-app/src-tauri/dumps/demo_dump.json");
 
-// ── Managed state ─────────────────────────────────────────────────
+// ── 受管状态 ──────────────────────────────────────────────────────
 
 pub struct AppState {
     pub(crate) runtime: Mutex<Runtime>,
@@ -91,7 +86,7 @@ pub struct AppState {
     pub(crate) context_loads: solve_jobs::KeyLocks,
     pub(crate) contexts: Mutex<ContextRegistry>,
     pub(crate) project_paths: Mutex<HashMap<ProjectId, String>>,
-    /// Canonical source file -> projects opened from it, including collections.
+    /// 规范化工程源文件路径 → 从该文件打开的项目 ID 列表（含合集）。
     project_files: Mutex<HashMap<String, Vec<ProjectId>>>,
     project_loads: solve_jobs::KeyLocks,
     /// 上下文 id → 本地化名映射（来自游戏 `--dump-prototype-locale` 的
@@ -442,12 +437,10 @@ pub(crate) fn spawn_auto_plan(
     });
 }
 
-/// Game contexts cached on disk under `<app_data>/contexts/<id>/`.
+/// 缓存在 `<app_data>/contexts/<id>/` 下的游戏上下文磁盘索引。
 ///
-/// The registry keeps manifests only; loaded prototype stores live in
-/// [`Runtime::contexts`] (single in-memory copy).  `id` is a content hash of
-/// the raw dump, so identical exports dedupe and ids are stable across
-/// machines.
+/// 注册表只保存清单元数据；已加载的原型仓库在 [`Runtime::contexts`] 中保持单份内存副本。
+/// `id` 是原始 dump 的内容哈希，因此相同导出自动去重且 ID 跨机器稳定。
 #[derive(Default)]
 pub(crate) struct ContextRegistry {
     dir: PathBuf,
@@ -514,7 +507,7 @@ pub struct GroupCount {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct IndexEntry {
-    /// Recipe fluid input capability, independent of fluid fuel.
+    /// 配方是否支持流体输入（独立于流体燃料）。
     pub supports_fluid_input: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tile: Option<metatorio_core::planet::TileCapabilities>,
@@ -575,7 +568,7 @@ pub struct ResolvedName {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct FlowAmount {
-    /// Expected units per second at speed 1; absent when cycle time is unknown.
+    /// 速度为 1 时的期望每秒速率；周期时间未知时为空。
     pub base_rate: Option<f64>,
     pub kind: String,
     pub name: String,
@@ -719,8 +712,7 @@ impl ContextRegistry {
         self.store_dir(id).join("icons")
     }
 
-    /// Rebuild `meta` from the manifests on disk.  Dot-prefixed dirs are
-    /// fast-delete trash: skipped here, purged on a background thread.
+    /// 从磁盘清单重建 `meta`。点号开头的目录为快速删除回收目录：此处跳过并在后台线程清理。
     fn scan(&mut self) {
         if self.dir.as_os_str().is_empty() {
             return;
@@ -750,7 +742,7 @@ impl ContextRegistry {
         }
     }
 
-    /// Create the cache directory + manifest for a new context id.
+    /// 为新的上下文 ID 创建缓存目录并写入清单。
     fn register(
         &mut self,
         id: String,
@@ -779,9 +771,8 @@ impl ContextRegistry {
         Some(())
     }
 
-    /// Fast delete: rename the cache dir to a dot-prefixed trash name and
-    /// purge it on a background thread, so a huge `icons/` tree never blocks
-    /// the UI.  Any leftover trash is picked up by [`Self::scan`] on startup.
+    /// 快速删除：将缓存目录重命名为点号开头的回收名并在后台线程清理，避免海量图标阻塞界面；
+    /// 残留的回收目录会在下次 [`Self::scan`] 启动扫描时续清。
     fn remove(&mut self, id: &str) {
         let Some(_meta) = self.meta.remove(id) else {
             return;
@@ -799,7 +790,7 @@ impl ContextRegistry {
     }
 }
 
-/// Delete a directory tree off the UI thread (fire-and-forget).
+/// 在 UI 线程之外异步清理整个目录树。
 pub(crate) fn spawn_delete(dir: PathBuf) {
     std::thread::spawn(move || {
         if let Err(error) = std::fs::remove_dir_all(&dir) {
@@ -1638,7 +1629,7 @@ pub(crate) async fn load_game_context_and_activate(
 
 // ── Commands ──────────────────────────────────────────────────────
 
-/// Activate a context (loading its store from cache on demand) and broadcast.
+/// 激活指定上下文（按需从缓存加载其数据仓库）并广播变更。
 ///
 /// GUI 命令与消息层（`ApplicationAction::SetActiveContext`）共用：上下文的
 /// 注册表/缓存只有 app 层能碰，把它做成单一实现，避免「GUI 能切、agent 不能」
@@ -3293,8 +3284,8 @@ pub struct ProjectFileOpen {
     pub reused: bool,
 }
 
-/// Shared GUI / message file-open path. Never overwrite an unrelated unsaved
-/// project's destination, and don't discard in-memory edits on repeated opens.
+/// GUI 与消息共用的工程文件打开入口：绝不覆盖无关未保存项目的保存路径，
+/// 重复打开同一文件时也不丢弃内存中的未保存编辑。
 pub async fn open_project_file(
     host: &Arc<dyn Host>,
     path: String,
@@ -3380,8 +3371,7 @@ pub async fn open_project_file(
             .map(|project| project.id)
             .collect::<Vec<_>>())
     })?;
-    // Saves are per-project. A collection must be saved as separate files rather
-    // than silently overwriting the source collection with a single project.
+    // 保存粒度为单个项目：合集文件打开后应分别另存为，避免单项目保存静默覆盖整个源合集。
     if projects.len() == 1 {
         state
             .project_paths
@@ -3443,8 +3433,7 @@ pub(crate) async fn persist_project(
     Ok(())
 }
 
-/// Resolve project inputs off-lock; publish accessibility only after successful
-/// computation and only while its revision and invalidation epoch are current.
+/// 在锁外解析项目输入并计算可达性；仅当计算成功且版本与失效代次仍最新时回填缓存。
 fn with_snapshot_accessibility<R, E>(
     host: &dyn Host,
     snapshot: &metatorio_runtime::ProjectSnapshot,
@@ -3471,7 +3460,7 @@ fn cache_snapshot_accessibility(
     }
 }
 
-/// Project-only reads retain their cache write after the blocking task joins.
+/// 项目级只读查询在阻塞任务汇合后同样按代次回填可达性缓存。
 async fn read_project_accessibility<R: Send + 'static>(
     host: &Arc<dyn Host>,
     project: ProjectId,
@@ -3774,8 +3763,7 @@ fn emit_factory_solve_error(
     );
 }
 
-/// Execute the side effects of one [`RuntimeCommand`] on the shared runtime,
-/// emitting the usual Tauri events (so a live GUI stays in sync).
+/// 在共享运行时上执行单条 [`RuntimeCommand`] 的副作用，并广播常规事件使 GUI 保持同步。
 ///
 /// 每条分支只在自己的**短临界区**内持锁；求解（Recompute / AutoPlan）与
 /// 文件/上下文 IO 都在锁外进行，因此本函数是 `async` 的。
@@ -3972,7 +3960,7 @@ pub(crate) async fn execute_command(
                 .clone()
                 .or_else(|| state.project_paths.lock().ok()?.get(&project).cloned());
             let Some(path) = path else {
-                // Pathless persist with no remembered path is a no-op: 这是**自动
+                // 无路径且未记住路径的持久化工单为空操作：这是**自动
                 // 落盘**的路径（元数据变更），未保存过的新项目不该报错。
                 return CommandOutcome::default();
             };
@@ -4900,8 +4888,8 @@ pub async fn dispatch(
             .dispatch(message)
             .map_err(metatorio_runtime::Diagnostic::from)?
     };
-    // Publish the edited document before persistence/solving can block this IPC.
-    // The final reply still includes command failures and repaired/writeback state.
+    // 在持久化或求解阻塞本次 IPC 前先行广播文档变更事件；
+    // 最终返回值仍会包含命令失败信息及兼容修复/回写后的状态。
     if outcome.changed {
         emit(host, "document-changed", outcome.revision);
     }

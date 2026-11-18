@@ -18,7 +18,7 @@ use metatorio_data::{
     TechnologyComponent, TileComponent,
 };
 
-/// 回写候选的过滤结果（含决策记录，见 [`SolveDiagnostics`]）。
+/// 回写候选的过滤结果（含决策记录，见 [`crate::solve::SolveDiagnostics`]）。
 pub struct UsedCandidates<T> {
     /// 判定为「实际使用」的候选（保持原顺序）。
     pub used: Vec<T>,
@@ -28,12 +28,12 @@ pub struct UsedCandidates<T> {
     pub considered: usize,
 }
 
-/// Legacy cutoff coefficients retained in diagnostics; never used to drop support.
+/// 诊断中保留的历史截断阈值系数；绝不用于丢弃有效支撑集。
 const TAIL_RATIO: f64 = 1e-9;
 const ABSOLUTE_FLOOR: f64 = 1e-9;
 
-/// Preserve every nonzero real candidate, including arbitrarily small upstream flows.
-/// The cutoff is diagnostic only; auxiliary conversion variables do not count.
+/// 保留全部非零真实候选（含任意微小的上游流）。
+/// 上述阈值仅用于诊断显示；辅助转换变量不计入候选。
 pub fn used_candidates<T: Clone>(
     candidates: &[T],
     prim: impl IntoIterator<Item = (ExpandedVarId, f64)>,
@@ -1286,10 +1286,9 @@ pub fn mechanic_accessible(
     recipe_unlocked(store, accessible, &mechanic.recipe.id)
 }
 
-/// Recipe eligibility currently depends on recipe ID alone, not its module,
-/// machine or quality variant. Cache within this immutable planning snapshot;
-/// later projects/milestones must compute fresh answers. Retain in place so
-/// rejected variants do not occupy another large vector during LP solving.
+/// 当前配方可用性仅取决于配方 ID，与插件、机器或品质变体无关。
+/// 在当前不可变规划快照内缓存结果（后续项目/里程碑会重新计算）；
+/// 原地保留/过滤向量，避免 LP 求解期间同时存在两份大数组。
 pub(crate) fn filter_accessible_candidates(
     store: &PrototypeStore,
     accessible: &Accessibility,

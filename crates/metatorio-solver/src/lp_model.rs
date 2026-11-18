@@ -1,4 +1,4 @@
-//! Backend-independent continuous LP expressions used by production planning.
+//! 生产规划使用的后端无关连续 LP 表达式模型。
 use crate::concept::AIndexMap;
 use std::ops::{Add, AddAssign, Mul, Sub, SubAssign};
 
@@ -198,8 +198,8 @@ impl Constraint {
 pub enum ResolutionError {
     Unbounded,
     Infeasible,
-    /// The selected search backend cannot handle this model representation.
-    /// This is neither an infeasibility proof nor a retryable numerical failure.
+    /// 所选求解后端不支持该模型表示形式。
+    /// 这既不是不可行证明，也不是可重试的数值失败。
     UnsupportedModel(String),
     Other(&'static str),
     Str(String),

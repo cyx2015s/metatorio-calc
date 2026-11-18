@@ -1,12 +1,12 @@
-//! Floating-point basis search. Every outcome is only an unverified hint.
-//! Positive diagonal scaling preserves basis identities, not exact arithmetic.
+//! 浮点基搜索：所有输出结果均为未经认证的启发式提示。
+//! 正对角缩放保持基结构身份不变，但不替代精确算术验算。
 use crate::sparse_float_basis::SparseFloatBasis;
 use crate::{Basis, BasisStatus, Model};
 use rayon::prelude::*;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-// Optional diagnostics only: no extra model scans are performed per pivot.
+// 仅作可选性能采样，不会在每次主元迭代时额外扫描模型。
 struct FloatProfile {
     started: Option<Instant>,
     pivots: usize,

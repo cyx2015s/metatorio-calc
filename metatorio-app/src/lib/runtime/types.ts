@@ -1,6 +1,6 @@
-// Protocol types are generated from Rust. This file contains only UI projections and helpers.
+// 协议类型由 Rust 自动生成；本文件仅包含前端投影与辅助类型。
 import type * as Wire from "./bindings";
-// Drop optional-never exclusivity markers so `in` narrows action variants.
+// 去掉可选 never 互斥标记，便于用 `in` 收窄 action 变体类型。
 type Variant<T> = T extends readonly unknown[] ? { [K in keyof T]: Variant<T[K]> } : T extends object ? { [K in keyof T as undefined extends T[K] ? Exclude<T[K], undefined> extends never ? never : K : K]: Variant<T[K]> } : T;
 type UnionKeys<T> = T extends unknown ? keyof T : never;
 type UnionValue<T, K extends PropertyKey> = T extends unknown ? K extends keyof T ? T[K] : never : never;

@@ -1,5 +1,5 @@
-//! Plain projection of Factorio rich text for catalog matching. Never rewrites
-//! prototype IDs or locale source. Keep parity with the frontend via shared cases.
+//! 供目录检索使用的 Factorio 富文本纯文本投影。
+//! 绝不改写原型 ID 或本地化原文，并通过共享测试样例与前端保持解析一致。
 
 pub fn plain_text(source: &str) -> String {
     plain_text_with(source, |_, _| None)
@@ -55,7 +55,7 @@ pub fn plain_text_with(
         } else if matches!(body, "/color" | ".color" | "/font" | ".font")
             || (matches!(tag, "color" | "font") && body.contains('='))
         {
-            // Styling metadata must not break words or become searchable.
+            // 样式标签元数据不得拆断搜索词，也不应自身参与检索。
         } else if reference && body.contains('=') {
             let mut parts = value.split(',');
             let name = parts.next().unwrap_or_default();

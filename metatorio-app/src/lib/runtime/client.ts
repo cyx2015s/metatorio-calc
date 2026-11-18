@@ -1,4 +1,4 @@
-// Rust owns the wire contract. Only browser guards and UI argument adapters live here.
+// Rust 侧拥有线协议契约；这里只保留浏览器环境守卫和界面参数顺序适配。
 import { commands as generatedCommands, events } from "./bindings.ts";
 import type { AutoPlanProgress, ContextList, DualVar, RuntimeDiagnostic, SolveResult, UniverseSolveResult } from "./types";
 export type { UniversePreview_Serialize as UniversePreview, ProjectFileOpen, ExportInfo as NetworkPngExport } from "./bindings.ts";
@@ -45,7 +45,7 @@ export const pickProjectSavePath = commands.pickProjectSavePath;
 export const projectSavePath = commands.projectSavePath;
 export const loadIcon = commands.icon;
 
-// These adapters retain the existing UI's parameter order and optional mod directory.
+// 适配器保留现有界面的参数顺序与可选 mod 目录参数。
 export const loadGameContext = (executablePath: string, modDir?: string | null) => commands.loadGameContext(executablePath, modDir ?? null);
 export const prototypeDetail = (kind: string, name: string, contextId: string) => commands.prototypeDetail(contextId, kind, name);
 export const suggest = (flow: DualVar, contextId: string) => commands.suggest(contextId, flow);

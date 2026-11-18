@@ -3,14 +3,14 @@ import type { DualVar } from './runtime/types';
 export interface ExpandedFlow { location?: import("./runtime/types").Location; flow: DualVar; amount: number }
 export interface FlowFilter { flow: DualVar; quality?: string; temperature?: [number, number] }
 
-/** Stable object identity; quality and temperature are optional refinements. */
+/** 稳定的流对象身份键；品质与温度作为可选细化条件。 */
 export function flowObjectKey(flow: DualVar): string {
   if (typeof flow === 'string') return flow;
   const [kind, value] = Object.entries(flow)[0];
   if (kind === 'Item' || kind === 'Entity') return JSON.stringify([kind, (value as {id: string}).id]);
   if (kind === 'Fluid' || kind === 'Pollution' || kind === 'Custom') return JSON.stringify([kind, (value as {name: string}).name]);
   if (kind === 'VirtualScience') return JSON.stringify([kind, value]);
-  // Abstract fuel constraints remain distinct; array ordering is not semantic.
+  // 抽象燃料约束保持独立身份；类别数组顺序不改变语义。
   if (kind === 'ItemFuel' || kind === 'ItemFuelSupply') {
     const fuel = value as {category: string[]; has_burnt_result?: boolean};
     return JSON.stringify([kind, [...fuel.category].sort(), !!fuel.has_burnt_result]);

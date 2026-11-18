@@ -1,4 +1,4 @@
-//! Adaptive structural cold starts. Only original-model checks can accept them.
+//! 自适应结构化冷启动搜索；只有完整原模型验算才能接受候选解。
 use crate::{
     Basis, BasisStatus, Certificate, ExactSolution, FloatCandidate, FloatOptions, FloatProgress,
     Model, RouteOptions, SolveControl, restricted::RestrictedIndex,
@@ -15,8 +15,7 @@ pub struct RouteCandidate {
 }
 
 impl Model {
-    /// Find an original-model primal-feasible starting basis without a saved
-    /// solution. Failure or cancellation establishes no terminal LP status.
+    /// 在没有历史解的情况下寻找原模型原始可行的初始基；失败或取消不建立终态 LP 状态。
     pub fn float_candidate_after_route_with_control(
         &self,
         options: FloatOptions,

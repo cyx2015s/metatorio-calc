@@ -1,4 +1,4 @@
-//! Per-run progress events shared by GUI and MCP auto-plan entry points.
+//! GUI 与 MCP 自动规划入口共用的单次运行进度事件。
 use crate::Host;
 use metatorio_runtime::{FactoryId, ProjectId, solve::AutoPlanProgress};
 use std::sync::{
@@ -13,8 +13,8 @@ struct State {
     progress: AutoPlanProgress,
 }
 
-/// Closing the command (including errors/timeouts/cancellation) closes progress.
-/// A timed-out blocking worker may continue, but cannot resurrect its events.
+/// 命令结束（含错误、超时或取消）即关闭进度推送；
+/// 已超时的阻塞工作线程即使继续跑完，也不得重新恢复该进度事件。
 pub(crate) struct PlanningProgress {
     host: Arc<dyn Host>,
     project: ProjectId,

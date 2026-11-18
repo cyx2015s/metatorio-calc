@@ -21,7 +21,7 @@ use crate::message::{
 };
 use crate::state::{DispatchResult, RuntimeError, RuntimeState};
 
-/// Real mechanisms have one variable each; conversion flows have independent IDs.
+/// 真实生产单元各占一个变量；虚拟转换流按独立索引编号。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ExpandedVarId {
@@ -41,7 +41,7 @@ impl ExpandedVarId {
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolveResult {
-    /// Document version used by this solve, for rejecting stale frontend events.
+    /// 用于检验过期前端事件的文档版本。
     #[serde(default)]
     pub revision: u64,
     pub project: ProjectId,
@@ -67,21 +67,19 @@ pub struct SolveDiagnostics {
     /// 本次求解使用的后端。旧结果没有该字段时按 Rust based（rust-certified）解释。
     #[serde(default = "legacy_solver")]
     pub solver: metatorio_solver::LpSolver,
-    /// Exact certificate for the returned factory LP. After auto-plan this is
-    /// the written-back factory, not the full candidate planning model.
+    /// 所返回工厂 LP 的精确证书；自动规划后指的是写回后的工厂，而非完整候选规划模型。
     #[serde(default)]
     pub exact_primal_verified: bool,
-    /// Optimality over the returned factory's mechanisms only; this does not
-    /// establish optimality over all auto-plan candidates.
+    /// 仅针对返回工厂当前机制的最优性证明，不代表全部自动规划候选的全局最优性。
     #[serde(default)]
     pub exact_optimality_verified: bool,
-    /// Optimization of the returned factory LP (after auto-plan writeback).
+    /// 返回工厂 LP（自动规划写回后）的优化记录。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub optimization: Option<metatorio_solver::OptimizationReport>,
-    /// Optimization of the full candidate LP, before auto-plan writeback.
+    /// 自动规划写回前完整候选 LP 的优化记录。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub planning_optimization: Option<metatorio_solver::OptimizationReport>,
-    /// Verified bound for this returned factory LP, rounded upward for display.
+    /// 所返回工厂 LP 的已认证成本下界（展示用，向上取整）。
     #[serde(default)]
     pub certified_relative_gap: Option<f64>,
     #[serde(default)]
@@ -209,13 +207,11 @@ pub struct RecipeProductivityView {
     pub source: String,
 }
 
-/// Tauri-independent application runtime.  Tauri commands can own this value
-/// behind a mutex and forward its commands/events to the frontend.
+/// 独立于 GUI 框架的应用运行时。外层宿主可通过互斥锁持有该结构，
+/// 并将其产出的命令与事件转发给前端或 MCP 调用方。
 ///
-/// The runtime holds one prototype store per game context (`contexts`), keyed
-/// by a stable context id.  A project pins the context it was planned against
-/// (`ProjectDocument::context_id`); solving falls back to the active context
-/// when the project does not pin one.
+/// 运行时按稳定的上下文 ID 持有多份游戏原型仓库（`contexts`）。
+/// 每个项目可通过 `ProjectDocument::context_id` 固定所属上下文；未固定时回落到当前激活上下文。
 #[derive(Debug, Default)]
 pub struct Runtime {
     pub state: RuntimeState,
@@ -321,7 +317,7 @@ impl Runtime {
         self.state.dispatch(message)
     }
 
-    /// Register a loaded prototype store under a stable context id.
+    /// 按稳定上下文 ID 注册已加载的原型仓库。
     pub fn install_context(&mut self, context_id: String, prototype: PrototypeStore) {
         // 换了 store，之前的依赖图与可达性结果作废。
         self.graph_cache.lock().unwrap().remove(&context_id);
@@ -329,7 +325,7 @@ impl Runtime {
         self.contexts.insert(context_id, Arc::new(prototype));
     }
 
-    /// Drop a context's in-memory store (the on-disk cache is untouched).
+    /// 从内存移除指定上下文的仓库（不影响磁盘缓存）。
     pub fn remove_context(&mut self, context_id: &str) {
         self.contexts.remove(context_id);
         self.graph_cache.lock().unwrap().remove(context_id);
@@ -340,7 +336,7 @@ impl Runtime {
         }
     }
 
-    /// The context used by projects that do not pin one.
+    /// 未固定上下文的项目所使用的默认激活上下文。
     pub fn set_active_context(&mut self, context_id: Option<String>) {
         if self.active_context != context_id {
             self.invalidate_accessibility();
@@ -353,12 +349,12 @@ impl Runtime {
         self.active_context.as_deref()
     }
 
-    /// Ids of contexts whose store is currently in memory.
+    /// 当前已加载到内存中的全部上下文 ID。
     pub fn context_ids(&self) -> impl Iterator<Item = &str> {
         self.contexts.keys().map(String::as_str)
     }
 
-    /// The in-memory store for a context id, if loaded.
+    /// 获取指定上下文 ID 在内存中的原型仓库（若已加载）。
     pub fn context_store_by_id(&self, id: &str) -> Option<&PrototypeStore> {
         self.contexts.get(id).map(Arc::as_ref)
     }
@@ -368,8 +364,7 @@ impl Runtime {
         self.contexts.get(id).cloned()
     }
 
-    /// Resolve the prototype store for a project: its pinned context first,
-    /// then the active context.
+    /// 解析项目对应的原型仓库：优先使用项目固定上下文，其次回落到激活上下文。
     pub fn context_store(&self, project_id: ProjectId) -> Result<&PrototypeStore, RuntimeError> {
         let project = self.state.project(project_id)?;
         let context_id = project.context_id.as_ref().or(self.active_context.as_ref());
@@ -383,7 +378,7 @@ impl Runtime {
         }
     }
 
-    /// Resolve the prototype store `Arc` for a project (snapshot-friendly).
+    /// 解析项目对应的原型仓库 `Arc`（便于构造无锁快照）。
     pub fn context_arc(&self, project_id: ProjectId) -> Result<Arc<PrototypeStore>, RuntimeError> {
         let project = self.state.project(project_id)?;
         let context_id = project.context_id.as_ref().or(self.active_context.as_ref());
@@ -397,7 +392,7 @@ impl Runtime {
         }
     }
 
-    /// Resolve the context id a project uses (pinned or active).
+    /// 解析项目使用的上下文 ID（固定优先，否则取激活上下文）。
     fn context_id_for(&self, project_id: ProjectId) -> Result<String, RuntimeError> {
         let project = self.state.project(project_id)?;
         project
@@ -407,9 +402,8 @@ impl Runtime {
             .ok_or(RuntimeError::ContextNotFound(String::new()))
     }
 
-    /// The cached, context-scoped accessibility dependency graph.  Built once
-    /// per context and reused by `milestone_order` / `compute_accessibility`
-    /// so interactions don't re-scan the whole prototype store.
+    /// 按上下文缓存的可达性依赖图：每个上下文构建一次并供 `milestone_order` /
+    /// `compute_accessibility` 复用，避免每次交互重扫整个原型仓库。
     fn graph_for_context(&self, context_id: &str) -> Arc<metatorio_core::GraphData> {
         if let Some(graph) = self.graph_cache.lock().unwrap().get(context_id) {
             return graph.clone();
@@ -426,7 +420,7 @@ impl Runtime {
         graph
     }
 
-    /// Cached graph for a project's context (convenience).
+    /// 获取项目所属上下文的缓存依赖图（便捷封装）。
     fn graph_for_project(
         &self,
         project_id: ProjectId,
@@ -499,7 +493,7 @@ impl Runtime {
     ///
     /// 走完整 dispatch 语义：改文档后由 `finish` 递增 revision、标记脏项目、
     /// 落盘并重解项目内全部工厂。也由
-    /// [`ProjectAction::SetDefaultMilestones`](crate::message::ProjectAction::SetDefaultMilestones)
+    /// [`ProjectAction::SetDefaultMilestones`]
     /// 消息触发（reducer 无 store，故在 `dispatch` 内拦截）。
     pub fn set_default_milestones(
         &mut self,
@@ -639,7 +633,7 @@ impl Runtime {
     /// 拿到的 [`SolveSnapshot`] 可以脱离 `&mut Runtime` 与 runtime 锁，在任意
     /// 线程上跑 [`solve_snapshot`]——这是把长求解移出锁的关键。
     ///
-    /// 冷缓存时快照里 `accessibility` 为 `None`，由 [`SolveSnapshot::resolve_accessibility`]
+    /// 冷缓存时快照里 `accessibility` 为 `None`，由 [`ProjectSnapshot::resolve_accessibility`](crate::solve::ProjectSnapshot::resolve_accessibility)
     /// 在锁外现算（py 上下文约 2.5s），算完可用 [`Runtime::cache_accessibility`] 回填。
     pub fn solve_snapshot_inputs(
         &self,
@@ -770,8 +764,7 @@ impl Runtime {
                 .unwrap_or(false)
     }
 
-    /// Solve a factory synchronously.  The outer Tauri layer should call this
-    /// from its dedicated worker rather than from the command thread.
+    /// 同步求解单个工厂；外层宿主应从专用后台工作线程调用，而非命令主线程。
     ///
     /// 复用 runtime 缓存的可达性（`project_accessibility`）：求解内部依赖的
     /// 配方/采矿产能自动推算需要可达性，若每次重新 `compute_accessibility`
@@ -811,7 +804,7 @@ impl Runtime {
         Ok(result)
     }
 
-    /// Plan the joint located problem, commit its support, then verify the written universe.
+    /// 联合规划多星球宇宙工厂：先提交支撑集回写，再重解验证写回后的宇宙文档。
     pub fn auto_plan_universe(
         &mut self,
         project_id: ProjectId,
@@ -984,8 +977,7 @@ pub fn attach_universe_plan_report(
     attach_planning_diagnostics(&mut result.report, report);
 }
 
-/// Factory dimensions describe the candidate LP; universe dimensions retain
-/// the written-back solve. Neither path replaces its verification evidence.
+/// 普通工厂规模记录对应候选 LP；宇宙工厂保留写回后重解的规模，两者均不替代各自的验证证据。
 pub fn attach_auto_plan_report(result: &mut SolveResult, report: AutoPlanReport) {
     result.report.variables_before = report.variables_before;
     result.report.variables_after = report.variables_after;
@@ -1016,9 +1008,8 @@ pub fn plan_universe_with_progress(
     let store = &snapshot.store;
     let universe_doc = &snapshot.universe_doc;
     let universe_id = universe_doc.id;
-    // Enumerate the full candidate set: each unlocked planet's local mechanics,
-    // plus Space mechanics and both cargo directions for every item quality at
-    // each planet. One joint universe LP then chooses among all of them.
+    // 枚举完整候选集：每个已解锁行星的本地机制、太空机制以及各星球各品质物品的双向货运，
+    // 再组装为统一的宇宙 LP 一次联合求解。
     let mut locations: Vec<Location> = store
         .group(PrototypeGroup::Planet)
         .filter(|record| accessibility.is_accessible(&Accessible::Planet(record.name.clone())))
@@ -1162,7 +1153,7 @@ pub fn plan_universe_with_progress(
         .into_iter()
         .filter(|m| m.amount != 0.0)
         .filter_map(|m| {
-            // Candidate IDs are assigned consecutively from 1 in insertion order.
+            // 候选 ID 按插入顺序从 1 连续分配。
             let index = usize::try_from(m.mechanic.0.checked_sub(1)?).ok()?;
             temp.mechanics
                 .get(index)
@@ -1188,21 +1179,21 @@ pub fn plan_universe_with_progress(
 #[derive(Debug, Clone)]
 pub struct ProjectSnapshot {
     pub project: ProjectId,
-    /// Snapshot document revision.
+    /// 快照依据的文档版本。
     pub revision: u64,
-    /// Accessibility invalidation generation, checked before off-lock cache publication.
+    /// 可达性失效代次，在锁外缓存回写前校验。
     pub accessibility_epoch: u64,
     pub store: Arc<PrototypeStore>,
     pub graph: Arc<metatorio_core::GraphData>,
-    /// Project-derived options used when the accessibility cache is cold.
+    /// 当可达性缓存未命中时，基于项目配置派生的计算选项。
     accessibility_options: AccessibilityOptions,
-    /// A cached accessibility result, or None when it must be computed off-lock.
+    /// 已缓存的可达性结果；为 `None` 时需在锁外计算。
     accessibility: Option<Accessibility>,
     pub project_doc: ProjectDocument,
 }
 
 impl ProjectSnapshot {
-    /// Whether this snapshot carries a warm project accessibility cache.
+    /// 快照是否已携带热可达性缓存。
     pub fn has_cached_accessibility(&self) -> bool {
         self.accessibility.is_some()
     }
@@ -1340,7 +1331,7 @@ pub fn solve_snapshot_with(
     Ok(result)
 }
 
-/// Stages of auto-planning; dimensions become known after LP construction.
+/// 自动规划所处阶段；矩阵维度在 LP 构建完成后可知。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -1559,8 +1550,7 @@ fn unconstrained_items(flows: &AIndexMap<ExpandedVarId, (Flow, f64)>) -> AIndexS
         .collect()
 }
 
-/// Explicit preservation keeps enabled manual routes alongside generated ones.
-/// Disabled entries retain their state during append-only writeback.
+/// 显式保留模式：将已启用的手动机制与自动生成候选一并纳入；追加写回时保持停用条目原状态不变。
 fn include_existing_candidates(candidates: &mut Vec<Mechanic>, factory: &FactoryDocument) {
     let disabled: std::collections::HashSet<_> = factory
         .mechanics
@@ -1568,15 +1558,14 @@ fn include_existing_candidates(candidates: &mut Vec<Mechanic>, factory: &Factory
         .filter(|entry| !entry.enabled)
         .map(|entry| format!("{:?}", entry.mechanic))
         .collect();
-    // Track only the manual routes, not a large debug string for every generated
-    // candidate in a potentially hundred-thousand-column enumeration.
+    // 仅追踪手动配置，避免在数十万列枚举中为每个自动候选生成大段 Debug 字符串。
     let mut missing: std::collections::HashSet<_> = factory
         .mechanics
         .iter()
         .filter(|entry| entry.enabled)
         .map(|entry| format!("{:?}", entry.mechanic))
         .collect();
-    // Do not let enumeration silently re-enable an identical disabled entry.
+    // 禁止自动枚举静默重新启用完全相同的停用条目。
     candidates.retain(|mechanic| {
         let key = format!("{mechanic:?}");
         if disabled.contains(&key) {
@@ -1592,8 +1581,7 @@ fn include_existing_candidates(candidates: &mut Vec<Mechanic>, factory: &Factory
     }
 }
 
-/// Manual factory solving permits surface exceptions, while enumeration honors
-/// conditions. Explain the distinction on failure without rejecting legal alternatives.
+/// 手动工厂求解允许地表条件例外，而自动枚举严格遵守条件；失败时向调用方说明差异而不误拒合法候选。
 fn existing_recipe_surface_note(store: &PrototypeStore, factory: &FactoryDocument) -> String {
     let Some(properties) = crate::planet::surface_properties_of(
         store,
@@ -1723,7 +1711,7 @@ pub struct AutoPlanReport {
     pub variables_after: usize,
     /// 本次自动规划使用的后端。
     pub solver: metatorio_solver::LpSolver,
-    /// Full candidate optimization, retained across the writeback subset solve.
+    /// 完整候选模型的优化记录，在写回子集重解后仍保留。
     pub planning_optimization: Option<metatorio_solver::OptimizationReport>,
 }
 
@@ -1942,7 +1930,7 @@ fn solve_document(
 
 /// 零成本转换流：表达流之间的子类型关系，复刻原版 planner.rs:264-316 并扩展。
 ///
-/// 1. 温度区间子类型：窄区间流可放宽为包含它的宽区间流（[T,T] ⊆ [T1,T2]）。
+/// 1. 温度区间子类型：窄区间流可放宽为包含它的宽区间流（`[T,T] ⊆ [T1,T2]`）。
 /// 2. 定点温度互转（**只降温**）：同种流体从高温定点降到低温定点，把显热排进
 ///    对应 FluidHeat。升温方向被刻意移除——`FluidHeat` 无温度，模型无法表达
 ///    「热源必须比目标更热」，升温边等于没有火用代价的自由升温，会让温度梯度

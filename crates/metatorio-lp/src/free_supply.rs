@@ -1,4 +1,4 @@
-//! Projection of isolated unlimited free supplies, for floating hints only.
+//! 孤立无限自由供给的投影约简，仅用于浮点候选搜索。
 use crate::{Basis, BasisStatus, FloatCandidate, Model, Row, SolveControl};
 use std::collections::HashSet;
 
@@ -19,10 +19,8 @@ pub(crate) struct FreeSupplyProjection {
 }
 
 impl Model {
-    /// Remove a zero-cost nonnegative unlimited supplier with exactly one
-    /// nonredundant inequality. Associated automatically satisfied rows are
-    /// removed too, so the lifted basis is block triangular. Other suppliers
-    /// of the same row remain ordinary columns. No coefficients are rounded.
+    /// 移除只出现在单条非冗余不等式中的零成本非负无限供给列，并同步移除自动满足的关联行，
+    /// 使提升后的基保持块三角结构；同一行的其他供给列仍保留为普通列，不做系数舍入。
     pub(crate) fn free_supply_projection_with_control(
         &self,
         control: &SolveControl,

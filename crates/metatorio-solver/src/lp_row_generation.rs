@@ -1,12 +1,10 @@
-//! Constraint generation is a relaxation of the full LP, not column pruning.
-//! Every terminal outcome is certified again against the original model.
+//! 约束行生成是对完整 LP 的松弛，而非列剪枝；所有终态结果均会在完整原模型上重新认证。
 use crate::{lp_experiments::Snapshot, lp_hybrid::Failure, lp_rational as exact};
 use num_traits::{Signed, Zero};
 use std::time::Instant;
 
-/// Equal columns on the current frontier are interchangeable in its relaxation.
-/// Keep the cheapest (then lowest original index). New rows split groups, so
-/// every previous representative remains available to the warm basis.
+/// 在当前松弛前沿上完全等价的列可合并去重，保留成本最低（其次原索引最小）的代表列；
+/// 加入新行会拆分等价组，旧代表列仍保留给热启动基使用。
 fn frontier_columns(
     model: &exact::Model,
     selected: &[usize],

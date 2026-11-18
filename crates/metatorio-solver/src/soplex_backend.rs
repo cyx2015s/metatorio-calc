@@ -1,10 +1,8 @@
-//! Optional SoPlex backend through the patched vendored `soplex-sys`.
+//! 可选 SoPlex 后端（通过本地打了补丁的 `soplex-sys` 接入）。
 //!
-//! The safe binding's add-column API is dense, so the production model is
-//! written as a sparse MPS file and read through SoPlex's file reader. The
-//! vendored build enables Boost.Multiprecision and this adapter requests
-//! rational read/solve/check modes with zero tolerances. SoPlex certifies the
-//! MPS model exactly, then returns the primal values as `f64` for the LP model.
+//! 安全绑定的逐列添加接口为稠密向量，因此这里将模型写为稀疏 MPS 文件再交由
+//! SoPlex 的文件读取器加载。本地补丁启用了 Boost.Multiprecision，适配器会请求
+//! 零容差的精确有理数读取/求解/检查模式，经精确认证后再将原始解转为 `f64` 返回。
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},

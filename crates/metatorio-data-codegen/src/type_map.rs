@@ -1,8 +1,7 @@
 //! schema 类型 → Rust 类型的映射器。
 //!
-//! Phase 1 支持：标量、ID 别名、array、struct、builtin、自定义映射。
-//! Phase 2 待办：union/tuple/dictionary 细化为具体 Rust 类型（当前映射为
-//! `serde_json::Value` 保真，反序列化零成本，后续可逐步替换）。
+//! 支持标量、ID 别名、array、struct、tuple、dictionary、builtin 及自定义映射；
+//! 未注册的 union/type/literal 映射为 `serde_json::Value` 保真，反序列化零开销。
 
 use crate::config::Config;
 use crate::schema::{ComplexType, Schema, TypeRef};
@@ -163,7 +162,7 @@ fn map_complex(schema: &Schema, config: &Config, c: &ComplexType) -> Mapped {
                 Mapped::Rust(format!("({})", parts.join(", ")))
             }
         }
-        // Phase 2 剩余：union 保持 Value 保真（需要语义的类型走 custom_type_map 手写注册）
+        // union 保持 Value 保真（需要语义的类型走 custom_type_map 手写注册）
         "union" | "type" | "literal" => Mapped::Rust("serde_json::Value".to_string()),
         other => {
             eprintln!("metatorio-data-codegen: 未知 complex_type: {other}");

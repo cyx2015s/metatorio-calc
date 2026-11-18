@@ -1,8 +1,7 @@
-//! Sparse extraction of a restricted master, preserving original term order.
+//! 稀疏提取受限主问题，保持原始项顺序。
 use crate::{Model, Row, SolveControl};
 
-/// Compressed column incidence. Store references into the original rows rather
-/// than another copy of coefficients. The index is reused across CG rounds.
+/// 压缩列关联索引：引用原模型行下标而非复制系数，可在多轮列生成间复用。
 pub(crate) struct RestrictedIndex<'a> {
     model: &'a Model,
     offsets: Vec<usize>,

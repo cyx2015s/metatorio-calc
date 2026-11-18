@@ -1,5 +1,4 @@
-//! Rust candidate search and exact certification for application models.
-//! Optional HiGHS support/basis experiments remain behind the highs feature.
+//! 应用模型的纯 Rust 候选搜索与精确认证路径（可选 HiGHS 支撑集/基实验仍置于 `highs` feature 下）。
 #[cfg(feature = "highs")]
 use crate::lp_experiments::{ReplayOptions, replay};
 use crate::{lp_experiments::Snapshot, lp_rational as exact};

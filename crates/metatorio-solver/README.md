@@ -1,120 +1,29 @@
-# Metatorio continuous LP solver
+# metatorio-solver
 
-Production planning uses backend-independent variables, sparse expressions and
-constraints from `lp_model`. A project selects its LP backend in project
-settings; the default build enables five choices:
+Metatorio 的线性规划建模与多后端求解调度层，无 GUI 依赖。
 
-- `clarabel` (pure Rust interior point)
-- `highs` (native simplex)
-- `microlp` (pure Rust simplex)
-- `soplex` (bundled patched SoPlex, exact rational MPS path)
-- `rust-certified` (displayed as `Rust based`; legacy pure Rust path)
+## 支持的求解后端
 
-The SoPlex option builds the vendored `vendor/soplex-sys` patch (C++17, MSVC
-exceptions, Windows library-name alias) with the vendored Boost.Multiprecision
-headers from `vendor/boost`. It writes a sparse MPS file, reads it through
-SoPlex's file reader, and sets read/solve/check/sync modes plus zero feasibility
-and optimality tolerances for SoPlex's exact rational path. SoPlex certifies the
-MPS model exactly, then returns primal values as `f64` for the LP model.
+项目通过 `ProjectSettings.solver`（[`LpSolver`](src/lp_solver.rs)）选择后端，默认编译启用全部 5 个选项：
 
-```powershell
-cargo build --release -p metatorio-headless
-cargo test -p metatorio-solver --lib
-# Compile one backend only, for example:
+- `highs`（**HiGHS**，默认）：内置 C++ 源码编译的工业单纯形求解器，包含针对数值退化循环的有界重试阶梯；
+- `clarabel`（**Clarabel**）：纯 Rust 内点法（IPM）求解器；
+- `microlp`（**microlp**）：纯 Rust 轻量单纯形求解器；
+- `soplex`（**SoPlex**）：通过 `vendor/soplex-sys` 补丁和 `vendor/boost` 头文件编译，写入稀疏 MPS 后启用 SoPlex 精确有理数模式（feas/opt 容差为 0）；
+- `rust-certified`（界面显示 **Rust based**）：基于 `metatorio-lp` 的纯 Rust 精确重构与认证后端（为兼容旧工程，默认序列化 ID 仍保留 `rust-certified`）。
+
+## 调度原则
+
+- `lp.rs` 直接分发至项目所选后端，不再在适配层做二次原模型拒绝或跨后端静默回退；
+- 不可行、无界、数值失败和超时由所选后端按原始语义报告；
+- 若某后端未编译进当前二进制（Cargo feature 未开启），返回明确错误提示。
+
+## 常用命令
+
+```sh
+# 仅跑纯 Rust 单纯形后端测试（无需 C++ / CMake）
+cargo test -p metatorio-solver --no-default-features --features microlp,rust-lp
+
+# 检查单个后端编译
 cargo check -p metatorio-solver --no-default-features --features microlp
-
 ```
-
-The adapter no longer performs a post-solve original-model check, certificate
-rejection, retry ladder or writeback self-check. The chosen backend's result is
-returned directly; infeasible, unbounded, numerical failure and timeout are
-reported as the backend reports them. The legacy `Rust based` backend still
-uses its internal exact machinery, but the adapter does not re-validate it.
-
-These guarantees apply to the binary floating coefficients received by the LP;
-they do not recover the game's pre-rounding rational recipe data. The core
-`metatorio-lp` supports additional exact LP operations and has its own README.
-
-The certified/verified application search uses a shared 1,200-second cooperative
-work budget, independent of the MCP response. Async auto_plan returns `running`
-immediately and its background scheduler waits up to 1,800 seconds per solve by
-default; ordinary synchronous recompute retains its 120-second default.
-`METATORIO_SOLVE_TIMEOUT_MS` or `--solve-timeout-ms` explicitly overrides scheduler
-waiting. Waiting limits are separate from LP work and do not prove infeasibility.
-Uncached exact LU elimination and triangular solves check deadlines during work.
-Some model scans and individual rational operations remain noninterruptible;
-this is not a hard wall-clock timeout. Dense factor storage
-and dimension limits remain, so passing the current corpus is not a guarantee
-for every asset or arbitrary LP size.
-Epic electronic-circuit targets of `1e-6` and `1` with eight shared beacons are
-regular regressions. Tighter search produces exact optima on frozen former
-timeout inputs, but can also produce singular hints on other models. The
-certified application therefore checks the default hint, then primal/ratio
-settings of `1e-12`/`1e-12` and `1e-12`/`1e-14`, before permitting full exact
-optimization with the default search as a final attempt. Earlier attempts
-retain full-model certification; preliminary drifted or stopped hints skip
-support correction. All share the same work budget and exact acceptance policy.
-The first preliminary attempt has 45 seconds, later attempts have 90 seconds,
-and preliminary deadlines stop at 1,140 seconds to reserve final repair time.
-Observers may veto support/full repair before construction starts. Verified infeasibility
-terminates immediately. Retry hints are captured in `rust-retries/<index>/`,
-and attempt witnesses in `rust-attempt-certificates/<index>/`; only the selected
-attempt is published in `rust-certificates/` for independent verification.
-
-An exact sparse zero-propagation precheck can prove missing-supply contradictions.
-After the three preliminary certified hints remain incomplete, exact column generation can recover a small
-master problem. Only a fully validated floating primal vector seeds it; otherwise
-it starts from demand rows and exact missing-supplier rays. It uses at most 900
-seconds of the shared budget, reserving final repair time. Restricted failures
-are lifted and checked against every original column before reporting infeasibility.
-If column recovery remains incomplete, constraint generation tries a relaxation that
-starts with demand rows, then adds exactly violated original rows. Low-degree
-rows are preferred to dense shared-resource rows; after 32 rounds the frontier
-widens. It keeps every supplier occurring in selected rows and restores omitted
-zero columns when new rows need them. Singular relaxation hints can restart from
-the exact all-slack basis. Recovery validates and reuses retained exact bases;
-20-second progress stops preserve completed pivots. Before exact warm repair,
-floating search can continue from the retained basis; only its independently
-certified result replaces the retained state. A certified primal basis may
-have an independent dual, so an invalid warm hint falls back to another proposal
-or cold start. A full feasible primal basis can continue exact original-cost
-optimization to close an excessive gap without repeating Phase I. Recovery has
-at most 256 rounds and uses the remaining shared budget minus 60 seconds reserved
-for final repair, consuming time otherwise available to later hints. Each active floating model remains limited to 4,096
-rows; larger original models can succeed through smaller relaxations. Accepted
-primal/dual witnesses and lifted Farkas multipliers always undergo complete
-original-model checks. Recovery witnesses are published directly in
-`rust-certificates/`; failed relaxation snapshots, when capture is enabled, live
-in `rust-row-relaxations/`.
-See `docs/lp-experiments.md` and `docs/lp-specialty-smoke-fix.md` for evidence
-and remaining coverage limits.
-
-`lp_verify_witnesses capture-directory` requires every original model to have
-an accepted feasible witness within the exact gap budget. The explicit
-`--allow-infeasible` option additionally rechecks saved Farkas multipliers
-against the original model; it is intended for mixed outcome surveys and is
-not used by the successful-planning gate in `lp-experiment.ps1`.
-
-Full actual planning regression with automatic witness verification:
-
-```powershell
-./scripts/lp-experiment.ps1 -Backend rust-certified -NativeFree -PipelineOnly -RequireSolved -UseDefaultBackend
-```
-
-This command checks that the selected dependency graph contains no HiGHS,
-highs-sys or good_lp, saves each original LP and exact witnesses, and independently
-recomputes their certificates after the requests complete. Use a new capture
-directory for each run. `UseDefaultBackend` leaves the backend environment unset
-and uses default Cargo features. Native replay remains available through
-`lp-experiments`. Paired frozen-model comparison uses `lp_application_replay`,
-`scripts/lp-compare-backends.ps1` and `scripts/lp-summarize-backends.py`. Summaries
-audit numerical input bits and distinguish strict bounds from the application
-bound tolerance; rejected solves do not count as faster successful solves.
-
-The optional experiment `METATORIO_LP_COST_BOUNDS=1` tries an incumbent-budget
-hint only after the three original hints fail and a full exact feasible incumbent
-has been retained. It shares the overall deadline with a cooperative 15-second
-allowance, and accepts only an original-model certificate. It is disabled by
-default pending paired measurements. `lp_cost_bounds` compares floating hints
-on a frozen snapshot using an independently checked incumbent; see
-`docs/lp-ammonia-cost-bounds-20261015.md` for the application case and controls.

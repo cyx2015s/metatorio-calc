@@ -1,4 +1,4 @@
-//! Each valid mechanism expands to one algebraic variable, in caller order.
+//! 每个有效机制按调用方传入顺序展开为一个代数变量。
 
 use crate::dual_var::DualVar;
 

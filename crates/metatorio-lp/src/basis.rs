@@ -1,4 +1,4 @@
-//! Sparse exact basis factorization with full-basis eta updates and compressed compatibility.
+//! 稀疏精确基矩阵分解，支持全基 eta 更新与压缩兼容接口。
 use super::{Basis, BasisStatus, ExactSolution, Model, Rational, SolveControl, rational};
 use num_traits::Zero;
 use std::collections::BTreeMap;

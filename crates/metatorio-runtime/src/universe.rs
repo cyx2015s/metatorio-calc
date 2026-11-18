@@ -1,10 +1,8 @@
-//! Universe-factory expansion and LP solve.
+//! 宇宙工厂的机制展开与 LP 求解。
 //!
-//! Locations are part of the LP coordinates: a `LocatedDualVar` is balanced
-//! independently at each planet/space location. Local mechanics are expanded
-//! with their own environment. Rocket exports consume local items and rocket
-//! weight capacity. Orbital drops consume Space items and deliver them to one
-//! planet. Project-level estimates price exports per kg and drops per stack.
+//! 空间位置直接参与 LP 坐标：每个 `LocatedDualVar` 在各自的行星/太空地点独立平衡；
+//! 本地机制按所在地点环境展开；火箭发运消耗本地物品与火箭重量运力，轨道投送消耗太空
+//! 物品并送往指定行星；项目级估算价格分别按千克与按堆叠计入发运和空投成本。
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -99,9 +97,8 @@ pub(crate) fn locate_flow(location: &Location, flow: Flow) -> SolverFlow<Located
         .collect()
 }
 
-/// All asteroid-chunk items are available in space. This intentionally unions
-/// every chunk prototype instead of relying on one space-location name: a
-/// universe factory has one abstract Space location.
+/// 太空环境中所有星块（asteroid-chunk）物品均作为隐式来源。
+/// 这里刻意合并全部星块原型而非绑定单一太空地点名，因为宇宙工厂使用统一的抽象 `Space` 位置。
 pub(crate) fn space_source_flows(store: &PrototypeStore) -> Flow {
     let mut out = Flow::default();
     for record in store.group(PrototypeGroup::AsteroidChunk) {
@@ -138,12 +135,10 @@ pub(crate) fn planet_source_flows(store: &PrototypeStore, planet: &str) -> Flow 
     crate::planet::implicit_source_flows(store, planet, None)
 }
 
-/// Return all locations mentioned by mechanics and targets.
+/// 返回机制与目标涉及的全部空间位置。
 pub(crate) fn used_locations(universe: &UniverseDocument) -> BTreeSet<Location> {
     let mut locations = BTreeSet::new();
-    // Space is always available: its asteroid chunks are global implicit
-    // sources and can feed planet targets even without an explicit space
-    // mechanic.
+    // 太空始终纳入：星块是全局隐式来源，即使没有显式太空机制也能直接供给星球目标。
     locations.insert(Location::Space);
     for entry in &universe.mechanics {
         locations.insert(entry.mechanic.location().clone());
@@ -215,7 +210,7 @@ fn add_located_conversion_flows(
     }
 }
 
-/// Read-only view data uses exactly the same per-mechanism expansion as the LP.
+/// 只读预览与 LP 求解复用完全相同的逐机制展开实现。
 pub fn expand_located_mechanic(
     store: &PrototypeStore,
     base: &metatorio_core::GameState,
@@ -412,7 +407,7 @@ pub fn preview_universe(
     UniversePreview { mechanics, sources }
 }
 
-/// Build and solve a universe factory with the project's selected backend.
+/// 使用项目选定的后端构建并求解宇宙工厂。
 pub fn solve_universe(
     store: &PrototypeStore,
     project: &ProjectDocument,
@@ -462,7 +457,7 @@ pub fn solve_universe_with_progress(
         }
     }
 
-    // Implicit sources: each planet's own resources and all space chunks.
+    // 隐式来源：各行星自身天然资源与太空全部星块。
     let locations = used_locations(universe);
     let mut sources: SolverFlow<LocatedDualVar> = SolverFlow::default();
     for location in &locations {
@@ -474,7 +469,7 @@ pub fn solve_universe_with_progress(
             sources.insert(flow, penalty);
         }
     }
-    // Explicit inputs override the same located implicit source.
+    // 显式外部输入覆盖同地点的隐式来源。
     for input in &universe.external_inputs {
         if !input.penalty.is_finite() || input.penalty < 0.0 {
             return Err("外部输入成本必须为非负有限数".into());
@@ -494,8 +489,7 @@ pub fn solve_universe_with_progress(
     let conversion_target =
         crate::solve::conversion_targets(&target, expression_flows.keys().cloned());
 
-    // Temperature/fuel/heat subtype conversions are location-local; a global
-    // set would create illegal cross-location shortcuts.
+    // 温度/燃料/热量子类型转换严格限定在同一地点内，避免制造非法的跨星球零成本捷径。
     add_located_conversion_flows(
         &mut flows,
         &locations,
@@ -820,8 +814,7 @@ mod tests {
                 && flow.flow.flow == DualVar::Item(item("iron-ore"))
                 && flow.amount > 0.9
         }));
-        // The LP may choose surplus capacity among zero-cost optima.
-        // Transfers must never overdraw the local capacity.
+        // 零成本等价最优解下 LP 可能选取过剩运力；运输量不得超过本地实际运力供给。
         let amount = |id| {
             mechanics
                 .iter()

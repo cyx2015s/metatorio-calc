@@ -85,7 +85,7 @@ pub fn validate(cli: &Cli) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve forwarded arguments against the second process's working directory.
+/// 按第二个进程的工作目录解析转交过来的文件路径参数。
 pub(crate) fn requested_paths(args: Vec<String>, cwd: &Path) -> Result<Vec<PathBuf>, String> {
     let cli = Cli::try_parse_from(args).map_err(|error| error.to_string())?;
     Ok(cli

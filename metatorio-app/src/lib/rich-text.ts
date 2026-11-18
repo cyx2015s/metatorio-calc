@@ -1,5 +1,5 @@
-/** Factorio text, never HTML. Keep the source intact; render only these tokens.
- * Unknown tags remain literal. Unsupported game actions degrade to readable text.
+/** Factorio 富文本解析，绝不作为 HTML 渲染。保留原文，仅输出受控 token；
+ * 未知标签保持字面内容，不支持的游戏交互标签降级为可读纯文本。
  */
 export type RichStyle = { color?: string; bold?: boolean; mono?: boolean };
 export type RichToken = RichStyle & (
@@ -16,7 +16,7 @@ export function factorioColor(value: string): string | undefined {
   const input = value.trim().toLowerCase();
   if (Object.hasOwn(colors, input)) return colors[input];
   if (/^#[\da-f]{6}$/.test(input)) return input;
-  // Factorio uses AARRGGBB; CSS uses RRGGBBAA.
+  // Factorio 使用 AARRGGBB；CSS 使用 RRGGBBAA。
   if (/^#[\da-f]{8}$/.test(input)) return `#${input.slice(3)}${input.slice(1, 3)}`;
   if (!/^\d*\.?\d+\s*,\s*\d*\.?\d+\s*,\s*\d*\.?\d+$/.test(input)) return;
   const rgb = input.split(",").map(Number);
@@ -40,7 +40,7 @@ export function parseRichText(source: string): readonly RichToken[] {
   const style = (): RichStyle => ({ color: colorStack.at(-1), bold: fontStack.at(-1)?.includes("bold"), mono: fontStack.at(-1)?.includes("mono") });
   const text = (text: string) => { if (text) result.push({ type: "text", text, ...style() }); };
   let end = 0;
-  // Excluding nested brackets makes scanning linear, including large blueprints.
+  // 排除嵌套方括号使扫描保持线性复杂度（即使面对超长蓝图字符串）。
   for (const match of source.matchAll(/\[([^\[\]\r\n]+)\]/g)) {
     text(source.slice(end, match.index));
     end = match.index! + match[0].length;
@@ -62,7 +62,7 @@ export function parseRichText(source: string): readonly RichToken[] {
       const split = value.search(/[/.]/);
       const kind = value.slice(0, split), name = value.slice(split + 1);
       if (split > 0 && spriteClasses.has(kind) && validName(name)) result.push({ type: "icon", kind, name, ...style() });
-      else text(value); // Arbitrary sprite prototypes are unavailable in the icon cache.
+      else text(value); // 任意 sprite 原型不在图标缓存中，退回显示文本。
     } else if (tag === "tooltip" && value.includes(",")) text(value.slice(0, value.lastIndexOf(",")));
     else if (tag === "gps" && equals >= 0) text(`GPS ${value}`);
     else if (["train", "train-stop", "space-platform", "armor", "tip"].includes(tag) && equals >= 0) text(`${tag}: ${value}`);
@@ -71,7 +71,7 @@ export function parseRichText(source: string): readonly RichToken[] {
     else text(match[0]);
   }
   text(source.slice(end));
-  // Bounded and source-only: resolved names/icons must never leak across contexts.
+  // 缓存有上限且仅存原始文本解析结果：已解析名称与图标绝不跨上下文泄漏。
   if (source.length <= 16384) {
     if (cache.size >= 2048) cache.delete(cache.keys().next().value!);
     cache.set(source, result);

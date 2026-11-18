@@ -1,8 +1,7 @@
-//! Universe-factory coordinates and mechanics.
+//! 宇宙工厂的空间坐标与机制包装。
 //!
-//! A normal factory has one implicit environment. A universe factory plans
-//! several locations at once, so every flow and every mechanic must carry the
-//! location it belongs to.
+//! 普通工厂只有单一的隐式环境；宇宙工厂同时规划多个地点，
+//! 因此每条流和每个机制都必须显式携带所属位置。
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -11,11 +10,10 @@ use crate::dual_var::DualVar;
 use crate::id::IdWithQuality;
 use crate::mechanic::Mechanic;
 
-/// A physical planning location.
+/// 物理规划位置。
 ///
-/// `Planet(name)` uses `name` both as the planet prototype and as its surface:
-/// current Factorio data does not expose multiple surfaces per planet. `Space`
-/// is the orbital/space-platform environment.
+/// `Planet(name)` 同时作为行星原型名与地表名（当前游戏数据不支持同星球多地表）；
+/// `Space` 表示轨道/太空平台环境。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
@@ -56,7 +54,7 @@ impl std::fmt::Display for Location {
     }
 }
 
-/// A flow coordinate qualified by its location.
+/// 附带空间位置的流坐标。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
@@ -80,7 +78,7 @@ impl LocatedDualVar {
     }
 }
 
-/// A normal mechanic placed at one universe location.
+/// 放置于某一宇宙位置的普通机制。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -98,10 +96,10 @@ impl Default for LocalLocatedMechanic {
     }
 }
 
-/// Cargo transported between a planet and space.
+/// 行星与太空之间的货运机制。
 ///
-/// `location` is the planet: the origin of RocketExport, or destination of OrbitalDrop.
-/// Both directions preserve the item identity, including quality.
+/// `location` 为所属行星：`RocketExport` 的起点，或 `OrbitalDrop` 的终点；
+/// 两个方向均保留包含品质在内的完整物品身份。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -119,7 +117,7 @@ impl Default for OrbitalCargoMechanic {
     }
 }
 
-/// Local production and both explicit directions of orbital cargo transport.
+/// 本地生产与双向星际货运机制的统一枚举。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]

@@ -1,7 +1,7 @@
 //! Model Context Protocol 服务端（合并进主二进制）。
 //!
 //! 端点是一个本机 Streamable-HTTP 服务（决策见 `docs/mcp-design.md`）：它与 GUI 共享
-//! 同一份 [`AppState`]（也就是同一个 [`Runtime`]），所以外部 agent 与人是**在同一个
+//! 同一份 [`AppState`]（也就是同一个 [`metatorio_runtime::Runtime`]），所以外部 agent 与人是**在同一个
 //! 进程里操作同一批项目**。每个规划动作都是 `Runtime::dispatch(AppMessage)`——MCP 这
 //! 一层因此只是同一个 reducer 之上的薄封装，与具体框架无关。
 //!

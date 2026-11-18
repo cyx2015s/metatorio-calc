@@ -12,13 +12,11 @@ import { richTextPlain } from "$lib/rich-text";
 import { lookupName } from "$lib/display-labels";
 import { MechanicFlowCache } from "$lib/mechanic-filter";
 import { diagnosticFrom } from "$lib/diagnostic";
-// Svelte 5 rune-based store bridging the frontend to the Tauri runtime.
+// 基于 Svelte 5 runes 的状态存储，连接前端界面与 Tauri 运行时。
 //
-// `runtime` is a singleton: the UI reads its $state fields reactively and
-// calls its methods to send AppMessages.  After every dispatch the store
-// refreshes the document + UI snapshots, so the UI never keeps its own copy
-// of backend data.  Game context (prototype store + icons) and catalog
-// results are cached here as well.
+// `runtime` 为全局单例：UI 响应式读取其 $state 字段并调用其方法发送 AppMessage。
+// 每次 dispatch 后同步刷新文档与 UI 快照，前端不自行维护后端数据副本；
+// 游戏上下文（原型索引、图标）与目录查询结果亦缓存在此。
 
 import {
   accessibility,
@@ -432,8 +430,7 @@ class RuntimeStore {
   private async refreshSnapshot(generation: number): Promise<void> {
     const document = await getDocument();
     if (generation !== this.refreshGeneration) return;
-    // Events and dispatch completion can request the same snapshot. Preserve
-    // component identity/focus instead of redrawing an unchanged document.
+    // 广播事件与 dispatch 完成回执可能请求同一份快照；若文档内容未变则保留组件身份与焦点，避免无意义重绘。
     const shared = reconcileSnapshot(this.document, document);
     if (shared === this.document) return;
     const beforeFactory = this.factorySignatures;
@@ -759,7 +756,7 @@ class RuntimeStore {
     return this.nativeOpenTask;
   }
 
-  /** Dialogs, startup arguments and OS drop/open events share one serial queue. */
+  /** 对话框、启动参数以及系统拖放/打开事件共用同一条串行队列。 */
   openProjectPath(path: string): Promise<boolean> {
     const task = this.fileOpenQueue.then(async () => {
       this.openingProjectPath = path;

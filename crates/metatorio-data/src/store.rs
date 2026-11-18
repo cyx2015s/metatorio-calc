@@ -1,4 +1,4 @@
-//! Phase 3：原型仓库（PrototypeStore）。
+//! 原型仓库（PrototypeStore）。
 //!
 //! 把游戏 dump 反序列化为**按 (type, name) 唯一**的组件化原型记录：
 //! - 每个原型按 `COMPONENT_LIST`（继承链组件 + 组合组件）反序列化，

@@ -35,7 +35,7 @@ pub struct FlowSpec<I: ItemIdent> {
     pub fixed: Option<f64>, // 如果是Some(v)，表示这个原始变量必须是v
 }
 
-/// Dimensions of the complete LP, including external source/sink variables.
+/// 完整 LP 的维度（包含外部供需变量）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProblemSize {
     pub variables: usize,
@@ -52,10 +52,9 @@ where
     pub flows: AIndexMap<R, FlowSpec<I>>,
     pub sources: Flow<I>, //  输入特定物品消耗的价值
     pub sinks: Flow<I>,   //  产生额外物品的惩罚
-    // 我还不知道怎么称呼，目前规定如下：
-    // 如果是严格模式，相比普通模式有如下限制：只能使用来自external的输入
+    // 是否严格源模式：仅允许使用外部显式声明的输入
     pub strict_source: bool,
-    // 如果是严格模式，相比普通模式有如下限制：没有出现在target中的物品必须配平
+    // 是否严格汇模式：未出现在目标中的流必须精确配平
     pub strict_sink: bool,
     /// 缺少提供者且外部不供给的物品，用于失败诊断。
     /// trim_flows 只记录它们，不删除其消费流或改变原始 LP。
@@ -66,7 +65,7 @@ where
     /// 由**调用方按类型语义**填（`DualVar::Pollution`），求解器不猜：`I` 是泛型，
     /// 内核不认识具体变体。这是「平衡规则来自语义、不来自系数符号」的第一步。
     pub unconstrained: AIndexSet<I>,
-    /// Project-level LP backend. Defaults to the legacy Rust certified backend.
+    /// 项目级 LP 后端；默认优先选用 HiGHS（随编译启用的 feature 回退）。
     pub solver: crate::lp_solver::LpSolver,
 }
 
@@ -255,9 +254,8 @@ where
         self
     }
 
-    /// Record structurally missing providers without deleting any flow.
-    /// Only existence matters; retaining every provider/consumer ID can be
-    /// expensive for free source items consumed by millions of candidates.
+    /// 在不删除任何流的前提下记录结构上缺少供给的流。
+    /// 只需判断是否存在提供者；对被百万候选共同消耗的免费源，逐一保留 ID 代价过高。
     pub fn trim_flows(&mut self, record_missing: bool) -> bool {
         if !self.strict_source || !record_missing {
             return false;
@@ -271,7 +269,7 @@ where
                     entry.0 |= signs.0;
                     entry.1 |= signs.1;
                 } else {
-                    // Clone each item key only once, not once per incidence.
+                    // 每个物品键只克隆一次，避免按出现次数重复克隆。
                     status.insert(item.clone(), signs);
                 }
             }

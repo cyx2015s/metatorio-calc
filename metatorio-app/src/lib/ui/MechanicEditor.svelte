@@ -2,7 +2,7 @@
   import {transportLabel} from "$lib/mechanics/located";
   import LocationPicker from "./LocationPicker.svelte";
   import { iconTypeForKind } from "./icon-types";
-  // Shared mechanism configuration and actions; no flow expansion or flow UI.
+  // 跨普通/宇宙工作区共享的机制配置与编辑动作；不负责流展开或流量区渲染。
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { untrack } from 'svelte';
   import { solarBalance } from "$lib/runtime/client";
@@ -50,7 +50,7 @@
       solarBalanceInfo = null;
       return;
     }
-    // Environment changes must invalidate the displayed solar calculation too.
+    // 工厂或宇宙环境变化时同样需要使已显示的太阳能配平结果失效。
     void environmentKey; void runtime.flowRevision;
     void entry.location; void entry.mechanic.solar_panel; void entry.mechanic.accumulator;
     let alive = true;

@@ -1,4 +1,4 @@
-//! Recipe input capability shared by editing, enumeration and expansion.
+//! 供编辑、枚举与展开共用的配方输入能力判定。
 use crate::{CraftingMachineComponent, RecipeComponent, types::Ingredient};
 
 impl RecipeComponent {
@@ -40,8 +40,8 @@ mod tests {
 }
 
 impl CraftingMachineComponent {
-    /// Only recipe fluid boxes count; a fluid energy source is a separate system.
-    /// The prototype default production_type is "none", not "input".
+    /// 只统计配方自身的流体槽；流体能源属于独立的燃料系统。
+    /// 原型默认 `production_type` 为 `"none"`，而非 `"input"`。
     pub fn supports_fluid_input(&self) -> bool {
         self.fluid_boxes.iter().any(|fluid_box| {
             matches!(

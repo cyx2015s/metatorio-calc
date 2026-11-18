@@ -1,5 +1,5 @@
-//! Relative feasibility with exact arithmetic and an exact original dual witness.
-//! No absolute floor: an entirely missing microscopic supply has error one.
+//! 基于精确有理数与原模型对偶证明的相对可行性认证。
+//! 不设绝对容差下限：完全缺失极微小的供给也会计为误差 1。
 use crate::{
     Basis, BasisStatus, Certificate, ExactSolution, FloatCandidate, FloatOptions, Model, Rational,
     SolveControl, rational,
@@ -12,8 +12,7 @@ use std::collections::BTreeMap;
 pub struct RelativeVerification {
     pub accepted: bool,
     pub maximum_relative_balance_error: String,
-    /// Absolute primal-cost / dual-bound difference. For an inexactly feasible
-    /// point this is a stopping criterion, not an original-LP upper bound.
+    /// 原始成本与对偶下界的绝对相对差值；对于非精确可行点，仅作停机判据，不是原 LP 上界。
     pub relative_duality_gap: Option<String>,
 }
 impl RelativeVerification {

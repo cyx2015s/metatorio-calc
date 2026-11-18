@@ -2,11 +2,10 @@ import type {Core, ElementDefinition} from 'cytoscape';
 import {networkPngSize,type NetworkTile} from './network-export';
 
 const nextFrame=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
-// Canvas renderer APIs are implemented by the bundled Cytoscape version but
-// absent from its type declarations.
+// 内置 Cytoscape 版本实现了这些 Canvas 渲染器接口，但类型声明中未列出。
 type CanvasCore=Core&{renderer():unknown;renderTo(context:CanvasRenderingContext2D,zoom:number,pan:{x:number;y:number},pixelRatio:number):Core};
-/** A detached, immutable rendering snapshot. Its viewport is moved per tile so
- * Cytoscape's viewport culling sees that tile, never the user's current viewport. */
+/** 独立且不可变的渲染快照：逐块移动自身视口，使 Cytoscape 视口裁剪只看当前图块，
+ * 不受用户当前交互视口影响。 */
 export async function createNetworkPngSnapshot(source:Core,background:string,cancelled:()=>boolean){
   const cytoscape=(await import('cytoscape')).default;
   await document.fonts.ready;
@@ -17,13 +16,11 @@ export async function createNetworkPngSnapshot(source:Core,background:string,can
   const check=()=>{if(cancelled())throw new Error('已取消导出');};
   try {
     check();
-    // Element JSON omits bypasses; copying computed styles preserves quality and
-    // location badge layers as well as the current font and display scale.
+    // 元素 JSON 不含旁路样式；拷贝计算后样式以保留品质/地点徽标图层及当前字体和显示缩放。
     const elements=source.elements().map(ele=>({...ele.json(),style:ele.style()} as ElementDefinition));
     graph=cytoscape({container:host,elements,style:source.json().style,layout:{name:'preset'},
       zoom:1,minZoom:1,maxZoom:1,pixelRatio:1,textureOnViewport:false,hideEdgesOnViewport:false,motionBlur:false}) as CanvasCore;
-    // Offscreen nodes are culled and never update :backgrounding. Populate the
-    // snapshot renderer's image cache explicitly, including all badge layers.
+    // 屏幕外节点会被裁剪且不会触发 :backgrounding；显式预热快照渲染器的图片缓存（含全部徽标层）。
     const renderer=graph.renderer() as unknown as {getCachedImage(url:string,crossOrigin:string,onLoad:()=>void):HTMLImageElement};
     const urls=new Set<string>();
     graph.nodes().forEach(node=>{

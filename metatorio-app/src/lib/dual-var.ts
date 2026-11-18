@@ -9,8 +9,8 @@ export interface FlowPresentation {
   facts: {label: string; value: string}[]; description: string;
 }
 
-/** A DualVar is a flow identity, not merely an item icon. Match is optional:
- * absent means an exact flow; {} means a pattern with unconstrained quality/temperature. */
+/** DualVar 是计算流的身份标识，不只是物品图标。match 为可选匹配条件：
+ * 未传入表示精确流；传入 `{}` 表示不限品质与温度的模式匹配。 */
 export function presentFlow(flow: DualVar, localize: Localize, match?: FlowMatch): FlowPresentation {
   const kind = typeof flow === 'string' ? flow : Object.keys(flow)[0];
   const value = typeof flow === 'string' ? undefined : Object.values(flow)[0];

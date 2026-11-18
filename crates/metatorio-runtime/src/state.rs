@@ -39,7 +39,7 @@ use crate::message::{
     TileDisposeMechanicAction, TileExtractMechanicAction,
 };
 
-/// Mutable application state that is independent from any GUI framework.
+/// 独立于任何 GUI 框架的可变应用状态。
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeState {
     pub document: AppDocument,
@@ -74,10 +74,9 @@ impl RuntimeState {
         state
     }
 
-    /// Accept one user message and return side effects for the outer runtime.
+    /// 接收一条用户消息并返回供外层运行时执行的副作用列表。
     ///
-    /// All application-owned enums are matched explicitly.  Adding a new
-    /// message variant therefore forces this dispatcher to be updated.
+    /// 所有应用内部枚举均显式穷举匹配，新增消息变体时编译器会强制更新此处分发逻辑。
     pub fn dispatch(&mut self, message: AppMessage) -> Result<DispatchResult, RuntimeError> {
         if let AppMessage::History(action) = message {
             return match action {
@@ -175,7 +174,7 @@ impl RuntimeState {
                 project: project.id,
             });
             for factory in &project.factories {
-                // New projects or changed project settings invalidate every factory.
+                // 新建项目或项目设置变更时，使该项目下所有工厂的求解缓存失效。
                 if previous.is_none_or(|previous| {
                     previous.settings != project.settings
                         || previous.factories.iter().find(|f| f.id == factory.id) != Some(factory)
@@ -1345,7 +1344,7 @@ impl RuntimeState {
                 self.apply_mechanic_list(project_id, factory_id, action)
             }
             FactoryAction::Mechanic { mechanic, action } => {
-                // Recipe or machine edits both recheck categories and fluid input support.
+                // 编辑配方或机器时都会复查类别兼容性与流体输入支持。
                 let (needs_compat, needs_clamp) = mechanic_repair_needs(&action);
                 let entry = self
                     .factory_mut(project_id, factory_id)?
@@ -1923,7 +1922,7 @@ impl RuntimeState {
             output.push(entry);
         }
         let doc = self.universe_mut(project, universe)?;
-        // Equivalent plans keep the original order and IDs.
+        // 等价规划方案保持原有的顺序与条目 ID。
         if !preserve
             && original.len() == output.len()
             && original.iter().all(|a| output.iter().any(|b| a == b))
@@ -1984,8 +1983,7 @@ impl RuntimeState {
     /// 与现有项目 id 冲突时整体重分配：项目 → 工厂 → 目标/表达式/项 →
     /// 外部输入 → 机制（所有子 id 同步映射，保持引用一致）。
     pub fn import_projects(&mut self, imported: &AppDocument) {
-        // Reserve ids above both documents. Otherwise a freshly allocated id can
-        // collide with another imported object that has not been pushed yet.
+        // 在两份文档的最大 ID 之上预留新分配 ID，避免与尚未写入的其他导入对象冲突。
         let imported_max = imported
             .projects
             .iter()
@@ -2079,7 +2077,7 @@ impl RuntimeState {
     }
 }
 
-/// One inventory for import collision checks and allocator high-water marks.
+/// 统一遍历项目内的全部 ID，供导入冲突检查与分配器高水位计算使用。
 fn project_ids(project: &ProjectDocument) -> impl Iterator<Item = u64> + '_ {
     std::iter::once(project.id.0)
         .chain(project.factories.iter().flat_map(|factory| {
@@ -2595,7 +2593,7 @@ fn apply_factory_context(
     })
 }
 
-/// Compatibility repair and module clamping must agree for factory and universe edits.
+/// 普通工厂与宇宙工厂编辑需保持一致的兼容性修复与插件槽位钳制判定。
 fn mechanic_repair_needs(action: &MechanicAction) -> (bool, bool) {
     (
         matches!(
@@ -2612,11 +2610,9 @@ fn mechanic_repair_needs(action: &MechanicAction) -> (bool, bool) {
     )
 }
 
-/// Build a kind-tagged mechanic action from a selector commit.  The target
-/// mechanic's kind is known up front, so the produced action always matches
-/// the mechanic — a mismatched (selector kind, mechanic kind) pair is a
-/// protocol error instead of a runtime dispatch decision.
-/// Only recipe and mining mechanics carry a module configuration.
+/// 根据选择器提交内容构造带机制类型标签的动作。目标机制类型在调用前已知，
+/// 因此生成的动作总是与机制匹配；（选择器类型, 机制类型）不匹配属于协议错误。
+/// 仅配方与采矿机制携带插件配置。
 fn apply_mechanic_action(
     mechanic: &mut Mechanic,
     action: MechanicAction,

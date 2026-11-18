@@ -1,19 +1,18 @@
-//! Structural route proposals for a cold restricted master.
+//! 面向冷启动受限主问题的结构路由候选提议。
 //!
-//! These columns are only search hints. Unlike relevance reduction, this is
-//! deliberately not an equivalent projection and proves no LP status.
+//! 这些列仅作为搜索提示；不同于相关性约简，它刻意不做等价投影，也不证明任何 LP 状态。
 use crate::{Model, SolveControl};
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BinaryHeap, HashMap, VecDeque};
 
-/// Search width, independent of material names, saved solutions and model size.
+/// 搜索宽度参数（与物品名称、历史解及模型规模无关）。
 #[derive(Clone, Copy, Debug)]
 pub struct RouteOptions {
-    /// Maximum distinct signed row patterns retained for each requested row.
+    /// 每个目标行最多保留的不同符号模式数量。
     pub directions_per_row: usize,
-    /// Maximum coefficient/cost variants retained within a signed row pattern.
+    /// 每种符号模式下最多保留的系数/成本变体数量。
     pub variants_per_direction: usize,
-    /// Weight of log relative acquisition cost versus source distance.
+    /// 对数相对获取成本相对于源距离的权重。
     pub cost_weight: f64,
 }
 

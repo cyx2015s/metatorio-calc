@@ -9,11 +9,11 @@ export const commands = {
 	loadGameContext: (executablePath: string, modDir: string | null) => __TAURI_INVOKE<ContextInfo_Serialize>("load_game_context", { executablePath, modDir }),
 	loadDump: (path: string) => __TAURI_INVOKE<ContextInfo_Serialize>("load_dump", { path }),
 	listContexts: () => __TAURI_INVOKE<ContextList_Serialize>("list_contexts"),
-	/**  OS file dialog for the Factorio executable (game-context loading). */
+	/**  打开系统文件对话框，选择 Factorio 可执行文件（用于导出游戏上下文）。 */
 	pickGameExecutable: () => __TAURI_INVOKE<string | null>("pick_game_executable"),
-	/**  OS file dialog for a pre-generated `data-raw-dump.json`. */
+	/**  打开系统文件对话框，选择预生成的 `data-raw-dump.json`。 */
 	pickDumpFile: () => __TAURI_INVOKE<string | null>("pick_dump_file"),
-	/**  OS folder dialog for a Factorio mod directory. */
+	/**  打开系统目录对话框，选择 Factorio 模组目录。 */
 	pickModDir: () => __TAURI_INVOKE<string | null>("pick_mod_dir"),
 	icon: (ty: string, name: string, contextId: string) => __TAURI_INVOKE<number[] | null>("icon", { ty, name, contextId }),
 	catalogIndex: (contextId: string) => __TAURI_INVOKE<CatalogIndex_Serialize>("catalog_index", { contextId }),
@@ -43,7 +43,7 @@ export const commands = {
 	 *  `ApplicationAction::SaveProjectAs` 消息（`RuntimeCommand::Persist`）。
 	 */
 	pickProjectSavePath: () => __TAURI_INVOKE<string | null>("pick_project_save_path"),
-	/**  The dialog is shown once; subsequent tiles stream into a native PNG encoder. */
+	/**  打开一次保存对话框；后续画布分块流式写入原生 PNG 编码器。 */
 	beginNetworkPng: (fileName: string, width: number, height: number) => __TAURI_INVOKE<ExportInfo | null>("begin_network_png", { fileName, width, height }),
 	writeNetworkPngTile: (exportId: number, x: number, y: number, imageBase64: string) => __TAURI_INVOKE<null>("write_network_png_tile", { exportId, x, y, imageBase64 }),
 	finishNetworkPng: (exportId: number) => __TAURI_INVOKE<string>("finish_network_png", { exportId }),
@@ -296,7 +296,7 @@ export type AutoPlanProgress_Serialize = {
 	constraints: number | null,
 };
 
-/**  Stages of auto-planning; dimensions become known after LP construction. */
+/**  自动规划所处阶段；矩阵维度在 LP 构建完成后可知。 */
 export type AutoPlanStage = "preparing" | "enumerating" | "building" | "solving";
 
 /**  单个插件塔（插件塔）的配置。 */
@@ -747,13 +747,13 @@ export type DualVar_Serialize = "Unknown" | ({ Item: IdWithQuality }) & { Custom
 /**  按科研包原型名区分的科研价值，不带品质。 */
 ({ VirtualScience: string }) & { Custom?: never; Entity?: never; Fluid?: never; FluidFuel?: never; FluidHeat?: never; Item?: never; ItemFuel?: never; ItemFuelSupply?: never; Pollution?: never };
 
-/**  Legacy string errors and structured domain diagnostics share an event channel. */
+/**  传统字符串错误与结构化领域诊断共用同一个事件通道。 */
 export type EventError = EventError_Serialize | EventError_Deserialize;
 
-/**  Legacy string errors and structured domain diagnostics share an event channel. */
+/**  传统字符串错误与结构化领域诊断共用同一个事件通道。 */
 export type EventError_Deserialize = string | Diagnostic_Deserialize;
 
-/**  Legacy string errors and structured domain diagnostics share an event channel. */
+/**  传统字符串错误与结构化领域诊断共用同一个事件通道。 */
 export type EventError_Serialize = string | Diagnostic_Serialize;
 
 export type ExportInfo = {
@@ -991,7 +991,7 @@ export type FlowAmount = FlowAmount_Serialize | FlowAmount_Deserialize;
 
 /**  配方原料/产物条目（含概率/产能/品质修饰）。 */
 export type FlowAmount_Deserialize = {
-	/**  Expected units per second at speed 1; absent when cycle time is unknown. */
+	/**  速度为 1 时的期望每秒速率；周期时间未知时为空。 */
 	base_rate?: number | null,
 	kind: string,
 	name: string,
@@ -1017,7 +1017,7 @@ export type FlowAmount_Deserialize = {
 
 /**  配方原料/产物条目（含概率/产能/品质修饰）。 */
 export type FlowAmount_Serialize = {
-	/**  Expected units per second at speed 1; absent when cycle time is unknown. */
+	/**  速度为 1 时的期望每秒速率；周期时间未知时为空。 */
 	base_rate: number | null,
 	kind: string,
 	name: string,
@@ -1327,7 +1327,7 @@ export type IndexEntry = IndexEntry_Serialize | IndexEntry_Deserialize;
 
 /**  目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。 */
 export type IndexEntry_Deserialize = {
-	/**  Recipe fluid input capability, independent of fluid fuel. */
+	/**  配方是否支持流体输入（独立于流体燃料）。 */
 	supports_fluid_input: boolean,
 	tile?: TileCapabilities_Deserialize | null,
 	kind: string,
@@ -1361,7 +1361,7 @@ export type IndexEntry_Deserialize = {
 
 /**  目录索引条目：一次性下发到前端，筛选/分组/排序全部前端本地做。 */
 export type IndexEntry_Serialize = {
-	/**  Recipe fluid input capability, independent of fluid fuel. */
+	/**  配方是否支持流体输入（独立于流体燃料）。 */
 	supports_fluid_input: boolean,
 	tile?: TileCapabilities_Serialize,
 	kind: string,
@@ -1464,31 +1464,31 @@ export type ItemWeight_Serialize = {
 	fallback?: string,
 };
 
-/**  A normal mechanic placed at one universe location. */
+/**  放置于某一宇宙位置的普通机制。 */
 export type LocalLocatedMechanic = LocalLocatedMechanic_Serialize | LocalLocatedMechanic_Deserialize;
 
-/**  A normal mechanic placed at one universe location. */
+/**  放置于某一宇宙位置的普通机制。 */
 export type LocalLocatedMechanic_Deserialize = {
 	location?: Location,
 	mechanic?: Mechanic_Deserialize,
 };
 
-/**  A normal mechanic placed at one universe location. */
+/**  放置于某一宇宙位置的普通机制。 */
 export type LocalLocatedMechanic_Serialize = {
 	location: Location,
 	mechanic: Mechanic_Serialize,
 };
 
-/**  A flow coordinate qualified by its location. */
+/**  附带空间位置的流坐标。 */
 export type LocatedDualVar = LocatedDualVar_Serialize | LocatedDualVar_Deserialize;
 
-/**  A flow coordinate qualified by its location. */
+/**  附带空间位置的流坐标。 */
 export type LocatedDualVar_Deserialize = {
 	location?: Location,
 	flow?: DualVar_Deserialize,
 };
 
-/**  A flow coordinate qualified by its location. */
+/**  附带空间位置的流坐标。 */
 export type LocatedDualVar_Serialize = {
 	location: Location,
 	flow: DualVar_Serialize,
@@ -1527,7 +1527,7 @@ export type LocatedFlow_Serialize = {
 	scale: number | null,
 };
 
-/**  Local production and both explicit directions of orbital cargo transport. */
+/**  本地生产与双向星际货运机制的统一枚举。 */
 export type LocatedMechanic = LocatedMechanic_Serialize | LocatedMechanic_Deserialize;
 
 export type LocatedMechanicSolution = LocatedMechanicSolution_Serialize | LocatedMechanicSolution_Deserialize;
@@ -1550,7 +1550,7 @@ export type LocatedMechanicSolution_Serialize = {
 	cost: number | null,
 };
 
-/**  Local production and both explicit directions of orbital cargo transport. */
+/**  本地生产与双向星际货运机制的统一枚举。 */
 export type LocatedMechanic_Deserialize = {
 	type: "local",
 } & LocalLocatedMechanic_Deserialize | {
@@ -1559,7 +1559,7 @@ export type LocatedMechanic_Deserialize = {
 	type: "orbital-drop",
 } & OrbitalCargoMechanic_Deserialize;
 
-/**  Local production and both explicit directions of orbital cargo transport. */
+/**  本地生产与双向星际货运机制的统一枚举。 */
 export type LocatedMechanic_Serialize = {
 	type: "local",
 } & LocalLocatedMechanic_Serialize | {
@@ -1569,11 +1569,10 @@ export type LocatedMechanic_Serialize = {
 } & OrbitalCargoMechanic_Serialize;
 
 /**
- *  A physical planning location.
+ *  物理规划位置。
  * 
- *  `Planet(name)` uses `name` both as the planet prototype and as its surface:
- *  current Factorio data does not expose multiple surfaces per planet. `Space`
- *  is the orbital/space-platform environment.
+ *  `Planet(name)` 同时作为行星原型名与地表名（当前游戏数据不支持同星球多地表）；
+ *  `Space` 表示轨道/太空平台环境。
  */
 export type Location = { kind: "planet"; name: string } | { kind: "space" };
 
@@ -1581,20 +1580,20 @@ export type LpSolver = LpSolver_Serialize | LpSolver_Deserialize;
 
 export type LpSolver_Deserialize = "clarabel" | "highs" | "microlp" | "soplex" | 
 /**
- *  Legacy Rust path. The serialized id remains `rust-certified` so existing
- *  project files keep loading; `rust-based` is accepted as an alias.
+ *  传统纯 Rust 认证后端。序列化 ID 仍保留 `rust-certified` 以兼容已有工程文件，
+ *  同时也接受别名 `rust-based`。
  */
 "rust-certified" | 
 /**
- *  Legacy Rust path. The serialized id remains `rust-certified` so existing
- *  project files keep loading; `rust-based` is accepted as an alias.
+ *  传统纯 Rust 认证后端。序列化 ID 仍保留 `rust-certified` 以兼容已有工程文件，
+ *  同时也接受别名 `rust-based`。
  */
 "rust-based";
 
 export type LpSolver_Serialize = "clarabel" | "highs" | "microlp" | "soplex" | 
 /**
- *  Legacy Rust path. The serialized id remains `rust-certified` so existing
- *  project files keep loading; `rust-based` is accepted as an alias.
+ *  传统纯 Rust 认证后端。序列化 ID 仍保留 `rust-certified` 以兼容已有工程文件，
+ *  同时也接受别名 `rust-based`。
  */
 "rust-certified";
 
@@ -1937,10 +1936,10 @@ export type ModuleConfig_Serialize = {
 	beacons: BeaconConfig_Serialize[],
 };
 
-/**  Evidence for the model searched, before any planner subset is written back. */
+/**  自动规划回写子集之前所搜模型的诊断记录。 */
 export type OptimizationReport = OptimizationReport_Serialize | OptimizationReport_Deserialize;
 
-/**  Evidence for the model searched, before any planner subset is written back. */
+/**  自动规划回写子集之前所搜模型的诊断记录。 */
 export type OptimizationReport_Deserialize = {
 	optimality_proven: boolean,
 	termination_reason: OptimizationTermination,
@@ -1954,7 +1953,7 @@ export type OptimizationReport_Deserialize = {
 	first_feasible_seconds?: number | null,
 };
 
-/**  Evidence for the model searched, before any planner subset is written back. */
+/**  自动规划回写子集之前所搜模型的诊断记录。 */
 export type OptimizationReport_Serialize = {
 	optimality_proven: boolean,
 	termination_reason: OptimizationTermination,
@@ -1971,18 +1970,18 @@ export type OptimizationReport_Serialize = {
 export type OptimizationTermination = "optimal" | "time-limit" | "search-stopped";
 
 /**
- *  Cargo transported between a planet and space.
+ *  行星与太空之间的货运机制。
  * 
- *  `location` is the planet: the origin of RocketExport, or destination of OrbitalDrop.
- *  Both directions preserve the item identity, including quality.
+ *  `location` 为所属行星：`RocketExport` 的起点，或 `OrbitalDrop` 的终点；
+ *  两个方向均保留包含品质在内的完整物品身份。
  */
 export type OrbitalCargoMechanic = OrbitalCargoMechanic_Serialize | OrbitalCargoMechanic_Deserialize;
 
 /**
- *  Cargo transported between a planet and space.
+ *  行星与太空之间的货运机制。
  * 
- *  `location` is the planet: the origin of RocketExport, or destination of OrbitalDrop.
- *  Both directions preserve the item identity, including quality.
+ *  `location` 为所属行星：`RocketExport` 的起点，或 `OrbitalDrop` 的终点；
+ *  两个方向均保留包含品质在内的完整物品身份。
  */
 export type OrbitalCargoMechanic_Deserialize = {
 	location?: Location,
@@ -1990,41 +1989,32 @@ export type OrbitalCargoMechanic_Deserialize = {
 };
 
 /**
- *  Cargo transported between a planet and space.
+ *  行星与太空之间的货运机制。
  * 
- *  `location` is the planet: the origin of RocketExport, or destination of OrbitalDrop.
- *  Both directions preserve the item identity, including quality.
+ *  `location` 为所属行星：`RocketExport` 的起点，或 `OrbitalDrop` 的终点；
+ *  两个方向均保留包含品质在内的完整物品身份。
  */
 export type OrbitalCargoMechanic_Serialize = {
 	location: Location,
 	item: IdWithQuality,
 };
 
-/**
- *  Project-level estimates, editable independently of physical transport
- *  coefficients. Weights in prototype data are grams.
- */
+/**  项目级星际运输估算成本，可独立于物理运输系数编辑。原型数据中重量单位为克。 */
 export type OrbitalTransportCosts = OrbitalTransportCosts_Serialize | OrbitalTransportCosts_Deserialize;
 
-/**
- *  Project-level estimates, editable independently of physical transport
- *  coefficients. Weights in prototype data are grams.
- */
+/**  项目级星际运输估算成本，可独立于物理运输系数编辑。原型数据中重量单位为克。 */
 export type OrbitalTransportCosts_Deserialize = {
 	rocket_export_per_kg?: number | null,
 	orbital_drop_per_stack?: number | null,
-	/**  Extra drop cost is this coefficient divided by effective spoil time in ticks. */
+	/**  额外空投惩罚 = 该系数 / 有效变质时间（tick）。 */
 	orbital_drop_spoil_penalty?: number | null,
 };
 
-/**
- *  Project-level estimates, editable independently of physical transport
- *  coefficients. Weights in prototype data are grams.
- */
+/**  项目级星际运输估算成本，可独立于物理运输系数编辑。原型数据中重量单位为克。 */
 export type OrbitalTransportCosts_Serialize = {
 	rocket_export_per_kg: number | null,
 	orbital_drop_per_stack: number | null,
-	/**  Extra drop cost is this coefficient divided by effective spoil time in ticks. */
+	/**  额外空投惩罚 = 该系数 / 有效变质时间（tick）。 */
 	orbital_drop_spoil_penalty: number | null,
 };
 
@@ -2077,7 +2067,7 @@ export type PlanningAction_Deserialize = ({ "set-preserve-existing-mechanics": {
 ({ "use-best-modules": {
 	quality: string,
 } }) & { "add-enumerated-beacon-with-prototype"?: never; "add-enumerated-module"?: never; "add-machine-preference"?: never; "enumerated-beacon-module"?: never; "remove-enumerated-beacon"?: never; "remove-enumerated-module"?: never; "remove-machine-preference"?: never; "reorder-machine-preference"?: never; "set-alternative-count"?: never; "set-enumerated-beacon"?: never; "set-preserve-existing-mechanics"?: never } | "add-enumerated-beacon" | 
-/**  Create a populated plan in one history entry, without a transient empty plan. */
+/**  在单条撤销历史中直接创建带原型与插件配置的插件塔枚举计划（避免产生中间空条目）。 */
 ({ "add-enumerated-beacon-with-prototype": {
 	beacon: IdWithQuality,
 } }) & { "add-enumerated-module"?: never; "add-machine-preference"?: never; "enumerated-beacon-module"?: never; "remove-enumerated-beacon"?: never; "remove-enumerated-module"?: never; "remove-machine-preference"?: never; "reorder-machine-preference"?: never; "set-alternative-count"?: never; "set-enumerated-beacon"?: never; "set-preserve-existing-mechanics"?: never; "use-best-modules"?: never } | ({ "remove-enumerated-beacon": {
@@ -2129,7 +2119,7 @@ export type PlanningAction_Serialize = ({ "set-preserve-existing-mechanics": {
 ({ "use-best-modules": {
 	quality: string,
 } }) & { "add-enumerated-beacon-with-prototype"?: never; "add-enumerated-module"?: never; "add-machine-preference"?: never; "enumerated-beacon-module"?: never; "remove-enumerated-beacon"?: never; "remove-enumerated-module"?: never; "remove-machine-preference"?: never; "reorder-machine-preference"?: never; "set-alternative-count"?: never; "set-enumerated-beacon"?: never; "set-preserve-existing-mechanics"?: never } | "add-enumerated-beacon" | 
-/**  Create a populated plan in one history entry, without a transient empty plan. */
+/**  在单条撤销历史中直接创建带原型与插件配置的插件塔枚举计划（避免产生中间空条目）。 */
 ({ "add-enumerated-beacon-with-prototype": {
 	beacon: IdWithQuality,
 } }) & { "add-enumerated-module"?: never; "add-machine-preference"?: never; "enumerated-beacon-module"?: never; "remove-enumerated-beacon"?: never; "remove-enumerated-module"?: never; "remove-machine-preference"?: never; "reorder-machine-preference"?: never; "set-alternative-count"?: never; "set-enumerated-beacon"?: never; "set-preserve-existing-mechanics"?: never; "use-best-modules"?: never } | ({ "remove-enumerated-beacon": {
@@ -2153,10 +2143,7 @@ export type PlanningPreferences = PlanningPreferences_Serialize | PlanningPrefer
  *  应用如何为项目里的每个机制枚举备选方案。
  */
 export type PlanningPreferences_Deserialize = {
-	/**
-	 *  Include enabled manual mechanisms as candidates, and append results
-	 *  without replacing existing entries. Manual surface exceptions are kept.
-	 */
+	/**  将已启用的手动机制纳入候选并追加结果，不替换现有条目；保留手动地表例外。 */
 	preserve_existing_mechanics?: boolean,
 	alternative_count?: number,
 	machine_preferences?: IdWithQuality[],
@@ -2169,10 +2156,7 @@ export type PlanningPreferences_Deserialize = {
  *  应用如何为项目里的每个机制枚举备选方案。
  */
 export type PlanningPreferences_Serialize = {
-	/**
-	 *  Include enabled manual mechanisms as candidates, and append results
-	 *  without replacing existing entries. Manual surface exceptions are kept.
-	 */
+	/**  将已启用的手动机制纳入候选并追加结果，不替换现有条目；保留手动地表例外。 */
 	preserve_existing_mechanics: boolean,
 	alternative_count: number,
 	machine_preferences: IdWithQuality[],
@@ -2434,9 +2418,9 @@ export type ProjectOpenRequestedEvent = null;
 export type ProjectSettings = ProjectSettings_Serialize | ProjectSettings_Deserialize;
 
 export type ProjectSettings_Deserialize = {
-	/**  Per-prototype estimates, shared by fission and fusion; absent = 3. */
+	/**  按建筑原型名覆盖邻居数估算，核反应堆与聚变反应堆共用；缺省为 3。 */
 	reactor_neighbours?: { [key in string]: number },
-	/**  Estimated orbital logistics prices, independent of physical flow coefficients. */
+	/**  星际物流估算价格，独立于物理流量系数。 */
 	orbital_transport_costs?: OrbitalTransportCosts_Deserialize,
 	time_scale?: TimeScale,
 	/**
@@ -2471,9 +2455,9 @@ export type ProjectSettings_Deserialize = {
 };
 
 export type ProjectSettings_Serialize = {
-	/**  Per-prototype estimates, shared by fission and fusion; absent = 3. */
+	/**  按建筑原型名覆盖邻居数估算，核反应堆与聚变反应堆共用；缺省为 3。 */
 	reactor_neighbours: { [key in string]: number },
-	/**  Estimated orbital logistics prices, independent of physical flow coefficients. */
+	/**  星际物流估算价格，独立于物理流量系数。 */
 	orbital_transport_costs: OrbitalTransportCosts_Serialize,
 	time_scale: TimeScale,
 	/**
@@ -2726,7 +2710,7 @@ export type ReactorMechanicAction_Serialize = ({ "set-reactor": {
 /**  反应堆组件。 */
 export type ReactorMechanic_Deserialize = {
 	reactor?: IdWithQuality,
-	/**  None inherits the project estimate, falling back to 3. */
+	/**  为 `None` 时继承项目级邻居估算，缺省回退为 3。 */
 	neighbours?: number | null,
 	/**  明确燃料（反应堆通常使用物品）；None = 自动选择/无需燃料。 */
 	fuel?: Fuel_Deserialize | null,
@@ -2735,7 +2719,7 @@ export type ReactorMechanic_Deserialize = {
 /**  反应堆组件。 */
 export type ReactorMechanic_Serialize = {
 	reactor: IdWithQuality,
-	/**  None inherits the project estimate, falling back to 3. */
+	/**  为 `None` 时继承项目级邻居估算，缺省回退为 3。 */
 	neighbours: number | null,
 	/**  明确燃料（反应堆通常使用物品）；None = 自动选择/无需燃料。 */
 	fuel: Fuel_Serialize | null,
@@ -3125,21 +3109,15 @@ export type SolveDiagnostics_Deserialize = {
 	variables_after: number,
 	/**  本次求解使用的后端。旧结果没有该字段时按 Rust based（rust-certified）解释。 */
 	solver?: LpSolver_Deserialize,
-	/**
-	 *  Exact certificate for the returned factory LP. After auto-plan this is
-	 *  the written-back factory, not the full candidate planning model.
-	 */
+	/**  所返回工厂 LP 的精确证书；自动规划后指的是写回后的工厂，而非完整候选规划模型。 */
 	exact_primal_verified?: boolean,
-	/**
-	 *  Optimality over the returned factory's mechanisms only; this does not
-	 *  establish optimality over all auto-plan candidates.
-	 */
+	/**  仅针对返回工厂当前机制的最优性证明，不代表全部自动规划候选的全局最优性。 */
 	exact_optimality_verified?: boolean,
-	/**  Optimization of the returned factory LP (after auto-plan writeback). */
+	/**  返回工厂 LP（自动规划写回后）的优化记录。 */
 	optimization?: OptimizationReport_Deserialize | null,
-	/**  Optimization of the full candidate LP, before auto-plan writeback. */
+	/**  自动规划写回前完整候选 LP 的优化记录。 */
 	planning_optimization?: OptimizationReport_Deserialize | null,
-	/**  Verified bound for this returned factory LP, rounded upward for display. */
+	/**  所返回工厂 LP 的已认证成本下界（展示用，向上取整）。 */
 	certified_relative_gap?: number | null,
 	relative_primal_verified?: boolean,
 	maximum_relative_balance_error?: number | null,
@@ -3159,21 +3137,15 @@ export type SolveDiagnostics_Serialize = {
 	variables_after: number,
 	/**  本次求解使用的后端。旧结果没有该字段时按 Rust based（rust-certified）解释。 */
 	solver: LpSolver_Serialize,
-	/**
-	 *  Exact certificate for the returned factory LP. After auto-plan this is
-	 *  the written-back factory, not the full candidate planning model.
-	 */
+	/**  所返回工厂 LP 的精确证书；自动规划后指的是写回后的工厂，而非完整候选规划模型。 */
 	exact_primal_verified: boolean,
-	/**
-	 *  Optimality over the returned factory's mechanisms only; this does not
-	 *  establish optimality over all auto-plan candidates.
-	 */
+	/**  仅针对返回工厂当前机制的最优性证明，不代表全部自动规划候选的全局最优性。 */
 	exact_optimality_verified: boolean,
-	/**  Optimization of the returned factory LP (after auto-plan writeback). */
+	/**  返回工厂 LP（自动规划写回后）的优化记录。 */
 	optimization?: OptimizationReport_Serialize,
-	/**  Optimization of the full candidate LP, before auto-plan writeback. */
+	/**  自动规划写回前完整候选 LP 的优化记录。 */
 	planning_optimization?: OptimizationReport_Serialize,
-	/**  Verified bound for this returned factory LP, rounded upward for display. */
+	/**  所返回工厂 LP 的已认证成本下界（展示用，向上取整）。 */
 	certified_relative_gap: number | null,
 	relative_primal_verified: boolean,
 	maximum_relative_balance_error: number | null,
@@ -3207,7 +3179,7 @@ export type SolveResultEvent_Deserialize = SolveResult_Deserialize;
 export type SolveResultEvent_Serialize = SolveResult_Serialize;
 
 export type SolveResult_Deserialize = {
-	/**  Document version used by this solve, for rejecting stale frontend events. */
+	/**  用于检验过期前端事件的文档版本。 */
 	revision?: number,
 	project: ProjectId,
 	factory: FactoryId,
@@ -3224,7 +3196,7 @@ export type SolveResult_Deserialize = {
 };
 
 export type SolveResult_Serialize = {
-	/**  Document version used by this solve, for rejecting stale frontend events. */
+	/**  用于检验过期前端事件的文档版本。 */
 	revision: number,
 	project: ProjectId,
 	factory: FactoryId,
@@ -3418,16 +3390,16 @@ export type TargetTerm_Serialize<F = DualVar_Serialize | DualVar_Deserialize> = 
 	coefficient: number | null,
 };
 
-/**  Shared physical tile capabilities for UI filtering and command validation. */
+/**  供界面过滤与命令校验共用的地格物理能力。 */
 export type TileCapabilities = TileCapabilities_Serialize | TileCapabilities_Deserialize;
 
-/**  Shared physical tile capabilities for UI filtering and command validation. */
+/**  供界面过滤与命令校验共用的地格物理能力。 */
 export type TileCapabilities_Deserialize = {
 	fluid?: string | null,
 	destroys_dropped_items: boolean,
 };
 
-/**  Shared physical tile capabilities for UI filtering and command validation. */
+/**  供界面过滤与命令校验共用的地格物理能力。 */
 export type TileCapabilities_Serialize = {
 	fluid: string | null,
 	destroys_dropped_items: boolean,

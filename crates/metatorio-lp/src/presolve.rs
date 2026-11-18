@@ -1,12 +1,11 @@
-//! Sparse zero propagation with an independently checked original-model proof.
+//! 稀疏零传播预检：发现不可行时附带在完整原模型上独立验算的证明。
 use crate::{InfeasibilityCertificate, Model, Rational, SolveControl, rational};
 use num_traits::{Signed, Zero};
 use std::collections::{HashSet, VecDeque};
 
 impl Model {
-    /// Nonnegative variables and homogeneous one-sided rows can force columns
-    /// to zero. A contradicted demand is returned only with a full Farkas proof.
-    /// None means unknown, not feasible. No dense basis or floating tolerance.
+    /// 非负变量与齐次单向约束可将部分列强制推零；仅当存在完整 Farkas 证明时
+    /// 才返回矛盾需求证书，返回 `None` 表示未知（不代表可行），不依赖稠密基或浮点容差。
     pub fn prove_zero_propagation_infeasible(
         &self,
         control: &SolveControl,
@@ -14,8 +13,7 @@ impl Model {
         Ok(self.zero_propagation_analysis(control)?.1)
     }
 
-    /// Columns forced to zero by homogeneous rows and nonnegative bounds.
-    /// This is a search reduction; final witnesses must still cover self.
+    /// 标记被齐次行与非负界强制推零的列；仅作搜索缩减用，最终证明仍需覆盖原模型 `self`。
     pub fn zero_forced_columns_with_control(
         &self,
         control: &SolveControl,

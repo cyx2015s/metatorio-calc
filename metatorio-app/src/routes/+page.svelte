@@ -661,7 +661,7 @@
     try {
       await runtime.addUniverse(name);
     } catch {
-      // the runtime store already exposes the command error.
+      // runtime store 已直接暴露本次命令错误，此处无需重复弹窗。
     }
   }
 

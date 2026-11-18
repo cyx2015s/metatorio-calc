@@ -1,7 +1,6 @@
-//! Sign-closed relevance reduction for nonnegative-cost production LPs.
-//! Rows use A x <= b (or equality). This is not ordinary backwards reachability:
-//! selected inputs require every possible supplier, and equalities also require
-//! all disposal directions. Cycles are retained without requiring a start seed.
+//! 针对非负成本生产 LP 的符号闭合相关性约简。
+//! 行约束为 `A x <= b`（或等式）。区别于普通反向可达性：被选中的输入需要保留所有可能供给，
+//! 等式约束还需要保留全部消耗/处置方向，同时保留环路而无需显式起点。
 use crate::{
     Basis, BasisStatus, ExactSolution, FloatCandidate, FloatOptions, FloatProgress, Model,
     Rational, Row, SolveControl, rational,
@@ -13,7 +12,7 @@ pub struct RelevanceReduction {
     pub model: Model,
     pub columns: Vec<usize>,
     pub rows: Vec<usize>,
-    /// Original zero-cost columns with no consumption or equality effects.
+    /// 没有消耗或等式依赖的原模型零成本自由供给列。
     pub free_suppliers: Vec<usize>,
     original_columns: usize,
     original_rows: usize,

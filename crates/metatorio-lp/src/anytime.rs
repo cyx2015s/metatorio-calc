@@ -1,13 +1,13 @@
-//! Primal-only anytime results. Optimality is an optional stronger certificate.
+//! 仅含原始可行性的随时可用（anytime）结果；最优性证明属于可选的更强证书。
 use crate::{Basis, Certificate, ExactSolution};
 
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct PivotCostChange {
-    /// Global count of completed, certified primal optimization pivots.
+    /// 已完成且经过认证的原始单纯形优化主元累计次数。
     pub pivot: usize,
     pub cost_before: f64,
     pub cost_after: f64,
-    /// Converted from the exact rational difference, not an f64 subtraction.
+    /// 由精确有理数差值转换得到，而非 `f64` 直接相减。
     pub decrease: f64,
 }
 
@@ -15,17 +15,14 @@ pub struct PivotCostChange {
 pub struct AnytimeResult {
     pub solution: ExactSolution,
     pub basis: Basis,
-    /// Always certifies primal feasibility on the complete original model.
+    /// 始终在完整原模型上认证原始可行性。
     pub certificate: Certificate,
     pub pivots: usize,
-    /// All strictly positive exact original-cost decreases, including those
-    /// outside the recent display window or unrepresentable as finite f64.
+    /// 全部严格正的原目标精确下降次数（包括超出最近展示窗口或无法表示为有限 `f64` 的主元）。
     pub improving_pivots: usize,
     pub timed_out: bool,
-    /// Last eight representable original-cost primal pivots, including zero
-    /// decreases. Each pair belongs to one uninterrupted master segment; a new
-    /// segment starts its own baseline and never contributes a synthetic pivot.
-    /// Pivots whose costs cannot be represented by finite f64s are omitted.
+    /// 最近 8 次可表示的原目标优化主元记录（含零下降）。每对记录属于同一段连续主问题；
+    /// 新区段会另起基线，不会合成跨段差值，无法表示为有限 `f64` 的主元会省略。
     pub recent_pivot_cost_changes: Vec<PivotCostChange>,
 }
 

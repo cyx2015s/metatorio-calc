@@ -20,7 +20,7 @@ export const mechanicKindLabels: Record<string, string> = {
     "tile-dispose": "地格销毁",
 };
 
-// Catalog selector, primary field, and (when different) localization namespace.
+// 目录选择器类别、主原型字段名以及（当不同时的）本地化命名空间。
 const primaryPrototypes = {
   recipe: ["recipe", "recipe"],
   mining: ["resource", "resource"],

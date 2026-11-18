@@ -1,5 +1,4 @@
-// Share observers across all row shells. At the narrow workspace breakpoint the
-// workspace itself scrolls; on desktop each column owns its scroll position.
+// 所有行壳共用 IntersectionObserver：窄屏断点下由整体工作区滚动，桌面宽屏由中栏独立滚动。
 type Subscription = { root: Element | null; callback: (visible: boolean) => void };
 const subscriptions = new Map<HTMLElement, Subscription>();
 const roots = new Map<Element | null, { observer: IntersectionObserver; nodes: Set<HTMLElement> }>();

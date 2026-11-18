@@ -1,7 +1,7 @@
-//! Cancellation for a synchronous solve call tree on one worker thread.
+//! 单个工作线程上同步求解调用树的协作取消控制。
 //!
-//! The scope is deliberately thread local: spawned threads must install their
-//! own cloned token. It is restored on return and on panic.
+//! 作用域刻意限定在线程局部存储：派生的新线程必须自行安装克隆后的令牌。
+//! 函数返回或 panic 时自动恢复原作用域。
 use std::{
     cell::RefCell,
     sync::{
@@ -39,7 +39,7 @@ impl CancellationToken {
     }
 }
 
-/// Cancellation is unfinished computation, never an infeasibility proof.
+/// 取消只表示计算未完成，绝不等价于不可行证明。
 pub fn check_cancelled() -> Result<(), String> {
     if CURRENT.with(|slot| {
         slot.borrow()

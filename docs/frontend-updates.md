@@ -27,18 +27,8 @@
   实际 DOM、求解缓存隔离、版本拒绝与并发 busy 状态。
 - `cargo test -p metatorio-runtime --no-default-features --features microlp,rust-lp --lib`
 - `cargo test -p metatorio-shell --no-default-features --features microlp,rust-lp --lib -- --skip auto_plan_assets_tests`
-
-本轮未稳定复现用户最初遇到的完整操作序列；上述修复针对代码中确认且可控制时序复现的竞态，
-不把普通单次编辑通过测试等同于证明不存在其他组合问题。
-
-后续已根据最简路径复现并定位另一处直接原因：新建项目→新建宇宙工厂→网络→普通工厂。
-`MechanicNetworkView` 销毁时通过可变的 `viewState` 属性保存视口，还读取 `selectedId`
-派生模型；此时父级选择已经切换，销毁阶段会重新求值下一工厂的父级派生链，之后
-普通工厂工具栏、侧栏和网络一起停留在旧快照，而 runtime 文档仍能正常更新。
-现改为在 keyed 网络组件创建时捕获该作用域自己的状态对象，并在存活的 effect 中保存
-筛选／选中／缩放设置；销毁只使用捕获的对象和 Cytoscape 数据，不再读取父级属性或模型。
-`npm run test:network-scope-switch-browser` 覆盖这个路径、即时增改及反复切换后的设置隔离。
+- `npm run test:network-scope-switch-browser`：覆盖宇宙/普通作用域切换时的状态捕获与卸载销毁隔离（`MechanicNetworkView` 卸载只读捕获的本地状态，不触碰已切换后的父级派生链）。
 
 仍有可优化的成本：新增机制后再指定原型、批量配置插件等复合操作，会发送多条独立
 dispatch，每条数值修改仍各自求解。消除此类中间求解需要显式的批量／事务入口；
-本轮保留现有独立消息的保存和撤销语义，没有用前端延迟定时器吞掉这些编辑。
+当前保留现有独立消息的保存和撤销语义。

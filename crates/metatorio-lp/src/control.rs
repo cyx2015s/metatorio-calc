@@ -1,4 +1,4 @@
-//! Optional cooperative cancellation, separate from nonterminal pivot observers.
+//! 可选协作取消控制，独立于非终态主元观察器。
 use std::{
     sync::{
         Arc,
@@ -7,10 +7,8 @@ use std::{
     time::Instant,
 };
 
-/// Interrupt expensive exact operations without treating unfinished work as a
-/// feasibility or optimality proof. Defaults never interrupt. Checks occur
-/// between elimination rows and triangular solve rows; an individual rational
-/// operation and memory allocation are not preemptible.
+/// 用于中断高耗时精确运算，但不把未完成的计算当成可行性或最优性证明。
+/// 默认不中断；检查点位于消元行与三角求解行之间，单次有理数运算和内存分配不可抢占。
 #[derive(Clone, Default)]
 pub struct SolveControl {
     deadline: Option<Instant>,

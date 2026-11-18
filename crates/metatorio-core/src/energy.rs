@@ -80,7 +80,7 @@ fn add_emissions(
     }
 }
 
-/// Apply the fluid source's per-tick usage rule.
+/// 应用流体能源的每 tick 消耗规则。
 fn fluid_usage(requested: f64, maximum: f64, scale_usage: bool, fulfillment: &mut f64) -> f64 {
     if requested <= 0.0 {
         return 0.0;
@@ -94,13 +94,13 @@ fn fluid_usage(requested: f64, maximum: f64, scale_usage: bool, fulfillment: &mu
         *fulfillment = (*fulfillment).min(maximum / used);
         used = maximum;
     } else if !scale_usage {
-        // A fixed fluid usage keeps the source at its declared flow rate.
+        // 不随负载缩放消耗时，流体来源固定按声明的最大速率消耗。
         used = maximum;
     }
     used
 }
 
-/// Convert an energy source to one-second flow coefficients.
+/// 将能源配置转换为每秒流量系数。
 pub fn energy_source_as_flow(
     ctx: &Context,
     energy_source: &EnergySource,
@@ -168,8 +168,7 @@ pub fn energy_source_as_flow(
                     fuel_emissions_multiplier = item.fuel_emissions_multiplier;
                 }
                 Some(FuelSpec::Fluid(_)) => {
-                    // A burner cannot consume a fluid fuel. Keep the mechanism
-                    // usable when a shared config contains an irrelevant fuel.
+                    // 燃烧室不能消耗流体燃料；当共享配置里混入无关燃料时，保留该机制可用。
                     return flow;
                 }
                 None => {
@@ -274,9 +273,8 @@ pub fn energy_source_as_flow(
                 }
                 Some(FuelSpec::Item(_)) => {}
                 None => {
-                    // With no selected fluid, the solver only sees the energy
-                    // deficit. A concrete provider (流体燃料机制/锅炉等) supplies
-                    // the matching abstract flow in a later conversion step.
+                    // 未指定具体流体时，求解器只记录能量缺口；
+                    // 由具体供给机制（流体燃料/锅炉等）在后续转换流步骤补齐匹配的抽象流。
                     let filter = source.fluid_box.filter.clone().unwrap_or_default();
                     if burns_fluid {
                         // 燃烧流体：消耗"流体燃料"抽象能量（热值流体被燃烧）。

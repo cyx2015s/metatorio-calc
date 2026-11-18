@@ -59,8 +59,7 @@
     observer.observe(element);
     return () => observer.disconnect();
   });
-  // Keep the panel on one side of the pointer; clamping a tall panel over the
-  // source icon would make that icon impossible to click.
+  // 将浮层保持在指针一侧；若把较高的面板钳制压回源图标上方，会遮挡该图标导致无法点击。
   let above = $derived(viewport.height - y - 22 < 200 && y > viewport.height - y);
   let maxHeight = $derived(Math.max(80, above ? y - 22 : viewport.height - y - 22));
   let left = $derived(Math.max(8,

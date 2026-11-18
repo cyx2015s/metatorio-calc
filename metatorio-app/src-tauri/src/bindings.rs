@@ -1,4 +1,4 @@
-//! One registry drives runtime commands and generated TypeScript contracts.
+//! 唯一命令注册表，同时驱动运行时命令与生成的 TypeScript 契约。
 use super::*;
 use serde::Serialize;
 use specta::Type;
@@ -69,7 +69,7 @@ pub(super) fn builder() -> Builder<tauri::Wry> {
                 open_project_file,
                 take_project_open_requests,
             ])
-            // Preserve Tauri's existing promise rejection and JSON number wire contract.
+            // 保持既有 Tauri Promise 拒绝格式与 JSON number 数值传输契约。
             .error_handling(ErrorHandlingMode::Throw)
             .dangerously_cast_bigints_to_number(),
     )

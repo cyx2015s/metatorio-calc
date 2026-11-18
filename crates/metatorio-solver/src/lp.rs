@@ -51,7 +51,7 @@ pub struct PivotCostChange {
     pub decrease: f64,
 }
 
-/// Evidence for the model searched, before any planner subset is written back.
+/// 自动规划回写子集之前所搜模型的诊断记录。
 #[cfg_attr(feature = "specta", derive(specta::Type))]
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OptimizationReport {
@@ -329,7 +329,7 @@ fn solve_lp_impl(
             ));
         }
     }
-    // Backend-independent variable numbering follows declaration order.
+    // 后端无关的变量编号按声明顺序分配。
     let index_of: AIndexMap<Variable, usize> = variables
         .iter_variables_with_def()
         .enumerate()

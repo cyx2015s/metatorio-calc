@@ -1,5 +1,5 @@
-//! Original-resolution PNG assembly without a full-image framebuffer.
-//! Tiles arrive in row-major order; only one horizontal band is retained.
+//! 无需整图帧缓冲的原始分辨率 PNG 流式拼接导出。
+//! 图块按行主序依次到达，内存中仅保留单个横向条带。
 use base64::Engine;
 use serde::Serialize;
 use std::{
@@ -76,7 +76,7 @@ impl NetworkPngExports {
 }
 
 struct PngExport {
-    // Drop the writer before removing its temporary file on Windows.
+    // Windows 上删除或替换临时文件前先释放流写入器。
     stream: Option<png::StreamWriter<'static, File>>,
     temp: tempfile::NamedTempFile,
     destination: PathBuf,
@@ -94,7 +94,7 @@ impl PngExport {
             return Err("PNG 尺寸必须大于零".into());
         }
         let row_bytes = (width as usize).checked_mul(4).ok_or("PNG 行宽溢出")?;
-        // This bounds working memory, not output dimensions or resolution.
+        // 这里只限制工作内存上限，不限制输出图像尺寸或分辨率。
         let band_height = MAX_BAND_HEIGHT
             .min((BAND_BYTES / row_bytes).max(1) as u32)
             .min(height);
@@ -199,8 +199,7 @@ impl PngExport {
             .ok_or("PNG 编码器已结束")?
             .finish()
             .map_err(|e| e.to_string())?;
-        // png's owned Writer writes IEND on drop; detect a failed final write
-        // before replacing an existing destination.
+        // png 的 Writer 在释放时写入 IEND；在覆盖已有目标文件前先校验末尾写入是否完整。
         let file = self.temp.as_file_mut();
         file.seek(SeekFrom::End(-12)).map_err(|e| e.to_string())?;
         let mut end = [0; 12];

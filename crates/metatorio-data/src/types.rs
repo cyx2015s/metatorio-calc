@@ -1091,7 +1091,7 @@ pub struct SimpleModifier {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BoolModifer {
-    /// Required by the inherited BoolModifier schema, including unlock effects.
+    /// 继承 `BoolModifier` schema 所需字段（包含解锁效果）。
     pub modifier: bool,
 }
 
@@ -1119,15 +1119,15 @@ pub struct UnlockSpaceLocationModifier {
 #[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Effect {
-    /// Multiplier to energy used during operation (not idle/drain use). The minimum possible sum is -80%.
+    /// 运行时能耗倍率（不含待机/漏电功耗），总和下限为 -80%。
     pub consumption: f64,
-    /// Multiplier to the pollution factor of an entity's pollution during use. The minimum possible sum is -80%.
+    /// 运行时污染系数倍率，总和下限为 -80%。
     pub pollution: f64,
-    /// Multiplied against work completed, adds to the bonus results of operating. E.g. an extra crafted recipe or immediate research bonus. The minimum possible sum is 0%.
+    /// 与已完成工作量相乘并累加到额外产出（如额外制作一次或即时科研加成），总和下限为 0%。
     pub productivity: f64,
-    /// Adds a bonus chance to increase a product's quality. The minimum possible sum is 0%.
+    /// 增加产出更高品质物品的额外概率，总和下限为 0%。
     pub quality: f64,
-    /// Modifier to crafting speed, research speed, etc. The minimum possible sum is -80%.
+    /// 制作速度、研究速度等速率修正，总和下限为 -80%。
     pub speed: f64,
 }
 

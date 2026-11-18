@@ -1,5 +1,5 @@
-//! A small initial admission hint using the current primal's unused resources.
-//! Floating scores only rank columns; no point or LP status is accepted here.
+//! 利用当前原始解中未使用资源的轻量初始准入提示。
+//! 浮点评分仅用于列排序，不在此处接受任何解点或 LP 状态。
 use crate::{Basis, BasisStatus, ExactSolution, Model, SolveControl, restricted::RestrictedIndex};
 use num_traits::ToPrimitive;
 

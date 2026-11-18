@@ -793,7 +793,7 @@ pub enum PlanningAction {
         quality: String,
     },
     AddEnumeratedBeacon,
-    /// Create a populated plan in one history entry, without a transient empty plan.
+    /// 在单条撤销历史中直接创建带原型与插件配置的插件塔枚举计划（避免产生中间空条目）。
     AddEnumeratedBeaconWithPrototype {
         beacon: IdWithQuality,
     },

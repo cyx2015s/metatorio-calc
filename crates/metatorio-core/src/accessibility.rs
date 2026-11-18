@@ -167,8 +167,7 @@ pub struct GraphData {
     recipes_by_product: HashMap<String, Vec<String>>,
     /// 物品名 → 可采出它的矿藏实体名（minable 产出）。
     resources_by_product: HashMap<String, Vec<String>>,
-    /// 变质产物名 → 可变质成它的物品名（`item.spoil_result`，隐含
-    /// "spoil.<item>" 配方，对应 yafc 的 getSpoilRecipe）。
+    /// 变质产物名 → 可变质成它的物品名（`item.spoil_result`，隐含 `"spoil.<item>"` 配方）。
     spoil_sources: HashMap<String, Vec<String>>,
     /// 燃烧产物 → 可燃烧成它的燃料物品（ItemFuel 机制）。
     burnt_sources: HashMap<String, Vec<String>>,
@@ -1047,9 +1046,8 @@ fn requirements(store: &PrototypeStore, graph: &GraphData, node: &Accessible) ->
                         .collect(),
                 )
             } else if matches!(node, Accessible::Planet(name) if name == "nauvis") {
-                // Product default, not an engine-discoverable starting location:
-                // prototype dumps do not include scenario/force unlock state.
-                // Explicit unlock effects take precedence, even for Nauvis.
+                // 产品默认起点，而非游戏引擎内置的通用出生点：
+                // 原型 dump 不包含场景或玩家力量的初始解锁状态；若显式声明了解锁效果，以效果为准。
                 Requirement::All(Vec::new())
             } else {
                 Requirement::Any(Vec::new())

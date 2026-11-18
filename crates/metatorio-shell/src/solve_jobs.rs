@@ -12,7 +12,7 @@
 //! - **latest-wins 合并**：快照在**拿到键锁之后**才取，排队中的请求因此
 //!   看到的是最新文档；若其身份（文档版本 + 可达性代次 + store 实例）与上次
 //!   求解相同，直接复用结果，不再重算——拖滑块产生的连串重算合并成一次。
-//! - **求解期间文档又变了 → 再算一轮**（最多 [`MAX_ROUNDS`] 轮，避免活锁），
+//! - **求解期间文档又变了 → 再算一轮**（最多 `MAX_ROUNDS` 轮，避免活锁），
 //!   保证返回结果尽量新鲜。
 //! - 失败结果不缓存（避免一次瞬时失败被后续请求反复命中）。
 
@@ -30,7 +30,7 @@ pub trait JobSnapshot: Clone + Send + Sync + 'static {
     fn epoch(&self) -> u64;
     fn store(&self) -> &Arc<PrototypeStore>;
 }
-// Specialized snapshots share the project input identity via Deref.
+// 各专用快照通过 Deref 共享项目输入身份。
 impl<S> JobSnapshot for S
 where
     S: std::ops::Deref<Target = metatorio_runtime::ProjectSnapshot> + Clone + Send + Sync + 'static,
@@ -100,7 +100,7 @@ impl KeyLocks {
 
 /// 求解调度器（挂在 `AppState` 上，按用途各一份）。
 ///
-/// `R` 是这次「求解」的产出：重算产 [`SolveResult`]，自动规划产
+/// `R` 是这次「求解」的产出：重算产 [`metatorio_runtime::SolveResult`]，自动规划产
 /// `(快照, 候选机制)`（快照用于回写前的版本校验）。
 pub struct SolveJobs<R, E = String, S = SolveSnapshot> {
     slots: Mutex<HashMap<SolveKey, Arc<Mutex<Slot<R>>>>>,
@@ -133,9 +133,8 @@ fn solve_timeout_from_env(default: Duration) -> Duration {
 impl<R: Clone + Send + 'static, E: From<String> + Send + 'static, S: JobSnapshot>
     SolveJobs<R, E, S>
 {
-    /// MCP auto_plan returns its running state immediately; its background job
-    /// can wait longer than an ordinary synchronous recompute. Explicit timeout
-    /// configuration still takes precedence over this default.
+    /// MCP `auto_plan` 会立刻返回 running 状态；后台作业的排队/执行等待上限
+    /// 高于普通同步重算。显式配置的超时时间仍然优先。
     pub fn for_auto_plan() -> Self {
         Self {
             slots: Mutex::new(HashMap::new()),
@@ -187,9 +186,8 @@ impl<R: Clone + Send + 'static, E: From<String> + Send + 'static, S: JobSnapshot
                 let task_snapshot = snapshot.clone();
                 let compute = compute.clone();
                 let cancellation = CancellationToken::default();
-                // Also cancel when the caller drops/aborts this future. The
-                // worker owns the key guard until it really exits, including
-                // non-cooperative preprocessing and native backend calls.
+                // 当调用方丢弃/中止该 future 时同步触发取消；工作线程在真正退出前
+                // （包括不可中断的预处理与原生后端调用）始终持有该工厂键锁。
                 struct CancelOnDrop(CancellationToken);
                 impl Drop for CancelOnDrop {
                     fn drop(&mut self) {

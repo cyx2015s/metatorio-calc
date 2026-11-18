@@ -22,8 +22,7 @@ export async function reorderIds(
       return;
     }
   }
-  // Arbitrary permutations retain the existing stable back-to-front algorithm.
-  // Re-read after every write: snapshots or even list membership may have changed.
+  // 任意置换保留稳定的从后往前移动算法；每次写入后重新读取，因为快照或列表成员可能已变化。
   for (let position = order.length - 1; position >= 0; position--) {
     const index = read().findIndex(entry => entry.id === order[position]);
     if (index >= 0 && index !== position) await move(order[position], position);

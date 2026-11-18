@@ -1,5 +1,5 @@
-/** Reuse unchanged JSON branches without mutating the published snapshot.
- * `next` is a fresh, owned IPC response; only that response is reconciled.
+/** 复用未变化的 JSON 分支且不修改已发布的旧快照。
+ * `next` 必须是新收到的独立 IPC 响应对象，仅对该响应做结构共享协调。
  */
 export function reconcileSnapshot<T>(previous: T | null, next: T): T {
   if (Object.is(previous, next)) return next;

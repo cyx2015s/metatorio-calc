@@ -1,9 +1,8 @@
-//! Sparse row-pivoted LU plus a bounded product-form (eta) update chain.
-//! No coefficient is dropped by tolerance: numerical failures remain hints.
+//! 稀疏行主元 LU 分解与有界乘积形式（eta）更新链。
+//! 不按容差丢弃任何系数；数值失败仅作为搜索提示处理。
 use std::collections::{BTreeMap, BTreeSet};
 
-// Match the periodic refactor interval in float.rs; this bounds only the
-// product-form update chain, independently of matrix dimensions and sparsity.
+// 与 float.rs 中的周期性重构间隔一致，与矩阵维度及稀疏度无关地限制 eta 链长度。
 const MAX_ETAS: usize = 128;
 const MIN_PIVOT: f64 = 1e-14;
 

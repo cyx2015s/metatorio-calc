@@ -1,4 +1,4 @@
-//! Exact correction of an untrusted candidate basis, preserving full-model scope.
+//! 保留完整原模型作用域，对未认证候选基做精确可行性修复与优化。
 use crate::{
     Basis, BasisStatus, Certificate, DualPivotRule, ExactSolution, InfeasibilityCertificate, Model,
     PivotProgress, Rational, SolveControl, rational,
