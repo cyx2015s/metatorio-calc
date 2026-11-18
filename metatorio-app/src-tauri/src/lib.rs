@@ -1,10 +1,10 @@
-//! Tauri adapter：把 GUI 无关的 `metatorio-shell` 接到 Tauri 上。
+//! Tauri 桌面端适配层：将平台中立的 `metatorio-shell` 桥接至 Tauri 2.0 运行时。
 //!
-//! 业务逻辑全在 `metatorio-shell`。这一层只负责：
-//! - [`TauriHost`]：用 `AppHandle` 实现 shell 的 `Host`（emit / app_data_dir）；
-//! - [`run`]：建窗口、装插件、启 MCP、恢复缓存上下文；
-//! - 一组 `#[tauri::command]` 薄包装：参数转换后转发给 shell；
-//! - 纯 GUI 的文件对话框命令（`pick_*`）。
+//! 核心业务与状态管理完全驻留于 `metatorio-shell`，本层专注负责桌面原生外壳职责：
+//! - [`TauriHost`]：基于 Tauri `AppHandle` 实现 [`Host`] 契约（原生事件广播与系统数据目录解析）；
+//! - 应用启动与生命周期（[`run`]）：窗口创建、插件集成、MCP 服务启动与上下文缓存恢复；
+//! - 类型化 IPC 桥梁：提供与前端通过 `tauri-specta` 绑定的命令与事件处理薄包装；
+//! - 平台专属原生集成：跨平台文件选择对话框（`pick_*`）与单实例进程关联调起。
 
 use std::path::PathBuf;
 use std::sync::Arc;

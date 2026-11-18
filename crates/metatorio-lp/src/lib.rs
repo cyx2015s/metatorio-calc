@@ -1,6 +1,11 @@
-//! Pure Rust exact reconstruction and verification for continuous binary-f64 LPs.
-//! Every input coefficient is interpreted as its exact binary rational value.
-//! A basis is a hint, not a proof; verification always checks the original LP.
+//! metatorio-lp：纯 Rust 实现的连续 binary-f64 线性规划精确重构与基验证引擎。
+//!
+//! ### 核心设计哲学
+//! - **精确有理数解释**：所有输入的浮点系数均被解释为其完全精确的二进制有理数表示（[`Rational`]），
+//!   杜绝浮点累计误差导致的约束漂移与伪不可行判定；
+//! - **基仅作为提示（Basis is a hint, not a proof）**：浮点求解器或启发式提供的基状态仅用作热启动候选；
+//!   最终解的原始/对偶可行性与最优性均在原始 LP 问题上通过精确有理数运算严格验算；
+//! - **代数分解与修复**：集成稀疏精确矩阵分解、对偶单纯形修复算法（[`DualRepair`]）与不可行性证书验证。
 use num_bigint::BigInt;
 use num_integer::Integer;
 pub use num_rational::BigRational as Rational;

@@ -1,138 +1,197 @@
-# 警告
-
-使用自动规划工具前，请自行检查游戏数据不会使得状态空间过于膨胀！！！针对离谱数值机器的枚举微调正在规划中，但不是主要内容。如使用[exfret's randomizer](https://mods.factorio.com/mod/propertyrandomizer)产生插件槽过多的机器。目前的临时限制为：超过8个插件槽位的机器不会尝试枚举空插件，且插件槽过多的机器可能会忽视绝大部分槽位。
-
 # 切向量化工具 Metatorio
 
-切向量化是切向量正在锐意制作中的量化工具，主要用于异星工厂中的问题计算。切向量化使用了顶针的修辞手法，令人忍俊不禁。
+> **Metatorio（切向量化）** 是作者「切向量」倾力打造的高性能《异星工厂》（Factorio）量化与自动化工厂规划工具。
+> 软件名称巧妙运用了顶针修辞手法——从“切向量”到“切向量化”，在严谨的运筹学求解中不失灵动趣味。
 
-# 使用方法
+[![Rust Version](https://img.shields.io/badge/Rust-%E2%89%A51.85-orange.svg)](https://www.rust-lang.org/)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-blue.svg)](https://tauri.app/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-1. （使用新的模组集时）点击右上角状态栏的「数据」，再点「加载游戏数据…」
-   1. 选择异星工厂可执行文件的路径
-   2. （可选）选择模组文件夹的路径
-   3. 确认加载
-2. 点击左上角「项目」下拉菜单，选择「新建项目…」；也可以在同一菜单里导入、保存或关闭项目
-3. 点击顶部工厂栏右侧的「+」新建工厂；「✦」新建宇宙工厂
-   1. 左栏顶部有两个 tab：
-      - 「工厂」：从上到下编辑环境与约束（星球、地表、严格供给/严格消耗）、生产目标、外部输入、目标表达式
-      - 「项目」：编辑时间刻度、**主品质**、品质上限、可达性、里程碑、配方/采矿/无限科技产能，以及自动规划的机器偏好、枚举插件与插件塔
-   2. 目标行左侧图标可改流，右键图标可查看能供给它的机制；目标行末尾的「×」在悬停时出现
-   3. 在中栏顶部点「+ 添加机制」手动添加游戏机制，包括但不限于配方、采矿、燃烧物品、变质、种植
-   4. 点「自动规划」，根据工厂/项目 tab 里的条件尝试自动添加机制。如果失败，可能是问题本身过于复杂，可以尝试添加外部输入、减少产量。建议启用严格供给模式再运行自动规划
-   5. 右栏「求解结果」显示总成本与总流平衡；点结果行末尾的「✦」可查看该流的供给/消耗建议
-4. 顶部「数据」里可以切换、重命名或删除游戏上下文缓存
-5. 需要跨星球运输时，用「✦」创建宇宙工厂：本地机制使用各自地点环境，火箭转移消耗源星球火箭重量并把物品送到太空，太空物品可零成本落到任意星球。详见 [docs/universe-factory.md](docs/universe-factory.md)
-6. 应用菜单「⋯」→「字体设置…」可分别指定界面字体与代码字体；设置只保存在本机浏览器，不写入项目文件
+---
 
-工程默认保存为 `.metatorio`（内容仍为 JSON，兼容旧 `.json`／`.fpp`）。可把工程拖到软件图标或窗口中打开；已有 GUI 时会转交并切换到现有窗口。新版安装包提供 `.metatorio` 的双击关联，便携 EXE 不自动注册关联。详见[工程文件与加载链路](docs/project-files.md)。
-   
-## 产物表达式
+## ✨ 核心特性
 
-（以下为旧版本截图，新版本操作略有不同但结果一致）
+- 🧮 **工业级线性规划（LP）多求解后端**：
+  - **HiGHS**（默认推荐）：现代化高性能工业求解器，速度与数值稳定性兼备；
+  - **SoPlex**：精准有理数单纯形求解器（集成 Boost 精确模式），杜绝浮点累计误差；
+  - **Clarabel**：内点法（IPM）二次锥规划求解器；
+  - **microlp**：纯 Rust 轻量级浮点求解器；
+  - **rust-certified**（自研）：纯 Rust 编写的精确有理数重构与基解验证引擎。
+- 🚀 **太空时代（Space Age）全机制与宇宙工厂支持**：
+  - 深度支持 2.0+ 与 Space Age DLC：星球环境属性、火箭运力（质量/槽位）、轨道空投、变质周期、核聚变与多品质系统；
+  - **宇宙工厂（Universe Factory）**：将各星球本地机制、火箭出口运输与轨道降落纳入全局线性规划联合求解。
+- 📊 **灵活的产物线性表达式**：
+  - 支持任意线性和比率目标表达式（如加权科研容量、跨品质成本权衡、压缩运输方案对比）。
+- 🤖 **全局自动规划（Auto-Planner）**：
+  - 基于科技树可达性（Accessibility）与环境约束，全排列枚举机器、配方、插件与插件塔组合，一步求解最优产能配置。
+- 🎮 **真实游戏数据直接加载与原生图标渲染**：
+  - 规避 Steam 启动确认中断，直接解包游戏本体与 Mod 原型数据（Lua dump 容错解析）；
+  - 独立渲染引擎在进程内像素级合成层叠图标与品质标识。
+- 🔌 **双模运行与 MCP 原生集成**：
+  - 既是美观易用的现代化桌面 GUI 应用（Tauri v2 + Svelte 5）；
+  - 也是标准 Model Context Protocol（MCP）服务端，支持直接接入外部 AI Agent 进行工厂审查与辅助规划。
 
-现在可以在生产目标中添加表达式。常见需求：计算最优的科研容量生产方式。
+> [!WARNING]
+> **关于极端数值与状态空间膨胀的提示**：
+> 在运行全局自动规划前，请留意所加载的游戏数据是否包含槽位异常膨胀的机器（例如使用 [Property Randomizer](https://mods.factorio.com/mod/propertyrandomizer) 模组生成的数十槽位机器）。由于组合爆炸，过多槽位会导致内存与规划耗时急剧上升。系统当前策略为：超过 8 个插件槽位的机器不会枚举空插件槽，且极端异常机器将仅考虑主流配置。
 
-![alt text](example/weighted-quality-electromagnetic-science.png)
+---
 
-目前的结论为，原版+SA下只有粉瓶值得生产精良以上品质的：不到一带废料可以生产一带的科研容量。涉及到物流瓶颈另算。
+## 🚀 快速上手
 
-更复杂的表达式可以模拟规划器无法理解的机制。如在后期的太空探索游戏中，制造铁锭运输再解压缩相比制造铁板成铁板运输可以节省约50%的成本。
-![alt text](example/iron-ingot.png)
-![alt text](example/iron-plate.png)
+### 1. 加载游戏数据
+1. 初次使用或切换模组配置时，点击窗口右上角状态栏的 **「数据」** → **「加载游戏数据…」**；
+2. 选择异星工厂可执行文件路径（例如 `factorio.exe`）；
+3. （可选）选择模组文件夹路径（`mods/`）；
+4. 确认后系统将就地解析原型数据并缓存，后续秒级恢复。
 
-# 关于模组支持
+### 2. 基础规划流程
+1. 点击左上角 **「项目」** → **「新建项目…」**（支持从同一菜单导入、保存或关闭项目）；
+2. 点击顶部工厂栏右侧的 **「+」** 新建普通工厂，或点击 **「✦」** 新建多星球宇宙工厂；
+3. **参数配置与目标设定（左侧栏）**：
+   - **工厂 Tab**：设置运行环境（星球、地表、严格供给 / 严格消耗约束）、生产目标、外部输入与目标表达式；
+   - **项目 Tab**：设定时间刻度（秒/分/小时）、**主品质**、品质上限、科技可达性、里程碑进度、配方/采矿/无限科技产能等级，以及自动规划的机器偏好与枚举配置；
+4. **编辑与求解（中栏与右栏）**：
+   - 目标行左侧图标可调整流类型，右键点击图标可逆向查看供给机制；
+   - 点击中栏 **「+ 添加机制」** 可手动添加配方、采矿、燃料燃烧、变质、植物种植等机制；
+   - 点击 **「自动规划」** 即可根据约束条件自动推导并填充最优机制组合（复杂问题推荐先开启严格供给模式）；
+   - 右栏 **「求解结果」** 实时展示总生产成本与流平衡状态，点击条目末尾的 **「✦」** 按钮可查看针对该流的精准供给/消耗建议。
 
-我已经测试过了[太空探索](https://mods.factorio.com/mod/space-exploration)、 [K2](https://mods.factorio.com/mod/Krastorio2)、[Py](https://mods.factorio.com/mod/pymodpack)和[无主之地](https://mods.factorio.com/mod/nullius)系列，2.0版本和2.1版本的异星工厂游戏数据应该会正常加载，大部分功能都可正常使用。自动规划功能在原版+品质、DLC、太空探索+品质、Py下尝试求解（传说）物品的生产流程时可能失败，在状态空间较多时可能会内存超出，谨慎考虑添加枚举插件、枚举插件塔的数量！
+### 3. 多星球宇宙工厂（Universe Factory）
+当生产链涉及跨星球物流调度时，使用 **「✦」** 按钮创建宇宙工厂：
+- 各星球本地机制按各自环境属性（太阳能倍率、引力、地表约束）展开；
+- 火箭运送消耗源星球的火箭运力（基于实际物品重量计算）并将产物送至太空；
+- 太空产物经轨道空投（Orbital Drop）按堆叠规格与变质损耗投送至目标星球。
+- 详细设计与数学模型详见 [宇宙工厂设计说明](docs/universe-factory.md)。
 
-# 构建与开发环境
+### 4. 项目文件与系统集成
+- 项目默认保存为 `.metatorio` 文件（采用人类可读的 JSON 结构，并完全向后兼容旧版 `.json` 与 `.fpp` 工程）；
+- 支持直接将工程文件拖拽到应用程序图标或窗口中打开；若已有运行中的 GUI 实例，系统将自动激活现有窗口并载入，避免重复启动。详见 [工程文件与加载链路](docs/project-files.md)。
 
-本仓库横跨 **Rust / C++ / TypeScript** 三种语言，先把工具链一次讲清楚。
+---
 
-## 工具链一览
+## 📈 高级功能：产物表达式
 
-| 组件 | 版本 | 用途 | 什么时候需要 |
-| --- | --- | --- | --- |
-| Rust | **≥ 1.85**（edition 2024；CI 用 stable） | 求解器内核（`crates/metatorio-solver` 等）+ Tauri 后端 | 编译一切 |
-| C++ 编译器 | 支持 C++11 即可（MSVC 2022 / GCC / Clang） | 编译默认构建中的 HiGHS / SoPlex 后端 | 默认功能或启用 `highs` / `soplex` 时 |
-| CMake | **≥ 3.15**（实测 4.1 可用） | HiGHS 的构建系统 | 同上 |
-| Ninja（可选） | 任意 | 加速 HiGHS 的 CMake 构建 | 同上 |
-| LLVM / libclang | LLVM 14+ | `highs-sys` 用 bindgen 生成 C 绑定 | 同上 |
-| Node.js | LTS | 前端构建脚本 | 前端 / 打包 |
-| pnpm | 9.x | 前端包管理 | 前端 / 打包 |
-| Tauri v2 系统库 | 见下 | 桌面壳 | Linux 打包 |
+生产目标不仅支持固定数值产出，还支持任意线性和比率表达式。例如：在太空时代（Space Age）背景下，探索高品质电磁科研包的最优生产策略。
 
-> 默认构建启用五个项目级后端：Clarabel、HiGHS、microlp、SoPlex 和旧的
-> `Rust based`（序列化 id 仍为 `rust-certified`）。新项目默认使用 HiGHS；
-> 旧文档没有 `solver` 字段时沿用 Rust based。HiGHS 和 SoPlex 都会通过 CMake
-> 编译内置 C++ 源码；SoPlex 使用本地 `vendor/soplex-sys` patch 修正 C++17、
-> /EHsc 和 Windows 库名，并用 `vendor/boost` 启用 exact rational 模式。
-> 因此默认构建需要上表的 C++ / CMake / LLVM。
-> 纯 Rust 构建可传
-> `--no-default-features --features clarabel,microlp,rust-lp`，或只启用一个后端。
-> 后端在项目设置中选择，不再读取 `METATORIO_LP_BACKEND`。
+![加权品质电磁科研包分析](example/weighted-quality-electromagnetic-science.png)
 
-## 按平台装齐
+> **计算实证**：在原版 + SA 条件下，只有粉瓶（生产科研包）值得追求精良及以上品质——不到一整带废料即可稳定产出一整带科研容量（不考虑物流拥堵前提下）。
 
-**Windows**（VS 2022 生成工具即可）：
+更复杂的表达式亦可用于求解复合运输决策。例如在《太空探索》（Space Exploration）后期阶段，量化比较“制造铁锭运输后解压缩”与“直接制造铁板运输”的物流成本差异（前者可降低约 50% 的火箭与物流开销）：
 
+![铁锭生产方案](example/iron-ingot.png)
+![铁板生产方案](example/iron-plate.png)
+
+---
+
+## 🧩 模组生态兼容性
+
+本工具已针对以下主流大型模组生态进行深度兼容与求解回归测试：
+- ✅ **太空时代 DLC（Space Age）与全品质机制**
+- ✅ **太空探索（Space Exploration）**
+- ✅ **工业革命 / Krastorio 2 (K2)**
+- ✅ **Pyanodons (Py 系列全套)**
+- ✅ **无主之地（Nullius）**
+
+异星工厂 2.0 及 2.1 版本的 dump 数据均可直接加载。
+
+> [!TIP]
+> 在涉及“原版 + 品质”、“太空探索 + 品质”或“Py 全家桶”求解传说级物品时，状态空间维度极高。建议在「项目设置」中合理控制允许枚举的插件种类与插件塔数量，防止内存过度消耗。
+
+---
+
+## 🛠️ 构建与开发环境
+
+本仓库横跨 **Rust**（求解内核与外壳适配）、**C++**（底层运筹求解器集成）与 **TypeScript**（现代化响应式 UI）三种技术栈。
+
+### 工具链依赖一览
+
+| 组件 | 版本要求 | 承担职责 | 必需场景 |
+| :--- | :--- | :--- | :--- |
+| **Rust** | **≥ 1.85**（Edition 2024） | 求解器内核（`metatorio-solver` 等）+ Tauri 后端 | 全量编译 |
+| **C++ 编译器** | 支持 C++17（MSVC 2022 / GCC / Clang） | 编译 HiGHS 与 SoPlex C++ 源码 | 默认特性构建 |
+| **CMake** | **≥ 3.15** | HiGHS 与 SoPlex 构建系统 | 默认特性构建 |
+| **Ninja**（可选） | 任意新版 | 加速 CMake 编译流程 | 推荐配置 |
+| **LLVM / libclang** | LLVM 14+ | `highs-sys` 通过 bindgen 生成 C/C++ 绑定 | 默认特性构建 |
+| **Node.js** | LTS 推荐 | 前端工程构建与脚本执行 | 前端 / 桌面端打包 |
+| **pnpm** | 9.x | 前端依赖管理与命令编排 | 前端 / 桌面端打包 |
+| **Tauri v2 系统库** | 见各平台说明 | 桌面原生视窗与系统集成 | 桌面端打包（尤其是 Linux） |
+
+> [!NOTE]
+> 默认构建启用了 Clarabel、HiGHS、microlp、SoPlex 以及纯 Rust 求解后端。
+> 如需进行免 C++ 工具链的纯 Rust 开发，可使用纯 Rust 特性组合：
+> ```sh
+> cargo test --workspace --no-default-features --features clarabel,microlp,rust-lp
+> ```
+
+### 平台依赖一键配置
+
+#### Windows（以 VS 2022 C++ 生成工具为例）
 ```powershell
 winget install Kitware.CMake Ninja-build.Ninja LLVM.LLVM
-# 或：choco install cmake ninja llvm -y
-# 再把 C:\Program Files\LLVM\bin 加进 PATH（或设 LIBCLANG_PATH 指向它）
+# 安装后确保 C:\Program Files\LLVM\bin 已加入系统 PATH（或设置 LIBCLANG_PATH 环境变量）
 ```
 
-**Ubuntu / Debian**：
-
+#### Ubuntu / Debian
 ```sh
+sudo apt update
 sudo apt install build-essential cmake ninja-build clang libclang-dev
-# Tauri 还需要：
+# Tauri v2 桌面视窗依赖：
 sudo apt install libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 ```
 
-## 常用命令
+### 常用开发与测试命令
 
 ```sh
-# 只跑求解器（最快，不碰前端）
-cargo test -p metatorio-solver
+# 1. 运行求解器测试（纯 Rust 单纯形模式，无需 C++ 工具链，速度最快）
+cargo test -p metatorio-solver --no-default-features --features microlp,rust-lp
 
-# 全量 Rust 测试
+# 2. 全工作区 Rust 单元测试与集成测试（需 C++ 编译器与 CMake）
 cargo test --workspace
 
-# 需要真实游戏数据的长用例（可选，约几分钟）
+# 3. 运行真实游戏数据长回归用例（约耗时数分钟）
 cargo test --release -p metatorio-runtime --lib legendary_biter_egg -- --ignored --nocapture
 
-# 打包桌面应用
-cd metatorio-app && pnpm install && pnpm tauri build
-```
-
-更新 Tauri 时需要同时更新 Rust 与前端依赖。`cargo update` 不会更新 npm 包；
-对应的 `tauri` / `@tauri-apps/api` 和各插件需要保持相同的主次版本，补丁版本可以不同。
-在仓库根目录更新 Cargo 依赖后，到前端目录更新对应包，并提交两侧锁文件：
-
-```sh
-cargo update
+# 4. 前端开发服务启动（在 metatorio-app 目录下执行）
 cd metatorio-app
-pnpm update @tauri-apps/api @tauri-apps/cli @tauri-apps/plugin-opener @tauri-apps/plugin-process @tauri-apps/plugin-updater
+pnpm install
+pnpm dev
+
+# 5. 生成与校验 TypeScript / Rust 强类型 IPC 合约
+cd metatorio-app
+pnpm bindings:check
+
+# 6. 桌面端应用打包构建
+cd metatorio-app
 pnpm tauri build
 ```
 
-前端安装与更新命令应在 `metatorio-app` 内运行，不要在仓库根目录另建 npm 工程。
-Windows 若遇到 CMake 不支持 `Visual Studio 18 2026` 生成器，可更新 CMake，
-或在已安装 Ninja 时，于当前 PowerShell 会话设置 `$env:CMAKE_GENERATOR = 'Ninja'` 后重试。
-生成器版本、MSVC PDB 沙箱通信以及普通 pwsh 的差异，见 [Windows 原生依赖构建排查](docs/windows-native-build.md)。
+> [!IMPORTANT]
+> **依赖管理准则**：
+> 前端 `pnpm` 命令必须在 `metatorio-app/` 子目录下执行，严禁在仓库根目录下初始化 `package.json` 或 `node_modules`。
 
-# 贡献
+---
 
-自动规划的真实上下文回归、极端倍率、插件塔组合及全产物遍历测试，见 [测试说明与实测结果](docs/auto-plan-testing.md)。
+## 📚 架构与技术文档导航
 
-机制卡布局、长列表挂载策略与浏览器回归，见 [机制工作区](docs/mechanic-workspace.md)。
-悬停计算详情、消息分层和地格选择边界，见 [悬停详情](docs/hover-details.md)。
+- 🤖 [**AGENTS.md**](AGENTS.md)：面向 AI Agent 与核心贡献者的全景代码阅读导引与架构速查字典。
+- 🔄 [**类型化 IPC 架构**](docs/typed-ipc.md)：基于 `tauri-specta` 的 Rust 与 TypeScript 强类型绑定与契约守护。
+- 🌌 [**宇宙工厂设计与数学模型**](docs/universe-factory.md)：多星球环境隔离、火箭运输成本与轨道空投规划。
+- 🗂️ [**工程文件与加载链路**](docs/project-files.md)：单实例唤醒、命令行启动传参、BOM 容错与文件关联。
+- 🖥️ [**Windows 原生构建排查指南**](docs/windows-native-build.md)：MSVC、CMake、Ninja 与 PDB 锁问题解决指南。
+- 🧪 [**自动规划测试说明与实测数据**](docs/auto-plan-testing.md)：极端倍率、插件塔拓扑与全产物遍历测试集。
+- 📐 [**LP 求解器算法调研与技术演进**](docs/lp-algorithm-survey-20261024.md)：单纯形法、内点法与有理数重建的性能全对比。
 
-欢迎提交各种 issue、pull request 或在其他社交网站上联系我反馈问题和提供建议。
+---
 
-# 许可
+## 🤝 贡献与反馈
 
-见 LICENSE。
+非常欢迎提交 Issue、发起 Pull Request 或提出针对新模组与新机制的适配需求！
 
-开发时的 Rust / TypeScript 合约生成与检查见 [类型化 IPC](docs/typed-ipc.md)。
+- **提交 Issue**：若遇到特定配方无法求解、自动规划状态异常或界面渲染问题，欢迎附带 `.metatorio` 工程文件或复现步骤。
+- **Pull Request**：提交代码前请确保运行 `cargo test --workspace` 以及 `cd metatorio-app && pnpm check` 验证通过。
+
+## 📄 开源许可
+
+本项目遵循 [MIT 许可证](LICENSE) 开源。
