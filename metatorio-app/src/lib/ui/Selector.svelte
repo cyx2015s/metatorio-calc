@@ -177,6 +177,9 @@
   /** 目录 kind → 可达性 kind（见 types.accessibleKindFor；无对应则不过滤）。 */
   const accessibleKindFor = catalogAccessibleKindFor;
 
+  let allowedNameSet = $derived(allowedNames && allowedNames.length > 0 ? new Set(allowedNames) : null);
+  let categoryFilterSet = $derived(categoryFilter && categoryFilter.length > 0 ? new Set(categoryFilter) : null);
+
   let visible = $derived(
     (searching
       ? searchIndex.filter(({ keys }) => !!searchNeedle && keys.some((key) => key.includes(searchNeedle))).map(({ entry }) => entry)
@@ -187,8 +190,8 @@
       if (tilePurpose && entry.kind === "tile") {
         if (tilePurpose === "extract" ? !entry.tile?.fluid : !entry.tile?.destroys_dropped_items) return false;
       }
-      if (allowedNames && allowedNames.length > 0) {
-        if (!allowedNames.includes(entry.name)) return false;
+      if (allowedNameSet && !allowedNameSet.has(entry.name)) {
+        return false;
       }
       // 无限科技选择器：只保留可多次研究的科技——无限（max=null），
       // 或 max_level > 最低等级（有实际多级研究空间）。
@@ -201,9 +204,9 @@
         const mapped = accessibleKindFor(entry.kind);
         if (mapped != null && !accessibleKeys.has(`${mapped}/${entry.name}`)) return false;
       }
-      if (!categoryFilter || categoryFilter.length === 0 || !catalogKind) return true;
+      if (!categoryFilterSet || !catalogKind) return true;
       // 与后端 categories_overlap 一致：空类别条目在过滤时视为不匹配
-      return entry.categories.some((category) => categoryFilter.includes(category));
+      return entry.categories.some((category) => categoryFilterSet.has(category));
     }),
   );
   let bySubgroup = $derived(groupBySubgroup(visible));
@@ -310,7 +313,7 @@
 
   /** 提交当前选择（条目 + 当前品质）。 */
   async function confirm() {
-    if (!selected || !visible.some((entry) => entry.name === selected)) return;
+    if (!selected || !selectedEntry) return;
     if (flowMode && onSelectFlow) {
       const flow = await buildCatalogFlow(selected);
       if (flow) {
@@ -648,7 +651,7 @@
     place-items: center;
     padding: 24px;
     background: var(--backdrop);
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(6px);
   }
 
   .modal {
@@ -657,7 +660,8 @@
     display: flex;
     flex-direction: column;
     padding: 16px;
-    background: var(--panel);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     box-shadow: var(--shadow-strong);
@@ -669,7 +673,7 @@
     justify-content: space-between;
     gap: 12px;
     margin-bottom: 12px;
-    padding-bottom: 10px;
+    padding-bottom: 11px;
     border-bottom: 1px solid var(--line);
   }
 
@@ -721,6 +725,8 @@
     border-radius: 3px;
     font-size: 10.5px;
     cursor: pointer;
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   .tab:hover {
@@ -744,6 +750,12 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-size: 12px;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  .search::placeholder {
+    color: var(--faint);
   }
 
   .search:focus {
@@ -782,11 +794,15 @@
     border: 1px solid transparent;
     border-radius: 999px;
     cursor: pointer;
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   .q-chip:hover {
     color: var(--text);
     background: var(--card-hover);
+    border-color: var(--line);
   }
 
   .q-chip.active {
@@ -816,9 +832,12 @@
     place-items: center;
     padding: 3px;
     background: var(--input-bg);
-    border: 1px solid transparent;
+    border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     cursor: pointer;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   .gtab:hover {
@@ -827,6 +846,7 @@
   }
 
   .gtab.active {
+    background: var(--accent-dim);
     border-color: var(--accent);
     box-shadow: inset 0 0 0 1px var(--accent);
   }
@@ -839,15 +859,20 @@
   }
 
   .subgroup {
-    padding: 6px 0 10px;
+    padding: 8px 0 10px;
   }
 
   .sg-label {
-    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
     color: var(--faint);
-    font-size: 9px;
+    font-size: 9.5px;
     font-weight: 700;
-    letter-spacing: 0.11em;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
   }
 
@@ -860,9 +885,12 @@
   .sg-items .icon-btn {
     width: 100%;
     height: 46px;
-    border: 1px solid transparent;
+    border: 1px solid var(--line);
     border-radius: var(--radius-sm);
     background: var(--input-bg);
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   .sg-items .icon-btn:hover {
@@ -871,8 +899,9 @@
   }
 
   .sg-items .icon-btn.active {
+    background: var(--accent-dim);
     border-color: var(--accent);
-    box-shadow: inset 0 0 0 1px var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 1px var(--accent);
   }
 
   .search-list {
@@ -893,6 +922,8 @@
     border-radius: var(--radius-sm);
     text-align: left;
     cursor: pointer;
+    transition: background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
 
   .row:hover {
@@ -969,6 +1000,14 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-size: 11.5px;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  .custom-panel select:focus,
+  .custom-panel input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
   }
 
   .modal-foot {
@@ -978,15 +1017,15 @@
     justify-content: space-between;
     gap: 12px;
     margin-top: 12px;
-    padding-top: 10px;
+    padding: 10px 4px 0;
     border-top: 1px solid var(--line);
   }
 
   .foot-hint {
     min-width: 0;
     overflow: hidden;
-    color: var(--faint);
-    font-size: 10px;
+    color: var(--muted);
+    font-size: 10.5px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }

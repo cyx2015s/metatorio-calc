@@ -113,15 +113,124 @@
 {/if}
 
 <style>
-  .panel { padding: 14px 16px; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; }
-  .section-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
-  .count { color: var(--muted); font-size: 10px; }
-  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
-  legend { font-weight: 600; margin-top: 12px; }
-  .estimate-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
-  .estimate-row > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  input { min-width: 0; width: 100%; box-sizing: border-box; }
-  .estimate-row input { width: 70px; }
-  .field, .btn.block { margin-top: 8px; }
-  [role="alert"] { color: var(--danger, #e66); overflow-wrap: anywhere; }
+  .panel {
+    min-width: 0;
+    padding: 14px 16px;
+    background: transparent;
+    border: 0;
+    border-bottom: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 6px;
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+  .section-head .count {
+    font-family: var(--mono);
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  fieldset {
+    border: 0;
+    padding: 0;
+    margin: 12px 0 0;
+    min-width: 0;
+  }
+  legend {
+    display: block;
+    width: 100%;
+    padding: 10px 0 4px;
+    margin: 0;
+    border-top: 1px solid var(--line);
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  fieldset > p.muted {
+    margin: 0 0 8px;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+  .estimate-row {
+    min-width: 0;
+    min-height: 32px;
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    padding: 3px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .estimate-row:hover,
+  .estimate-row:focus-within {
+    background: var(--card-hover);
+    border-color: var(--line);
+  }
+  .estimate-row > span {
+    flex: 1;
+    min-width: 0;
+    font-size: 11.5px;
+    overflow-wrap: anywhere;
+  }
+  .estimate-row input {
+    width: 68px;
+    min-height: 26px;
+    padding: 0 6px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-align: right;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .estimate-row input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .field {
+    margin-top: 10px;
+  }
+  .field > span:first-child {
+    color: var(--faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .field > .muted {
+    font-size: 10px;
+  }
+  .btn.block {
+    margin-top: 8px;
+  }
+  [role="status"] {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 10.5px;
+  }
+  [role="alert"] {
+    margin: 8px 0 0;
+    padding: 6px 8px;
+    color: var(--danger);
+    background: var(--danger-dim);
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
 </style>

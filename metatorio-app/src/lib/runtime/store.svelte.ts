@@ -8,8 +8,16 @@ import { universeView } from "$lib/mechanics/located";
 import { universePreview, type UniversePreview } from "./client";
 import { MechanicCommands, type MechanicScope } from "./mechanic-commands";
 import { IconCache } from "./icon-cache";
-import { richTextPlain } from "$lib/rich-text";
-import { lookupName } from "$lib/display-labels";
+import { CatalogNameIndex } from "./catalog-names.ts";
+import {
+  THEME_KEY,
+  UI_FONT_KEY,
+  MONO_FONT_KEY,
+  type ThemeMode,
+  applyThemeToDocument,
+  applyFontsToDocument,
+  persistFontPreference,
+} from "./theme-fonts.ts";
 import { MechanicFlowCache } from "$lib/mechanic-filter";
 import { diagnosticFrom } from "$lib/diagnostic";
 // 基于 Svelte 5 runes 的状态存储，连接前端界面与 Tauri 运行时。
@@ -89,36 +97,6 @@ function projectReadKeys(project: ProjectDocument | null) {
   return {domain, productivity: JSON.stringify([domain, settings?.mining_productivity, settings?.ignore_productivity, settings?.recipe_productivity, settings?.infinite_levels])};
 }
 
-const UI_FONT_FALLBACK = `"Inter", "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif`;
-const MONO_FONT_FALLBACK = `"JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace`;
-const GENERIC_FONT_FAMILIES = new Set([
-  "serif",
-  "sans-serif",
-  "monospace",
-  "cursive",
-  "fantasy",
-  "system-ui",
-  "ui-serif",
-  "ui-sans-serif",
-  "ui-monospace",
-  "ui-rounded",
-  "math",
-  "emoji",
-  "fangsong",
-]);
-
-/** 把用户输入的字体族转成安全的 CSS 字体栈。允许直接粘贴完整 stack（含逗号）。 */
-function fontStack(name: string, fallback: string): string {
-  const raw = name.replace(/[;{}]/g, "").trim();
-  if (!raw) return "";
-  const family = raw.includes(",")
-    ? raw
-    : GENERIC_FONT_FAMILIES.has(raw.toLowerCase())
-      ? raw
-      : `"${raw.replace(/"/g, "")}"`;
-  return `${family}, ${fallback}`;
-}
-
 class RuntimeStore {
   document = $state<AppDocument | null>(null);
   private factorySignatures = $derived(factorySolveSignatures(this.document));
@@ -195,85 +173,52 @@ class RuntimeStore {
   });
 
   /** 主题模式：system(跟随系统) / light / dark。不会写死，用户可选。 */
-  theme = $state<"system" | "light" | "dark">("system");
+  theme = $state<ThemeMode>("system");
   private themeMedia: MediaQueryList | null = null;
-  private static readonly THEME_KEY = "metatorio-theme";
-  /** 依主题模式解析实际亮/暗，并写入 <html data-theme>。 */
-  private applyTheme(): void {
-    const resolved =
-      this.theme === "system"
-        ? typeof window !== "undefined" &&
-          window.matchMedia("(prefers-color-scheme: light)").matches
-          ? "light"
-          : "dark"
-        : this.theme;
-    document.documentElement.dataset.theme = resolved;
-  }
   /** 启动时读回存储的主题并监听系统偏好变化（system 模式下实时跟随）。 */
   initTheme(): void {
-    const saved = localStorage.getItem(RuntimeStore.THEME_KEY) as
-      | "system"
-      | "light"
-      | "dark"
-      | null;
+    const saved = typeof localStorage !== "undefined" ? localStorage.getItem(THEME_KEY) : null;
     this.theme = saved === "light" || saved === "dark" || saved === "system" ? saved : "system";
     if (typeof window === "undefined") return;
-    this.themeMedia = window.matchMedia("(prefers-color-scheme: light)");
-    this.themeMedia.addEventListener("change", () => {
-      if (this.theme === "system") this.applyTheme();
-    });
-    this.applyTheme();
+    if (!this.themeMedia) {
+      this.themeMedia = window.matchMedia("(prefers-color-scheme: light)");
+      this.themeMedia.addEventListener("change", () => {
+        if (this.theme === "system") applyThemeToDocument(this.theme);
+      });
+    }
+    applyThemeToDocument(this.theme);
   }
-  setTheme(mode: "system" | "light" | "dark"): void {
+  setTheme(mode: ThemeMode): void {
     this.theme = mode;
-    localStorage.setItem(RuntimeStore.THEME_KEY, mode);
-    this.applyTheme();
+    if (typeof localStorage !== "undefined") localStorage.setItem(THEME_KEY, mode);
+    applyThemeToDocument(this.theme);
   }
 
   /** 界面 / 代码字体：纯前端偏好，保存在 localStorage，不进入项目文档或后端。 */
   uiFont = $state("");
   monoFont = $state("");
-  private static readonly UI_FONT_KEY = "metatorio-ui-font";
-  private static readonly MONO_FONT_KEY = "metatorio-mono-font";
-
-  private applyFonts(): void {
-    if (typeof document === "undefined") return;
-    const root = document.documentElement.style;
-    const ui = fontStack(this.uiFont, UI_FONT_FALLBACK);
-    const mono = fontStack(this.monoFont, MONO_FONT_FALLBACK);
-    if (ui) root.setProperty("--sans", ui);
-    else root.removeProperty("--sans");
-    if (mono) root.setProperty("--mono", mono);
-    else root.removeProperty("--mono");
-  }
 
   /** 启动时读回本地字体设置；空字符串表示使用 app.css 的默认字体。 */
   initFonts(): void {
-    this.uiFont = localStorage.getItem(RuntimeStore.UI_FONT_KEY) ?? "";
-    this.monoFont = localStorage.getItem(RuntimeStore.MONO_FONT_KEY) ?? "";
-    this.applyFonts();
+    this.uiFont = typeof localStorage !== "undefined" ? localStorage.getItem(UI_FONT_KEY) ?? "" : "";
+    this.monoFont = typeof localStorage !== "undefined" ? localStorage.getItem(MONO_FONT_KEY) ?? "" : "";
+    applyFontsToDocument(this.uiFont, this.monoFont);
   }
 
   setUiFont(name: string): void {
-    this.uiFont = name.replace(/[;{}]/g, "").trim();
-    if (this.uiFont) localStorage.setItem(RuntimeStore.UI_FONT_KEY, this.uiFont);
-    else localStorage.removeItem(RuntimeStore.UI_FONT_KEY);
-    this.applyFonts();
+    this.uiFont = persistFontPreference(UI_FONT_KEY, name);
+    applyFontsToDocument(this.uiFont, this.monoFont);
   }
 
   setMonoFont(name: string): void {
-    this.monoFont = name.replace(/[;{}]/g, "").trim();
-    if (this.monoFont) localStorage.setItem(RuntimeStore.MONO_FONT_KEY, this.monoFont);
-    else localStorage.removeItem(RuntimeStore.MONO_FONT_KEY);
-    this.applyFonts();
+    this.monoFont = persistFontPreference(MONO_FONT_KEY, name);
+    applyFontsToDocument(this.uiFont, this.monoFont);
   }
 
   resetFonts(): void {
-    this.uiFont = "";
-    this.monoFont = "";
-    localStorage.removeItem(RuntimeStore.UI_FONT_KEY);
-    localStorage.removeItem(RuntimeStore.MONO_FONT_KEY);
-    this.applyFonts();
+    this.uiFont = persistFontPreference(UI_FONT_KEY, "");
+    this.monoFont = persistFontPreference(MONO_FONT_KEY, "");
+    applyFontsToDocument(this.uiFont, this.monoFont);
   }
 
   contexts = $state<ContextInfo[]>([]);
@@ -840,6 +785,11 @@ class RuntimeStore {
 
   // ── 图标与目录 ──────────────────────────────────────────────────
 
+  /** 同步查询已缓存的物品图标（blob URL）；未命中返回 null。 */
+  peekIcon(type: string, name: string): string | null {
+    return this.icons.peek(this.effectiveContextId, type, name);
+  }
+
   /** 取物品图标（blob URL）；无图标时返回 null。带缓存（按上下文 id 区分）。 */
   getIcon(type: string, name: string): Promise<string | null> {
     return this.icons.get(this.effectiveContextId, type, name);
@@ -946,41 +896,18 @@ class RuntimeStore {
     this.mechanicFlowCache.clear();
   }
 
-  /** 本地化显示名（无翻译/未加载索引时回退内部 id）。O(1) Map 查找，避免大
-   * 目录下每次重渲染对 entries 做 O(N) 线性 .find。 */
-  private localizedNameMap = new Map<string, string>();
-  private localizedNameIndex: CatalogIndex | null = null;
-
-  private ensureLocalizedNameMap(): void {
-    const ci = this.catalogIndex;
-    if (!ci) {
-      this.localizedNameMap.clear();
-      this.localizedNameIndex = null;
-      return;
-    }
-    // 同一上下文重新加载翻译时也必须重建，不能只比较 context_id。
-    if (ci === this.localizedNameIndex) return;
-    const map = new Map<string, string>();
-    for (const entry of ci.entries) {
-      map.set(`${entry.kind}/${entry.name}`, entry.localized_name);
-    }
-    // 非条目的名字：分组、类别、表面属性等，保留完整命名空间。
-    for (const [name, localized] of Object.entries(ci.names ?? {})) {
-      map.set(name, localized);
-    }
-    this.localizedNameMap = map;
-    this.localizedNameIndex = ci;
-  }
+  /** 本地化显示名（无翻译/未加载索引时回退内部 id）。O(1) Map 查找与纯文本记忆化，
+   *  避免大目录下每次重渲染对 entries 做线性查找或重复解析富文本。 */
+  private catalogNames = new CatalogNameIndex();
 
   /** Raw Factorio markup, for RichText only. IPC/prototype IDs remain unchanged. */
   richName(kind: string, name: string): string {
-    this.ensureLocalizedNameMap();
-    return lookupName(this.localizedNameMap, kind, name);
+    return this.catalogNames.richName(kind, name, this.catalogIndex);
   }
 
   /** Plain visible label, safe for titles, aria labels and ordinary controls. */
   localizedName(kind: string, name: string): string {
-    return richTextPlain(this.richName(kind, name), (kind, name) => richTextPlain(this.richName(kind, name))).trim();
+    return this.catalogNames.localizedName(kind, name, this.catalogIndex);
   }
 
   /** 换上下文后清空索引/详情缓存。 */
@@ -988,8 +915,7 @@ class RuntimeStore {
     this.catalogGeneration++;
     this.catalogLoads.clear();
     this.catalogIndex = null;
-    this.localizedNameMap.clear();
-    this.localizedNameIndex = null;
+    this.catalogNames.clear();
     this.detailCache.clear();
     this.detailGeneration++;
     this.detailRequests.clear();

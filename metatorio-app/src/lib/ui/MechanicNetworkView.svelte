@@ -67,8 +67,13 @@
     externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: universeDocument ? [] : runtime.implicitSourcesCache,
     localize: (kind, name) => runtime.localizedName(kind, name), timeScale,
     mergeRecipes, collapse, showUtilities, onlyEnabled, isolateLocations:groupLocations}));
+  const searchableNodes = $derived(model.nodes.map(node => ({ node, searchKey: normalizeSearch(node.search) })));
   const needle = $derived(normalizeSearch(query));
-  const matches = $derived(model.nodes.filter(node => !needle || normalizeSearch(node.search).includes(needle)));
+  const matches = $derived(
+    needle
+      ? searchableNodes.filter(({ searchKey }) => searchKey.includes(needle)).map(({ node }) => node)
+      : model.nodes,
+  );
   // 配方或机器编辑会改变合并后节点的 ID；即使节点移到另一分组，编辑器仍跟随稳定机制 ID。
   const selectedNode = $derived(selectedMechanic === null
     ? model.nodes.find(node => node.id === selected)
@@ -314,29 +319,42 @@
     renderRevision++;
     // 图标请求由 runtime 缓存统一去重；文档、上下文、工厂或视图切换后，旧代数请求不得再写入画布。
     for (let offset = 0; offset < snapshot.nodes.length && revision === generation && mounted; offset += 8) {
-      await Promise.all(snapshot.nodes.slice(offset, offset + 8).map(async node => {
+      const updates = await Promise.all(snapshot.nodes.slice(offset, offset + 8).map(async node => {
         const info = node.flow ? presentFlow(node.flow, (k, n) => runtime.localizedName(k, n)) : undefined;
         const ref = node.entries[0] ? mechanicPrototype(node.entries[0].mechanic) : undefined;
         const name = info?.name ?? ref?.name, type = info?.type ?? (ref ? iconTypeForKind(ref.kind) : undefined);
-        if (!name || !type) return;
+        if (!name || !type) return null;
         const url = syntheticIconUrls[name] ?? await runtime.getIcon(type, name);
+        if (!url || !mounted || revision !== generation) return null;
         const qualities = networkIconQualities(node);
         const badges = qualities.length > 1 ? qualities : qualities.filter(quality => quality !== 'normal');
         const qualityUrls = await Promise.all(badges.map(quality => runtime.getIcon('quality', quality)));
         const locationUrl = node.location ? await runtime.getIcon(node.location.kind==='planet'?'planet':'item',node.location.kind==='planet'?node.location.name:'space-platform-starter-pack') : null;
-        if (url && cy && mounted && revision === generation) {
-          const images = qualityUrls.filter((url): url is string => !!url);
-          const badgeSize = Math.min(45, 100 / Math.max(1, images.length));
-          cy.getElementById(node.id).data('icon', url).style({
-            'background-image': [url, ...images, ...(locationUrl?[locationUrl]:[])],
-            'background-fit': ['contain', ...images.map(() => 'none' as const), ...(locationUrl?['none' as const]:[])],
-            'background-width': ['auto', ...images.map(() => `${badgeSize}%`), ...(locationUrl?['40%']:[])],
-            'background-height': ['auto', ...images.map(() => `${badgeSize}%`), ...(locationUrl?['40%']:[])],
-            'background-position-x': ['50%', ...images.map((_, i) => `${images.length === 1 ? 0 : i * 100 / (images.length - 1)}%`), ...(locationUrl?['100%']:[])],
-            'background-position-y': ['50%', ...images.map(() => '100%'), ...(locationUrl?['0%']:[])],
+        const images = qualityUrls.filter((badgeUrl): badgeUrl is string => !!badgeUrl);
+        const badgeSize = Math.min(45, 100 / Math.max(1, images.length));
+        return {
+          id: node.id,
+          url,
+          style: {
+            'background-image': [url, ...images, ...(locationUrl ? [locationUrl] : [])],
+            'background-fit': ['contain' as const, ...images.map(() => 'none' as const), ...(locationUrl ? ['none' as const] : [])],
+            'background-width': ['auto', ...images.map(() => `${badgeSize}%`), ...(locationUrl ? ['40%'] : [])],
+            'background-height': ['auto', ...images.map(() => `${badgeSize}%`), ...(locationUrl ? ['40%'] : [])],
+            'background-position-x': ['50%', ...images.map((_, i) => `${images.length === 1 ? 0 : i * 100 / (images.length - 1)}%`), ...(locationUrl ? ['100%'] : [])],
+            'background-position-y': ['50%', ...images.map(() => '100%'), ...(locationUrl ? ['0%'] : [])],
+          },
+        };
+      }));
+      if (cy && !cy.destroyed() && mounted && revision === generation) {
+        const readyUpdates = updates.filter((u): u is NonNullable<typeof u> => u !== null);
+        if (readyUpdates.length > 0) {
+          cy.batch(() => {
+            for (const update of readyUpdates) {
+              cy!.getElementById(update.id).data('icon', update.url).style(update.style);
+            }
           });
         }
-      }));
+      }
     }
     if (revision === generation && mounted) busy = false;
   }
@@ -482,46 +500,245 @@
 </section>
 
 <style>
-  .network-view { display: flex; flex-direction: column; flex: 1 0 auto; min-width: 0; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); overflow: hidden; }
+  .network-view {
+    display: flex;
+    flex-direction: column;
+    flex: 1 0 auto;
+    min-width: 0;
+    margin-top: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    box-shadow: var(--shadow-sm, var(--shadow));
+    overflow: hidden;
+  }
   .network-toolbar, .network-status, .node-options, .variant-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-  .network-toolbar { padding: 8px; border-bottom: 1px solid var(--line); }
-  .network-search { position: relative; min-width: 130px; width: 210px; max-width: 100%; }
-  .network-search input { width: 100%; box-sizing: border-box; }
-  .search-dropdown { position: absolute; z-index: 22; top: calc(100% + 6px); left: 0; width: min(430px, calc(100vw - 32px));
-    max-width: calc(100vw - 32px); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
-  .search-count, .no-matches { padding: 6px 8px; color: var(--muted); font-size: 11px; }
+  .network-toolbar {
+    gap: 5px;
+    padding: 7px 8px;
+    background: var(--panel-elev);
+    border-bottom: 1px solid var(--line);
+  }
+  .network-toolbar .btn { padding: 0 8px; font-size: 11px; }
+  .network-search { position: relative; min-width: 120px; width: 175px; max-width: 100%; }
+  .network-search input {
+    width: 100%;
+    min-height: 28px;
+    padding: 0 8px;
+    box-sizing: border-box;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .network-search input::placeholder { color: var(--faint); }
+  .network-search input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .search-dropdown {
+    position: absolute;
+    z-index: 22;
+    top: calc(100% + 6px);
+    left: 0;
+    width: min(430px, calc(100vw - 32px));
+    max-width: calc(100vw - 32px);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+    overflow: hidden;
+  }
+  .search-count, .no-matches { padding: 6px 10px; color: var(--faint); font-size: 10.5px; }
+  .search-count { background: var(--panel-elev); border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
   .search-results { max-height: min(320px, 45vh); overflow: auto; display: grid; }
-  .search-result { text-align: left; padding: 7px 8px; color: var(--text); background: none; border: 0; font: inherit; font-size: 11px; cursor: pointer; overflow-wrap: anywhere; }
-  .search-result:hover, .search-result[aria-selected="true"] { background: var(--card); }
-  .network-toolbar label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
-  .network-status { padding: 5px 8px; color: var(--muted); font-size: 11px; }
+  .search-result {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+    padding: 7px 10px;
+    color: var(--text);
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+    transition: background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .search-result:hover, .search-result[aria-selected="true"] { background: var(--card-hover); }
+  .network-toolbar label {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 28px;
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .network-toolbar select {
+    min-height: 28px;
+    padding: 0 6px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    cursor: pointer;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .network-toolbar select:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .network-toolbar label:has(input[type="checkbox"]) {
+    gap: 4px;
+    padding: 0 6px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .network-toolbar label:has(input[type="checkbox"]):hover {
+    color: var(--text);
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+  .network-toolbar label:has(input[type="checkbox"]:checked) {
+    color: var(--text);
+    background: var(--accent-dim);
+    border-color: var(--accent-line);
+  }
+  .network-toolbar input[type="checkbox"] {
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .network-status {
+    padding: 6px 10px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    gap: 6px 12px;
+  }
   .network-stage { position: relative; min-width: 0; min-height: 360px; flex: 1 0 clamp(360px, 62vh, 820px); }
   .network-canvas { position: absolute; inset: 0; height: 100%; width: 100%; }
   .network-help { position: absolute; right: 8px; bottom: 8px; z-index: 10; }
-  .help-button { min-height: 24px; padding: 2px 7px; font: inherit; font-size: 11px; cursor: pointer;
-    color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-sm); }
-  .help-button:hover { color: var(--text); border-color: var(--line-strong); }
+  .help-button {
+    min-height: 26px;
+    padding: 2px 9px;
+    font: inherit;
+    font-size: 11px;
+    font-weight: 550;
+    cursor: pointer;
+    color: var(--muted);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm, var(--shadow));
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .help-button:hover { color: var(--text); background: var(--card-hover); border-color: var(--muted); }
   .network-legend { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; margin: 0; }
   .network-legend dt { color: var(--muted); }
   .network-legend dd { margin: 0; }
   .network-note, .network-credit { color: var(--muted); font-size: 11px; line-height: 1.6; margin: 10px 0 0; }
   .neighbours summary { cursor: pointer; color: var(--muted); font-size: 11px; margin-top: 8px; }
+  .neighbours summary:hover { color: var(--text); }
   .node-options { padding-top: 6px; max-height: 200px; overflow: auto; }
   .node-options .btn { white-space: normal; text-align: left; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
-  .network-details { position: absolute; z-index: 15; width: min(420px, calc(100% - 16px)); max-height: calc(100% - 16px); overflow: auto;
-    box-sizing: border-box; padding: 10px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
-  .network-details > strong { display: block; padding-right: 24px; font-size: 12px; overflow-wrap: anywhere; }
-  .network-filter { position: absolute; z-index: 20; top: 8px; right: 8px; width: min(640px, calc(100% - 16px)); max-height: calc(100% - 16px); overflow: auto; background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
-  .network-filter header { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; font-size: 12px; }
+  .network-details {
+    position: absolute;
+    z-index: 15;
+    width: min(420px, calc(100% - 16px));
+    max-height: calc(100% - 16px);
+    overflow: auto;
+    box-sizing: border-box;
+    padding: 12px;
+    color: var(--text);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+  }
+  .network-details > strong {
+    display: block;
+    padding-right: 30px;
+    margin-bottom: 4px;
+    font-size: 12.5px;
+    font-weight: 650;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .network-details > :global(.flow-ref) {
+    padding-right: 30px;
+  }
+  .network-filter {
+    position: absolute;
+    z-index: 20;
+    top: 8px;
+    right: 8px;
+    width: min(640px, calc(100% - 16px));
+    max-height: calc(100% - 16px);
+    overflow: auto;
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+  }
+  .network-filter header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--panel-elev);
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+  }
   .network-filter :global(.mechanic-filter) { margin: 0; border: 0; }
-  .network-empty { position: absolute; inset: 45% 12px auto; text-align: center; color: var(--muted); pointer-events: none; }
-  .network-details p { font-size: 12px; color: var(--muted); margin: 8px 0; }
-  .close { float: right; }
-  .variant-options { margin: 6px 0; }
-  .edit-card { margin-top: 8px; }
+  .network-empty { position: absolute; inset: 45% 12px auto; text-align: center; color: var(--faint); font-size: 12px; pointer-events: none; }
+  .network-details p { font-size: 11.5px; color: var(--muted); margin: 8px 0; line-height: 1.45; }
+  .close { position: absolute; top: 8px; right: 8px; }
+  .variant-options { margin: 8px 0; }
+  .variant-options .btn.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  .edit-card { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
   .edit-card :global(.identity) { padding-inline: 0; }
-  .network-error { padding: 8px; color: var(--warn); }
-  .export-status { font-size: 12px; padding: 0 8px; overflow-wrap: anywhere; user-select: text; }
-  .export-status:not(:empty) { padding-block: 8px; }
+  .network-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    color: var(--danger);
+    background: var(--danger-dim);
+    border-bottom: 1px solid var(--danger-line);
+    font-size: 11.5px;
+  }
+  .export-status { font-size: 11.5px; padding: 0 10px; color: var(--muted); overflow-wrap: anywhere; user-select: text; }
+  .export-status:not(:empty) { padding-block: 7px; border-bottom: 1px solid var(--line); background: var(--panel-elev); }
   .warn { color: var(--warn); }
 </style>

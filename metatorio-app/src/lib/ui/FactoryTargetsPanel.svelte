@@ -61,7 +61,12 @@
   }
 </script>
 <section class="panel targets-panel">
-  <button class="title panel-toggle" aria-expanded={targetsOpen} onclick={() => targetsOpen=!targetsOpen}> <span>{targetsOpen?'▾':'▸'}　目标</span><span class="count">{targets.length}</span></button>
+  <button class="title panel-toggle" aria-expanded={targetsOpen} onclick={() => targetsOpen=!targetsOpen}>
+    <span class="toggle-label">
+      <span class="chev">{targetsOpen?'▾':'▸'}</span>
+      目标 <span class="count">{targets.length}</span>
+    </span>
+  </button>
   {#if targetsOpen}
     <div class="rows" use:dndzone={{items:rows,type:`targets-${scope.kind ?? 'factory'}-${scope.factory}`,flipDurationMs:120}} onconsider={e=>rows=e.detail.items} onfinalize={reorder}>
       {#each rows as target (target.id)}
@@ -82,7 +87,12 @@
   {/if}
 </section>
 <section class="panel expression-panel">
-  <button class="title panel-toggle" aria-expanded={expressionsOpen} onclick={()=>expressionsOpen=!expressionsOpen}><span>{expressionsOpen?'▾':'▸'}　目标表达式</span><span class="count">{expressions.length}</span></button>
+  <button class="title panel-toggle" aria-expanded={expressionsOpen} onclick={()=>expressionsOpen=!expressionsOpen}>
+    <span class="toggle-label">
+      <span class="chev">{expressionsOpen?'▾':'▸'}</span>
+      目标表达式 <span class="count">{expressions.length}</span>
+    </span>
+  </button>
   {#if expressionsOpen}
     <div use:dndzone={{items:exprRows,type:`expressions-${scope.kind??'factory'}-${scope.factory}`,flipDurationMs:120}} onconsider={e=>exprRows=e.detail.items} onfinalize={async e=>{
       exprRows=e.detail.items;const send=writer(),read=reader(),order=exprRows.map(e=>e.id);
@@ -91,8 +101,8 @@
     }}>
     {#each exprRows as expression (expression.id)}
       <div class="expr-card">
-        <div class="row-item"><label>常数 <input class="num" type="number" aria-label="目标表达式常数" value={expression.constant} onchange={e=>{const constant=Number(e.currentTarget.value);if(Number.isFinite(constant))writer()({'target-expression':{'set-constant':{expression:expression.id,constant}}},{'set-target-expression-constant':{expression:expression.id,constant}})}} /></label>
-          <button class="icon-btn" title="移除表达式" onclick={()=>writer()({'target-expression':{remove:{expression:expression.id}}},{'remove-target-expression':{expression:expression.id}})}>×</button></div>
+        <div class="row-item expr-head"><label class="expr-const">常数 <input class="num" type="number" aria-label="目标表达式常数" value={expression.constant} onchange={e=>{const constant=Number(e.currentTarget.value);if(Number.isFinite(constant))writer()({'target-expression':{'set-constant':{expression:expression.id,constant}}},{'set-target-expression-constant':{expression:expression.id,constant}})}} /></label>
+          <button class="icon-btn danger" title="移除表达式" onclick={()=>writer()({'target-expression':{remove:{expression:expression.id}}},{'remove-target-expression':{expression:expression.id}})}>×</button></div>
         <div use:dndzone={{items:expression.terms,type:`expression-terms-${expression.id}`,flipDurationMs:120}} onconsider={e=>expression.terms=e.detail.items} onfinalize={async e=>{
           expression.terms=e.detail.items; const send=writer(),read=reader(),id=expression.id,order=expression.terms.map(t=>t.id);
           await reorderIds(order, () => read()?.target_expressions.find(e=>e.id===id)?.terms ?? [],
@@ -104,7 +114,7 @@
             <FlowRef flow={term.flow} grow size={20} onClick={()=>editTerm(expression.id,term)} />
             <FlowRangeEditor flow={term.flow} onChange={flow=>editTerm(expression.id,term,flow)} />
             <input class="num" type="number" aria-label="表达式系数" value={term.coefficient} onchange={e=>{const coefficient=Number(e.currentTarget.value);if(Number.isFinite(coefficient))writer()({'target-expression':{'set-term-coefficient':{expression:expression.id,term:term.id,coefficient}}},{'set-target-expression-term-coefficient':{expression:expression.id,term:term.id,coefficient}})}} />
-            <button class="icon-btn" title="移除项" onclick={()=>writer()({'target-expression':{'remove-term':{expression:expression.id,term:term.id}}},{'remove-target-expression-term':{expression:expression.id,term:term.id}})}>×</button>
+            <button class="icon-btn danger" title="移除项" onclick={()=>writer()({'target-expression':{'remove-term':{expression:expression.id,term:term.id}}},{'remove-target-expression-term':{expression:expression.id,term:term.id}})}>×</button>
           </div>
         {/each}
         </div>
@@ -117,12 +127,138 @@
   {/if}
 </section>
 <style>
-  .panel {padding:14px 16px;border:0;border-bottom:1px solid var(--line);border-radius:0;box-shadow:none;background:transparent;flex:0 0 auto}
-  .panel-toggle {display:flex;justify-content:space-between;width:100%;border:0;padding:0 0 8px;background:none;color:var(--text);font:inherit;font-weight:600;text-align:left;cursor:pointer}
-  .count,.empty-hint {font-size:11px;color:var(--muted)}
-  .rows {display:flex;flex-direction:column;gap:4px}.row-item {display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:4px 0;min-width:0}
-  .target-value {display:inline-flex;align-items:center;gap:4px;margin-left:auto}
-  .num {width:65px;min-width:0;padding:5px;border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);background:var(--panel);font-family:var(--mono);text-align:right}
-  .block {width:100%;margin-top:6px}.expr-card {padding:6px 0;border-bottom:1px solid var(--line)}
-  .icon-btn {border:0;background:none;color:var(--muted);cursor:pointer;padding:3px}.danger:hover {color:var(--danger)}
+  .panel {
+    padding: 14px 16px;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
+    flex: 0 0 auto;
+  }
+  .panel-toggle {
+    width: 100%;
+    display: block;
+    margin: 0 0 10px;
+    padding: 0;
+    color: var(--text);
+    background: none;
+    border: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .panel-toggle:hover .chev {
+    color: var(--text);
+  }
+  .toggle-label {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+  }
+  .chev {
+    width: 9px;
+    flex: 0 0 auto;
+    color: var(--faint);
+    font-size: 9px;
+    transition: color var(--transition-fast);
+  }
+  .panel-toggle .count {
+    margin-left: auto;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0;
+  }
+  .rows {
+    display: grid;
+    gap: 1px;
+    margin-bottom: 10px;
+  }
+  .row-item {
+    min-width: 0;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    padding: 3px 6px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+  }
+  .row-item:hover,
+  .row-item:focus-within {
+    background: var(--card-hover);
+    border-color: var(--line);
+  }
+  .target-value {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .num {
+    width: 68px;
+    min-width: 0;
+    min-height: 26px;
+    padding: 0 6px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-align: right;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .num:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .expr-card {
+    padding: 8px;
+    margin-bottom: 8px;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+  .expr-head {
+    justify-content: space-between;
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .expr-const {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 550;
+  }
+  .expr-card > .btn.block,
+  .panel > .btn.block {
+    margin-top: 6px;
+  }
+  .empty-hint {
+    padding: 12px 4px;
+    color: var(--faint);
+    font-size: 11px;
+    line-height: 1.55;
+  }
+  @media (max-width: 1360px) {
+    .row-item {
+      gap: 5px;
+    }
+    .num {
+      width: 60px;
+    }
+  }
 </style>

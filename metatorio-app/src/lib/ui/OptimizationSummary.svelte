@@ -40,17 +40,46 @@
 <style>
   .optimization-summary {
     display: grid;
-    gap: 0.4rem;
-    margin: 0.75rem 0;
-    padding: 0.75rem;
+    gap: 5px;
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    background: var(--panel-elev);
     border: 1px solid var(--line);
-    border-radius: 8px;
-    font-size: 0.82rem;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    line-height: 1.45;
     overflow-wrap: anywhere;
   }
-  .timing { color: var(--muted); }
-  details { font-variant-numeric: tabular-nums; }
-  summary { cursor: pointer; }
-  ul { padding-left: 1.2rem; margin: 0.5rem 0 0; }
-  li + li { margin-top: 0.3rem; }
+  .optimization-summary strong {
+    color: var(--text);
+    font-size: 11.5px;
+    font-weight: 650;
+  }
+  .timing {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  details {
+    margin-top: 2px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    font-variant-numeric: tabular-nums;
+  }
+  summary {
+    color: var(--text);
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  summary:hover {
+    color: var(--accent);
+  }
+  ul {
+    padding-left: 16px;
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+  }
+  li + li { margin-top: 4px; }
 </style>

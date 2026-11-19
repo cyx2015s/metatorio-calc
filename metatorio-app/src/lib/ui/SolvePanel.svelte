@@ -34,7 +34,7 @@
         <div class="row-item one-line result-row">
           {#if row.location}<LocationIcon location={row.location} size={22}/>{/if}
           <FlowRef flow={row.flow} grow showQualifiers={false} size={22} onClick={onSuggest?()=>onSuggest?.(row.flow,row.location):undefined} onContextMenu={onSuggest?()=>onSuggest?.(row.flow,row.location):undefined} />
-          <strong class="mono amount" class:amount-pos={row.amount>0}>{row.amount<0?'-':row.amount>0?'+':''}{networkRate(row.flow,row.amount,timeScale)}</strong>
+          <strong class="mono amount" class:amount-pos={row.amount>0} class:amount-neg={row.amount<0}>{row.amount<0?'-':row.amount>0?'+':''}{networkRate(row.flow,row.amount,timeScale)}</strong>
           {#if onSuggest}<button class="icon-btn" title="查看建议" onclick={()=>onSuggest?.(row.flow,row.location)}>✦</button>{/if}
         </div>
       {/each}
@@ -49,7 +49,145 @@
   {:else}<div class="empty-hint">改动目标或机制后会自动重新求解。</div>{/if}
 </section>
 <style>
-  .panel{padding:14px 16px;background:transparent;border:0;border-radius:0;box-shadow:none}.solve-head,.section-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.title{font-weight:600}.chip{padding:3px 8px;border:1px solid var(--line);border-radius:16px;font-size:10px}.ok,.amount-pos{color:var(--ok)}.warn,.err-box{color:var(--danger)}
-  .cost-block{display:grid;gap:5px;margin:18px 0 22px;padding:16px;border:1px solid var(--line);border-radius:var(--radius)}.eyebrow,.cost-note,.count,.empty-hint{font-size:10px;color:var(--muted)}.cost-value{font-size:30px;font-weight:750}.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-  .rows{display:grid;gap:4px;margin-top:10px}.row-item{display:flex;align-items:center;gap:6px;padding:6px 0;min-width:0}.amount{font-size:11px;white-space:nowrap}.icon-btn{border:0;background:none;color:var(--muted);cursor:pointer}.err-box{font-size:12px;overflow-wrap:anywhere}.empty-hint{padding-top:18px}
+  .panel {
+    padding: 14px 16px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .solve-head, .section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .solve-head {
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .solve-head .title {
+    margin-bottom: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .section-head {
+    margin-top: 4px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+  }
+  .cost-block {
+    display: grid;
+    gap: 4px;
+    margin: 14px 0 16px;
+    padding: 12px 14px;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm, var(--shadow));
+  }
+  .cost-value {
+    font-size: 28px;
+    font-weight: 750;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+  }
+  .cost-note, .empty-hint {
+    font-size: 10.5px;
+    color: var(--faint);
+    line-height: 1.4;
+  }
+  .count {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .mono {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .rows {
+    display: grid;
+    gap: 2px;
+    margin-top: 8px;
+  }
+  .row-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 0;
+  }
+  .result-row {
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    transition: background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .result-row:hover {
+    background: var(--card-hover);
+  }
+  .amount {
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .amount-pos { color: var(--ok); }
+  .amount-neg { color: var(--text); }
+  .result-row .icon-btn {
+    width: 24px;
+    height: 24px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .result-row .icon-btn:hover {
+    color: var(--text);
+    background: var(--panel-elev);
+    border-color: var(--line-strong);
+  }
+  .err-box {
+    margin-top: 12px;
+    padding: 10px 12px;
+    color: var(--danger);
+    background: var(--danger-dim);
+    border: 1px solid var(--danger-line);
+    border-left: 3px solid var(--danger);
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+  }
+  .err-box > strong {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .err-box p {
+    margin: 4px 0 6px;
+    color: var(--text);
+  }
+  .err-box h4 {
+    margin: 8px 0 4px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .empty-hint {
+    padding: 20px 0;
+    text-align: center;
+  }
 </style>

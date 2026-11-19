@@ -24,8 +24,9 @@
   // 机制展开流（系数 1 时每秒产/耗；正值产出、负值消耗）。
   // 有求解结果时按实际用量缩放显示；无求解结果时显示系数 1 的原始流。
   // 依赖 entry.mechanic 整体：配方/机器/插件配置变化时重新加载。
+  type KeyedFlow = import("$lib/mechanic-filter").ExpandedFlow & { key: string };
   let loadingFlows = $state(true);
-  let mechanicFlows = $state<import("$lib/mechanic-filter").ExpandedFlow[]>([]);
+  let mechanicFlows = $state<KeyedFlow[]>([]);
   const environmentKey = $derived(runtime.mechanicEnvironmentKey(actions.commands.scope));
   $effect(() => {
     const mechanic = entry.mechanic;
@@ -36,7 +37,10 @@
     untrack(() => actions.loadFlow(entry.id, mechanic))
       .then((flows) => {
         if (!alive) return;
-        mechanicFlows = flows;
+        mechanicFlows = flows.map(item => ({
+          ...item,
+          key: JSON.stringify([item.location, dualVarKey(item.flow)]),
+        }));
         loadingFlows = false;
       }).catch(() => { if (alive) { mechanicFlows = []; loadingFlows = false; } });
     return () => {
@@ -65,7 +69,7 @@
         <!-- Scroll regions must be keyboard focusable, including when they contain no buttons. -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="flow-strip" tabindex="0" role="region" aria-label={`${lane.label}流量，可横向滚动`}>
-          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}
+          {#each lane.items as item (item.key)}
             {#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
           {:else}<span class="no-flow">{loadingFlows ? "加载中…" : "—"}</span>{/each}
         </div>
@@ -77,7 +81,7 @@
         <p>{solution ? "当前求解用量下的流量" : "未求解：以下为单位机制流量"}</p>
         {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
           <h4>{lane.label}（{lane.items.length}）</h4>
-          {#each lane.items as item (JSON.stringify([item.location, dualVarKey(item.flow)]))}{#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
+          {#each lane.items as item (item.key)}{#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
         {/each}
       </div>
     </SecondaryMenu>
@@ -85,25 +89,90 @@
 </article>
 
 <style>
-
-  .mech-card { height: var(--mechanic-row-height); min-height: var(--mechanic-row-height); display: grid;
-    grid-template-columns: clamp(248px, 38%, 360px) minmax(0, 1fr); padding: 0;
-    color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
-  .mech-card:hover { border-color: var(--line-strong); }
-  .off { background: var(--card); }
+  .mech-card {
+    height: var(--mechanic-row-height);
+    min-height: var(--mechanic-row-height);
+    display: grid;
+    grid-template-columns: clamp(248px, 38%, 360px) minmax(0, 1fr);
+    padding: 0;
+    color: var(--text);
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .mech-card:hover {
+    border-color: var(--line-strong);
+    background: var(--panel-elev);
+  }
+  .off {
+    background: var(--card);
+  }
+  .mech-card.off:hover {
+    background: var(--card-hover);
+  }
   .mech-card > :global(.identity) { border-right: 1px solid var(--line); }
-  .flow-lanes { position: relative; min-width: 0; display: grid; grid-template-rows: 1fr 1fr; padding: 0 30px 0 6px; gap: 2px; }
+  .flow-lanes { position: relative; min-width: 0; display: grid; grid-template-rows: 1fr 1fr; padding: 0 30px 0 8px; gap: 2px; }
   .flow-lane { display: flex; align-items: center; min-width: 0; gap: 6px; }
-  .lane-label { flex: 0 0 28px; color: var(--muted); font-size: 10px; text-align: center; }
-  .lane-label small { margin-left: 2px; font-family: var(--mono); font-size: 10px; }
+  .lane-label {
+    flex: 0 0 auto;
+    min-width: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 2px 5px;
+    color: var(--faint);
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .lane-label small {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 9.5px;
+  }
+  .lane-label small:empty { display: none; }
   .flow-strip { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; height: 34px; overflow-x: auto; overflow-y: hidden; }
   .flow-strip :global(.flow-chip) { flex: 0 0 auto; }
-  .no-flow { color: var(--muted); font-size: 11px; }
+  .no-flow { color: var(--faint); font-size: 11px; }
   .flow-lanes :global(.menu-anchor) { position: absolute; top: 23px; right: 4px; }
-  .all-flows { width: 22px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: none; color: var(--muted); font-size: 12px; cursor: pointer; }
-  .all-flows:hover { color: var(--text); border-color: var(--line-strong); }
+  .all-flows {
+    width: 22px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--input-bg);
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .all-flows:hover {
+    color: var(--text);
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
   .full-flow-list { display: grid; gap: 6px; }
   .full-flow-list p { color: var(--muted); margin: 0; font-size: 11px; }
-  .full-flow-list h4 { margin: 7px 0 0; font-size: 12px; }
+  .full-flow-list h4 {
+    margin: 8px 0 0;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
   @media (max-width: 600px) { .mech-card { grid-template-columns: minmax(220px, 46%) minmax(0, 1fr); } }
 </style>

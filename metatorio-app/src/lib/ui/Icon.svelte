@@ -25,8 +25,9 @@
     fallbackLabel?: string;
   } = $props();
 
-  let url = $state<string | null>(null);
-  let lastKey = $state("");
+  let asyncState = $state<{ key: string; url: string | null } | null>(null);
+  let failedKey = $state("");
+  let lastKey = "";
   // 名称防御：目录条目/分组键偶尔会以非字符串形态传入（历史上选择器把
   // 分组对象传给 name，导致渲染期 name.slice 抛错、整块 UI 不渲染）。
   // 统一转成字符串，占位符与 alt/title 都使用这个安全值。
@@ -34,6 +35,15 @@
   // 没有显式 tooltip 时回退到名称，保证每个图标至少有可辨识的悬停信息。
   let displayLabel = $derived(runtime.localizedName(type, label));
   let tip = $derived(richTextPlain(title || displayLabel) || undefined);
+  let currentKey = $derived(`${runtime.effectiveContextId}/${type}/${name}`);
+  let syncUrl = $derived.by(() => {
+    const rev = runtime.iconRevision;
+    if (failedKey === `${currentKey}/${rev}`) return null;
+    return syntheticIconUrls[name] ?? (type && name ? runtime.peekIcon(type, name) : null);
+  });
+  let url = $derived(
+    syncUrl ?? (asyncState?.key === currentKey ? asyncState.url : null),
+  );
 
   $effect(() => {
     const ctxId = runtime.effectiveContextId;
@@ -42,20 +52,31 @@
     // 若只是缓存失效/上下文重载触发重跑，保留当前图标直到新图标到位，
     // 避免"每次操作都闪一下首字母占位"。
     const key = `${ctxId}/${type}/${name}`;
-    if (key !== lastKey) {
-      lastKey = key;
-      url = null;
-    }
     const syntheticUrl = syntheticIconUrls[name];
     if (syntheticUrl) {
-      url = syntheticUrl;
+      lastKey = key;
+      asyncState = { key, url: syntheticUrl };
       return;
     }
-    if (!type || !name) return;
+    if (!type || !name) {
+      lastKey = key;
+      asyncState = null;
+      return;
+    }
+    const cached = runtime.peekIcon(type, name);
+    if (cached) {
+      lastKey = key;
+      asyncState = { key, url: cached };
+      return;
+    }
+    if (key !== lastKey) {
+      lastKey = key;
+      asyncState = { key, url: null };
+    }
     let alive = true;
     runtime.getIcon(type, name)
-      .then((iconUrl) => { if (alive) url = iconUrl; })
-      .catch(() => { if (alive) url = null; });
+      .then((iconUrl) => { if (alive) asyncState = { key, url: iconUrl }; })
+      .catch(() => { if (alive) asyncState = { key, url: null }; });
     return () => {
       alive = false;
     };
@@ -67,7 +88,10 @@
     class="icon"
     class:bare={bare || type === "quality"}
     src={url}
-    onerror={() => { url = null; }}
+    onerror={() => {
+      failedKey = `${currentKey}/${runtime.iconRevision}`;
+      asyncState = { key: currentKey, url: null };
+    }}
     alt={displayLabel}
     title={tip}
     style={`width:${size}px;height:${size}px`}

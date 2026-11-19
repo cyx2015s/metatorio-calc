@@ -132,7 +132,22 @@
         {/each}
       </div>
 <style>
-  .location-heading { display: flex; align-items: center; gap: 8px; padding: 10px 6px 4px; color: var(--text); }
+  .location-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 8px 6px;
+    margin-bottom: 4px;
+    color: var(--text);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .location-heading strong {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+  }
+
   .mech-list {
     /* 关键：机制列表必须按内容高度撑开，由 .center 负责滚动。
        若它作为可收缩 flex 项被压到剩余高度，内部的 .mech-group 会因
@@ -151,13 +166,19 @@
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius);
+    box-shadow: var(--shadow-sm, var(--shadow));
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  .mech-group:hover {
+    border-color: var(--line-strong);
   }
 
   .mech-group-head {
     display: flex;
     align-items: center;
-    gap: 7px;
-    padding: 7px 10px;
+    gap: 8px;
+    padding: 7px 12px;
     background: var(--panel-elev);
     border-bottom: 1px solid var(--line);
   }
@@ -166,10 +187,10 @@
     flex: 1;
     min-width: 0;
     overflow: hidden;
-    color: var(--muted);
-    font-size: 10px;
+    color: var(--text);
+    font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-overflow: ellipsis;
     text-transform: uppercase;
     white-space: nowrap;
@@ -187,7 +208,7 @@
   }
 
   .mech-group-row :global(.mech-card:hover) {
-    background: color-mix(in srgb, var(--panel) 82%, var(--text) 4%);
+    background: var(--card-hover);
   }
 
   /* 顶层机制卡由 MechanicCard 自己提供边框；这里只保证悬停/间距一致。 */

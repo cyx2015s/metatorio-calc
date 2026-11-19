@@ -173,33 +173,99 @@
 {/if}
 
 <style>
-  .hover-card { position: fixed; z-index: 80; width: min(440px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow: auto; padding: 10px; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); text-align: left; font-size: 11px; line-height: 1.35; }
-  header { display: flex; align-items: center; gap: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-  .heading { min-width: 0; flex: 1; display: grid; gap: 2px; }
-  .heading strong { font-size: 13px; overflow-wrap: anywhere; }
-  code { font: 10px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-  .badges { display: grid; gap: 3px; flex: 0 0 auto; font-size: 10px; text-align: right; color: var(--muted); }
-  .unavailable { color: var(--warn); }
-  section { margin-top: 8px; }
-  h4 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0 0 5px; font-size: 11px; }
-  h4 small { color: var(--muted); font-size: 10px; font-weight: 400; }
-  .weight-note { margin: 3px 0 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
-  .stats { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 3px 10px; }
-  .stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; padding: 3px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+  .hover-card {
+    position: fixed;
+    z-index: 80;
+    width: min(440px, calc(100vw - 16px));
+    max-height: calc(100dvh - 16px);
+    overflow: auto;
+    padding: 12px;
+    color: var(--text);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+    text-align: left;
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding-bottom: 9px;
+    border-bottom: 1px solid var(--line);
+  }
+  .heading { min-width: 0; flex: 1; display: grid; gap: 3px; }
+  .heading strong { font-size: 13px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+  code {
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    padding: 1px 5px;
+    font: 10px var(--mono);
+    color: var(--muted);
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    overflow-wrap: anywhere;
+  }
+  .badges { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: 0 0 auto; font-size: 9.5px; color: var(--muted); }
+  .badges span {
+    padding: 1px 6px;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    line-height: 1.3;
+    white-space: nowrap;
+  }
+  .badges .unavailable {
+    color: var(--warn);
+    background: var(--warn-dim);
+    border-color: var(--warn-line);
+  }
+  section { margin-top: 9px; }
+  h4 { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin: 0 0 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; color: var(--text); }
+  h4 small { color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: 0; }
+  .weight-note { margin: 4px 0 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 2px 12px; }
+  .stats > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 2px;
+    border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
   .stats span, .facts > span, .reference > span, .tile-capabilities span { color: var(--muted); }
   .stats strong, .quantity, .actual strong { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .facts { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 12px; margin-top: 7px; }
+  .stats strong { color: var(--text); font-weight: 600; }
+  .facts { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 12px; margin-top: 8px; padding: 2px 0; font-size: 11px; }
   .facts strong { text-align: right; overflow-wrap: anywhere; font-weight: 500; }
-  .actual { display: flex; justify-content: space-between; margin-top: 7px; padding: 5px 7px; background: var(--accent-dim); border-radius: var(--radius-sm); }
+  .actual {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding: 6px 9px;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: var(--radius-sm);
+  }
+  .actual span { color: var(--muted); font-size: 10.5px; }
+  .actual strong { font-size: 12px; font-weight: 700; }
   .tile-capabilities > div, .reference { display: flex; align-items: center; gap: 6px; margin-top: 5px; }
   .tile-capabilities span, .reference > span { min-width: 72px; }
   .flow-table { display: grid; }
-  .flow-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-top: 1px solid var(--line); }
+  .flow-row { display: flex; align-items: center; gap: 7px; padding: 5px 4px; border-top: 1px solid var(--line); }
   .flow-copy { flex: 1; min-width: 0; display: grid; gap: 2px; }
   .flow-copy strong { font-weight: 500; overflow-wrap: anywhere; }
   .flow-copy small { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
   .quantity { display: grid; gap: 2px; text-align: right; }
   .quantity small, .note { color: var(--muted); font-size: 10px; }
-  .note { margin: 6px 0 0; }
+  .note { margin: 6px 0 0; line-height: 1.45; }
   @media (max-width: 460px) { .stats { grid-template-columns: 1fr; } }
 </style>

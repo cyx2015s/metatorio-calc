@@ -70,7 +70,11 @@
   });
 
   let kind = $derived(entry.mechanic.type);
-  let solarOrbit = $derived(entry.location?.kind === "space" || runtime.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.settings.surface != null);
+  let solarOrbit = $derived(
+    kind === "solar" &&
+      (entry.location?.kind === "space" ||
+        runtime.document?.projects.find(p => p.id === project)?.factories.find(f => f.id === factory)?.settings.surface != null),
+  );
   let solarContinuous = $derived(solarOrbit || !!solarBalanceInfo?.continuous_daylight);
 
   const primary = $derived(mechanicPrimary(entry.mechanic));
@@ -126,7 +130,11 @@
   let machineQuality = $derived(entry.mechanic.machine?.quality ?? "normal");
   // 本地化显示名（无翻译回退内部 id）
   let primaryLabel = $derived(primaryName ? runtime.localizedName(primary.kind, primaryName) : "");
-  const neighbourEstimate = $derived(runtime.document?.projects.find(p=>p.id===project)?.settings.reactor_neighbours?.[primaryName] ?? 3);
+  const neighbourEstimate = $derived(
+    kind === "reactor" || kind === "fusion-reactor"
+      ? (runtime.document?.projects.find(p => p.id === project)?.settings.reactor_neighbours?.[primaryName] ?? 3)
+      : 3,
+  );
   let machineLabel = $derived(machineName ? runtime.localizedName(machineKind(), machineName) : "");
   let fluidLabel = $derived(fluidName ? runtime.localizedName("fluid", fluidName) : "");
   function machineKind(): CatalogKind {
@@ -418,27 +426,65 @@
   .identity { min-width: 0; display: grid; grid-template-rows: 30px 24px; gap: 4px; padding: 6px 10px; }
   .configuration, .metadata { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .primary, .machine-button { flex: 0 0 auto; width: 30px; height: 30px; }
-  .kind-label { color: var(--muted); font-size: 10px; white-space: nowrap; }
+  .kind-label { color: var(--muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
   .actions { display: flex; flex: 0 0 auto; gap: 0; margin-left: auto; }
   .actions .icon-btn { width: 22px; height: 24px; font-size: 12px; }
   .enabled.on { color: var(--ok); }
-  .amount { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.1; }
-  .amount strong { font-size: 12px; }
+  .amount { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .amount strong { font-size: 12px; font-weight: 700; }
   .cost { color: var(--muted); font-size: 10px; margin-left: 6px; }
-  .unsolved { color: var(--muted); font-size: 10px; }
-  .config-preview, .settings-button { display: flex; align-items: center; min-width: 0; max-width: 100%; gap: 4px; padding: 1px 3px;
-    height: 26px; border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); background: var(--input-bg); cursor: pointer; font-size: 10px; }
-  .config-preview:hover, .settings-button:hover { border-color: var(--line-strong); color: var(--text); }
+  .unsolved { color: var(--faint); font-size: 10px; }
+  .config-preview, .settings-button {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    max-width: 100%;
+    gap: 4px;
+    padding: 1px 4px;
+    height: 26px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    background: var(--input-bg);
+    cursor: pointer;
+    font-size: 10px;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .config-preview:hover, .settings-button:hover {
+    border-color: var(--line-strong);
+    color: var(--text);
+    background: var(--card-hover);
+  }
   .config-preview { overflow: hidden; }
   .preview-item { display: inline-flex; align-items: center; gap: 1px; flex: 0 0 auto; }
-  .preview-item small { font-family: var(--mono); font-size: 10px; }
+  .preview-item small { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 10px; }
   .settings-button { flex: 0 0 auto; white-space: nowrap; }
   .disclosure { margin-left: auto; }
-  .row2, .row2b, .setting-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
+  .row2, .row2b, .setting-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
   .sub { color: var(--muted); font-size: 11px; }
   .temp { display: inline-flex; gap: 5px; align-items: center; }
-  .temp input { width: 70px; min-height: 28px; color: var(--text); background: var(--input-bg); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); }
-  .solar-balance { line-height: 1.6; }
+  .temp input {
+    width: 72px;
+    min-height: 28px;
+    padding: 0 6px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+    text-align: right;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .temp input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .solar-balance { line-height: 1.6; font-variant-numeric: tabular-nums; }
   .spacer { flex: 1; }
   .identity.off { opacity: .65; }
   @media (max-width: 600px) { .identity { padding-inline: 6px; } }

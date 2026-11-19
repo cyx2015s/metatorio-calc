@@ -80,23 +80,41 @@
     align-items: center;
     gap: 5px;
     min-height: 26px;
-    padding: 1px 7px 1px 2px;
+    padding: 1px 8px 1px 3px;
+    color: var(--text);
     background: var(--input-bg);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-size: 10.5px;
+    white-space: nowrap;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
 
+  .flow-chip:hover {
+    border-color: var(--muted);
+    background: var(--card-hover);
+  }
 
   .flow-chip.out {
     border-color: var(--ok-line);
-    background: color-mix(in srgb, var(--input-bg) 94%, var(--ok) 5%);
+    background: color-mix(in srgb, var(--ok-dim) 70%, var(--input-bg));
+  }
+
+  .flow-chip.out:hover {
+    border-color: var(--ok);
   }
 
   .flow-chip .mono {
     color: var(--text);
     font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
     font-size: 10.5px;
-    font-weight: 550;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .flow-chip.out .mono {
+    color: var(--ok);
   }
 </style>

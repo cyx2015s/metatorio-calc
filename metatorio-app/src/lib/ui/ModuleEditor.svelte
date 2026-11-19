@@ -302,6 +302,15 @@
     font-size: 9px;
     line-height: 1;
     cursor: pointer;
+    transition: background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  .me-x:hover {
+    color: var(--accent-ink);
+    background: var(--danger);
+    border-color: var(--danger);
   }
 
   .me-beacons {
@@ -326,8 +335,12 @@
   }
 
   .me-warn {
+    padding: 6px 8px;
     color: var(--danger);
-    font-size: 10px;
+    background: var(--danger-dim);
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-sm);
+    font-size: 10.5px;
     line-height: 1.45;
   }
 
@@ -335,7 +348,7 @@
     display: grid;
     gap: 6px;
     padding: 8px;
-    background: var(--input-bg);
+    background: var(--panel-elev);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
   }
@@ -364,6 +377,7 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
     font-size: 10px;
     text-align: right;
   }
@@ -390,6 +404,11 @@
     background: var(--panel);
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+
+  .me-beacon-module:hover {
+    border-color: var(--line-strong);
   }
 
   .me-beacon-module input {
@@ -401,8 +420,15 @@
     border: 1px solid var(--line-strong);
     border-radius: 3px;
     font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
     font-size: 10px;
     text-align: right;
+  }
+
+  .me-beacon-module input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
   }
 
 </style>

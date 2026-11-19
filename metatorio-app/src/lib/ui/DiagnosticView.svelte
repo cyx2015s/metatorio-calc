@@ -40,12 +40,59 @@
 </section>
 
 <style>
-  .located-row{display:flex;align-items:center;gap:5px}
+  .located-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .located-row:hover {
+    background: color-mix(in srgb, var(--danger-dim) 50%, var(--card-hover));
+  }
   .diagnostic { min-width: 0; }
-  .diagnostic-message { white-space: pre-wrap; overflow-wrap: anywhere; }
-  input { width: 100%; min-width: 0; margin-top: 7px; }
-  .diagnostic-section { margin-top: 8px; }
-  .diagnostic-section > strong { display: block; font-size: 11px; margin-bottom: 4px; }
-  small { color: var(--muted); font-weight: normal; }
-  .diagnostic-flows { display: flex; flex-direction: column; gap: 5px; max-height: 280px; overflow: auto; }
+  .diagnostic-message { color: var(--text); font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+  input {
+    width: 100%;
+    min-width: 0;
+    min-height: 28px;
+    margin-top: 8px;
+    padding: 0 8px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  input::placeholder { color: var(--faint); }
+  input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .diagnostic-section {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--danger-line);
+  }
+  .diagnostic-section > strong {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    color: var(--danger);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  small {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: normal;
+  }
+  .diagnostic-flows { display: flex; flex-direction: column; gap: 3px; max-height: 280px; overflow: auto; }
 </style>

@@ -9,6 +9,7 @@
   --mechanic-row-height: 72px;
   --radius: 6px;
   --radius-sm: 4px;
+  --transition-fast: 120ms cubic-bezier(0.22, 1, 0.36, 1);
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Cascadia Mono", monospace;
   --sans: "Inter", "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
 
@@ -38,7 +39,9 @@
   --danger-line: #6b2b27;
   --icon-bg: #1a1a1a;
   --input-bg: #0a0a0a;
+  --surface-glass: rgba(10, 10, 10, 0.86);
   --grid: rgba(255, 255, 255, 0.035);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.03);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.72);
   --focus: #ffffff;
@@ -74,7 +77,9 @@
   --danger-line: #e4b3ae;
   --icon-bg: #ededed;
   --input-bg: #ffffff;
+  --surface-glass: rgba(255, 255, 255, 0.88);
   --grid: rgba(0, 0, 0, 0.045);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-strong: 0 18px 48px rgba(0, 0, 0, 0.14);
   --focus: #000000;
@@ -121,7 +126,7 @@ textarea {
 }
 
 :focus-visible {
-  outline: 1px solid var(--focus);
+  outline: 1.5px solid var(--focus);
   outline-offset: 1px;
 }
 
@@ -184,16 +189,28 @@ textarea {
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 90ms ease, border-color 90ms ease, color 90ms ease;
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background: var(--card-hover);
   border-color: var(--muted);
 }
 
-.btn:active {
+.btn:active:not(:disabled) {
   background: var(--accent-dim);
+  transform: translateY(0.5px);
+}
+
+.btn:focus-visible {
+  outline: 1.5px solid var(--focus);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 16%, transparent);
 }
 
 .btn:disabled {
@@ -206,9 +223,10 @@ textarea {
   background: var(--accent);
   border-color: var(--accent);
   font-weight: 700;
+  box-shadow: var(--shadow-sm);
 }
 
-.btn.primary:hover {
+.btn.primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 88%, var(--text));
   border-color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
@@ -219,7 +237,7 @@ textarea {
   border-color: transparent;
 }
 
-.btn.ghost:hover {
+.btn.ghost:hover:not(:disabled) {
   color: var(--text);
   background: var(--card-hover);
   border-color: transparent;
@@ -229,6 +247,11 @@ textarea {
   color: var(--danger);
   background: var(--danger-dim);
   border-color: var(--danger-line);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 18%, var(--danger-dim));
+  border-color: var(--danger);
 }
 
 .btn.on {
@@ -258,17 +281,29 @@ textarea {
   font-size: 13px;
   line-height: 1;
   cursor: pointer;
-  transition: color 90ms ease, background 90ms ease, border-color 90ms ease;
+  transition:
+    color var(--transition-fast),
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 
-.icon-btn:hover {
+.icon-btn:hover:not(:disabled) {
   color: var(--text);
   background: var(--card-hover);
   border-color: var(--line);
 }
 
-.icon-btn:active {
+.icon-btn:active:not(:disabled) {
   background: var(--accent-dim);
+  transform: translateY(0.5px);
+}
+
+.icon-btn:focus-visible {
+  outline: 1.5px solid var(--focus);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 16%, transparent);
 }
 
 .icon-btn:disabled {
@@ -276,7 +311,7 @@ textarea {
   opacity: 0.35;
 }
 
-.icon-btn.danger:hover,
+.icon-btn.danger:hover:not(:disabled),
 .icon-btn.danger:focus-visible {
   color: var(--danger);
   background: var(--danger-dim);
@@ -315,6 +350,7 @@ textarea {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   font-size: 11.5px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 .field > input:focus,
@@ -406,6 +442,9 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 999px;
   font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -424,6 +463,12 @@ textarea {
   color: var(--warn);
   background: var(--warn-dim);
   border-color: var(--warn-line);
+}
+
+.chip.danger {
+  color: var(--danger);
+  background: var(--danger-dim);
+  border-color: var(--danger-line);
 }
 
 .chip.muted {
@@ -449,6 +494,7 @@ textarea {
 
 /* ── 数值：等宽 + 表格数字，纵向严格对齐 ───────────────────────── */
 
+input[type="number"],
 .num,
 input.num {
   font-family: var(--mono);

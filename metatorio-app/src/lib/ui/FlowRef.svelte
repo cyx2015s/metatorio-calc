@@ -14,6 +14,7 @@
   const info = $derived(presentFlow(flow, (kind, name) => runtime.localizedName(kind, name), match));
   const richLabel = $derived(flowName(flow, (kind, name) => runtime.richName(kind, name)));
   const tip = $derived(title ? `${info.description} · ${title}` : info.description);
+  const visibleQualifiers = $derived(info.qualifiers.filter(value => !showBadge || value !== info.badge));
 </script>
 
 <span class="flow-ref" class:grow data-flow-kind={info.kind} data-wildcard={info.wildcard || undefined} title={tip}>
@@ -24,17 +25,18 @@
   </span>
   {#if showBadge && info.badge}<span class="semantic-badge">{info.badge}</span>{/if}
   {#if showName}<span class="flow-name">{#if info.kind === "Custom"}{info.label}{:else}<RichText text={richLabel} />{/if}</span>{/if}
-  {#if showName && showQualifiers}
-    <span class="qualifiers">{info.qualifiers.filter(value => !showBadge || value !== info.badge).join(" · ")}</span>
+  {#if showName && showQualifiers && visibleQualifiers.length > 0}
+    <span class="qualifiers">{visibleQualifiers.join(" · ")}</span>
   {/if}
 </span>
 
 <style>
-  .flow-ref { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; vertical-align: middle; }
-  .grow { flex: 1; }
+  .flow-ref { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; overflow: hidden; vertical-align: middle; }
+  .grow { flex: 1 1 88px; min-width: 0; }
   .flow-symbol { position: relative; display: inline-flex; flex: 0 0 auto; }
-  .flow-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .qualifiers { color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+  .flow-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .flow-name :global(.rich-text) { white-space: nowrap; overflow-wrap: normal; }
+  .qualifiers { flex: 0 0 auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
   .semantic-badge { font-size: 9px; line-height: 1.2; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 2px; flex: 0 0 auto; }
   .wildcard { position: absolute; bottom: -2px; left: -2px; font: bold 11px var(--mono); padding: 0 2px; background: var(--panel); border: 1px solid var(--line); border-radius: 3px; pointer-events: none; }
 </style>

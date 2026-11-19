@@ -64,3 +64,22 @@ test("all synthetic icons have an existing static asset, including fluid fuel", 
   }
 });
 
+test("peek returns null before resolution, blob URL synchronously after resolution, and null after clear", async () => {
+  let resolveLoad;
+  const cache = new IconCache(() => new Promise((resolve) => { resolveLoad = resolve; }));
+  assert.equal(cache.peek("", "item", "iron-plate"), null);
+  assert.equal(cache.peek("ctx", "item", "iron-plate"), null);
+
+  const pending = cache.get("ctx", "item", "iron-plate");
+  assert.equal(cache.peek("ctx", "item", "iron-plate"), null);
+  await Promise.resolve();
+
+  resolveLoad([1, 2, 3]);
+  const url = await pending;
+  assert.match(url, /^blob:/);
+  assert.equal(cache.peek("ctx", "item", "iron-plate"), url);
+
+  cache.clear();
+  assert.equal(cache.peek("ctx", "item", "iron-plate"), null);
+});
+

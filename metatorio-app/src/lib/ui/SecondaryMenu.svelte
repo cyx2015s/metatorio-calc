@@ -83,11 +83,32 @@
 
 <style>
   .menu-anchor { display: inline-flex; min-width: 0; max-width: 100%; }
-  .secondary-menu { position: fixed; z-index: 30; width: min(440px, calc(100vw - 16px));
-    max-height: calc(100dvh - 16px); overflow: auto; color: var(--text); background: var(--panel);
-    border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow-strong); }
-  header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  header strong { font-size: 12px; }
-  .menu-content { padding: 10px; }
+  .secondary-menu {
+    position: fixed;
+    z-index: 30;
+    width: min(440px, calc(100vw - 16px));
+    max-height: calc(100dvh - 16px);
+    overflow: auto;
+    color: var(--text);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 12px;
+    background: var(--panel-elev);
+    border-bottom: 1px solid var(--line);
+  }
+  header strong {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .menu-content { padding: 12px; }
 </style>

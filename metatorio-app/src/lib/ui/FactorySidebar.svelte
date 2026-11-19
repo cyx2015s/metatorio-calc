@@ -13,8 +13,55 @@
 </div>
 {#if tab==='factory'}{@render factoryContent()}{:else}{@render projectContent()}{/if}
 <style>
-  .rail-tabs {display:flex;position:sticky;top:0;z-index:2;background:var(--panel);border-bottom:1px solid var(--line)}
-  .rail-tab {flex:1;min-width:0;display:grid;gap:3px;text-align:left;padding:12px 16px;border:0;border-bottom:2px solid transparent;background:none;color:var(--muted);font:inherit;cursor:pointer}
-  .rail-tab.active {color:var(--text);border-bottom-color:var(--text)}
-  .rail-tab-main {font-size:12px;font-weight:600}.rail-tab-sub {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--muted)}
+  .rail-tabs {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface-glass);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .rail-tab {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+    text-align: left;
+    padding: 11px 16px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    cursor: pointer;
+    transition:
+      color var(--transition-fast),
+      background var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+  .rail-tab:hover {
+    color: var(--text);
+    background: var(--card-hover);
+  }
+  .rail-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+    background: color-mix(in srgb, var(--accent-dim) 55%, transparent);
+  }
+  .rail-tab-main {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+  }
+  .rail-tab-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--faint);
+  }
+  .rail-tab.active .rail-tab-sub {
+    color: var(--muted);
+  }
 </style>
