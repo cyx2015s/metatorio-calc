@@ -539,22 +539,35 @@
 
   .prefs-item {
     min-width: 0;
+    min-height: 32px;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 3px 4px;
+    padding: 3px 6px;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     transition: background var(--transition-fast), border-color var(--transition-fast);
   }
 
-  .prefs-item:hover {
+  .prefs-item:hover,
+  .prefs-item:focus-within {
     background: var(--card-hover);
     border-color: var(--line);
   }
 
   .prefs-item .check {
     margin: 0;
+  }
+
+  .prefs-item .icon-btn {
+    min-width: 26px;
+    min-height: 26px;
+    opacity: 0.68;
+  }
+
+  .prefs-item:hover .icon-btn,
+  .prefs-item:focus-within .icon-btn {
+    opacity: 1;
   }
 
   .prefs-name {
@@ -568,25 +581,26 @@
 
   .prefs-item.inferred {
     border-style: dashed;
-    border-color: var(--accent-line);
+    border-color: var(--line-strong);
+    background: color-mix(in srgb, var(--panel) 95%, var(--accent) 3%);
   }
 
   .prefs-item.user-specified {
     border-style: solid;
     border-color: var(--accent-line);
-    background: color-mix(in srgb, var(--input-bg) 94%, var(--accent) 4%);
+    background: var(--panel-elev);
   }
 
   .prod-input {
     width: 58px;
-    min-height: 24px;
-    padding: 0 5px;
+    min-height: 26px;
+    padding: 0 6px;
     color: var(--text);
     background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 10.5px;
     text-align: right;
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
@@ -602,7 +616,8 @@
     max-width: 54px;
     padding: 1px 5px;
     overflow: hidden;
-    color: var(--faint);
+    color: var(--muted);
+    background: var(--panel-elev);
     border: 1px solid var(--line);
     border-radius: 3px;
     font-size: 9px;

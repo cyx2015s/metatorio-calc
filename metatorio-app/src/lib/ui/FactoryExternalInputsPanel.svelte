@@ -192,6 +192,12 @@
         + 免费电力与热量
       </button>
     </div>
+    {#if externalInputs.length > 0}
+      <div class="list-head" aria-hidden="true">
+        <span>外部来源</span>
+        <span class="list-head-cost">成本</span>
+      </div>
+    {/if}
     <div
       class="rows"
       use:dndzone={{ items: dragInputs, flipDurationMs: 120 }}
@@ -239,6 +245,7 @@
                 }}
               />
             </span>
+            <span class="cost-inline" aria-hidden="true">成本</span>
           {/if}
           <input
             class="num"
@@ -284,7 +291,10 @@
       {/each}
     </div>
     {#if implicitInputs.length > 0}
-      <div class="implicit-hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>
+      <div class="implicit-hint">
+        <span>环境自带（隐式免费，改成本转手动）</span>
+        <span class="list-head-cost">成本</span>
+      </div>
       <div class="rows">
         {#each implicitInputs as flow (JSON.stringify(flow))}
           <div class="row-item one-line implicit" title="当前地表或轨道的可用资源，严格供给下也免费">
@@ -295,7 +305,7 @@
               size={24}
               title="环境自带 · 严格供给下也免费"
             />
-            <span class="chip">隐式</span>
+            <span class="implicit-tag" title="环境自带（隐式免费，编辑成本可转为手动输入）">隐</span>
             <input
               class="num"
               type="number"
@@ -443,22 +453,22 @@
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
-    gap: 1px;
-    opacity: 0;
-    transform: translateX(2px);
-    transition: opacity var(--transition-fast), transform var(--transition-fast);
+    gap: 2px;
+    opacity: 0.65;
+    transition: opacity var(--transition-fast);
   }
 
   .row-item:hover .row-actions,
   .row-item:focus-within .row-actions {
     opacity: 1;
-    transform: none;
   }
 
   .row-actions .icon-btn {
-    width: 20px;
-    height: 22px;
-    font-size: 11px;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    font-size: 12px;
   }
 
   .row-item.implicit {
@@ -467,17 +477,63 @@
     background: color-mix(in srgb, var(--panel) 92%, var(--accent) 4%);
   }
 
+  .list-head,
   .implicit-hint {
-    margin: 10px 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 6px;
     color: var(--faint);
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
+  .list-head {
+    margin: 2px 0 4px;
+  }
+
+  .implicit-hint {
+    margin: 10px 0 4px;
+  }
+
+  .list-head-cost {
+    flex: 0 0 auto;
+    padding-right: 28px;
+    color: var(--muted);
+  }
+
+  .implicit-hint .list-head-cost {
+    padding-right: 52px;
+  }
+
+  .cost-inline {
+    color: var(--faint);
+    font-size: 9.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .implicit-tag {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    min-height: 18px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px dashed var(--line-strong);
+    border-radius: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
   .num {
-    width: 68px;
+    width: 62px;
     min-height: 26px;
     padding: 0 6px;
     color: var(--text);
@@ -525,13 +581,10 @@
       gap: 5px;
     }
     .num {
-      width: 60px;
+      width: 56px;
     }
     .num.temp {
       width: 32px;
-    }
-    .row-actions .icon-btn {
-      width: 18px;
     }
     .temp-range {
       gap: 1px;
@@ -543,7 +596,7 @@
       gap: 5px;
     }
     .num {
-      width: 60px;
+      width: 54px;
     }
     .num.temp {
       width: 32px;

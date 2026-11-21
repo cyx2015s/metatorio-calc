@@ -13,18 +13,40 @@
   let panel = $state<HTMLDivElement>();
   let left = $state(0);
   let top = $state(0);
+  let placement = $state<"below" | "above">("below");
+  let rafId = 0;
 
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
     return { destroy: () => node.remove() };
   }
-  function position() {
+  function position(initial = false) {
     if (!anchor || !panel) return;
+    const pad = 8;
     const rect = anchor.getBoundingClientRect();
     const width = panel.offsetWidth;
     const height = panel.offsetHeight;
-    left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-    top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - height - 8));
+    const maxLeft = Math.max(pad, window.innerWidth - width - pad);
+    const maxTop = Math.max(pad, window.innerHeight - height - pad);
+
+    if (initial) {
+      const fitsBelow = rect.bottom + 6 + height <= window.innerHeight - pad;
+      const fitsAbove = rect.top - 6 - height >= pad;
+      placement = !fitsBelow && fitsAbove ? "above" : "below";
+    }
+
+    const rawTop = placement === "above" ? rect.top - height - 6 : rect.bottom + 6;
+    const nextLeft = Math.round(Math.max(pad, Math.min(rect.left, maxLeft)));
+    const nextTop = Math.round(Math.max(pad, Math.min(rawTop, maxTop)));
+    if (Math.abs(nextLeft - left) >= 1) left = nextLeft;
+    if (Math.abs(nextTop - top) >= 1) top = nextTop;
+  }
+  function schedulePosition() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      position(false);
+    });
   }
   function close(restoreFocus = false) {
     open = false;
@@ -38,7 +60,7 @@
     let alive = true;
     tick().then(() => {
       if (!alive) return;
-      position();
+      position(true);
       panel?.focus({ preventScroll: true });
     });
     function outside(event: PointerEvent) {
@@ -53,19 +75,29 @@
       event.preventDefault();
       close(true);
     }
-    const observer = new ResizeObserver(position);
+    function onScroll(event: Event) {
+      // 二级菜单自身内部滚动不重算定位，避免内容滚动引起外框抖动；
+      // 外部容器滚动时只平稳钳制到视口安全边距内，不自动关闭。
+      if (panel && event.target instanceof Node && panel.contains(event.target)) return;
+      schedulePosition();
+    }
+    const observer = new ResizeObserver(() => schedulePosition());
     tick().then(() => { if (alive && panel) observer.observe(panel); });
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", keydown);
-    window.addEventListener("resize", position);
-    window.addEventListener("scroll", position, true);
+    window.addEventListener("resize", schedulePosition);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       alive = false;
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
       observer.disconnect();
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", keydown);
-      window.removeEventListener("resize", position);
-      window.removeEventListener("scroll", position, true);
+      window.removeEventListener("resize", schedulePosition);
+      window.removeEventListener("scroll", onScroll, true);
     };
   });
 </script>

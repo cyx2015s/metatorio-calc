@@ -62,6 +62,12 @@
   </button>
   {#if open}
     <div class="shortcuts"><button class="btn" onclick={()=>freeEnergy().catch(()=>{})} disabled={hasFreeEnergy||!!pending[`energy:${project}:${universe.id}`]}>+ 免费电力与热量</button><LocationPicker value={runtime.universeAddLocation} label="外部输入默认地点" onChange={location=>runtime.universeAddLocation=location}/></div>
+    {#if dragInputs.length > 0}
+      <div class="list-head" aria-hidden="true">
+        <span>外部来源</span>
+        <span class="list-head-cost">成本</span>
+      </div>
+    {/if}
     <div class="rows" use:dndzone={{items:dragInputs,type:`universe-inputs-${project}-${universe.id}`,flipDurationMs:120}} onconsider={e=>dragInputs=e.detail.items} onfinalize={async e=>{
       dragInputs=e.detail.items;const send=writer(),p=project,u=universe.id,order=dragInputs.map(i=>i.id);
       await reorderIds(order, () => runtime.document?.projects.find(e=>e.id===p)?.universes?.find(e=>e.id===u)?.external_inputs ?? [],
@@ -82,11 +88,11 @@
     </div>
     {#if loading}<div class="empty-hint">读取环境来源…</div>{/if}
     {#if error}<div class="error" role="status">{error}</div>{/if}
-    {#if implicit.length}<div class="implicit-hint">环境自带（隐式免费，编辑成本可转为手动输入）</div>{/if}
+    {#if implicit.length}<div class="implicit-hint"><span>环境自带（隐式免费，改成本转手动）</span><span class="list-head-cost">成本</span></div>{/if}
     {#each implicit as flow (key(flow))}
       <div class="input-row implicit">
-        <LocationIcon location={flow.location} size={20}/><FlowRef flow={flow.flow} grow showQualifiers={false} size={22}/><span class="chip implicit-chip">隐式</span>
-        <input class="num" type="number" min="0" step="any" value="0" aria-label={`外部成本：${label(flow.flow)}`} disabled={pending[`${project}:${universe.id}:${key(flow)}`]} onchange={e=>{const value=Number(e.currentTarget.value);if(e.currentTarget.value.trim()&&Number.isFinite(value)&&value>=0)promote(flow,internal(flow.flow,value)).catch(()=>{});}}/>
+        <LocationIcon location={flow.location} size={20}/><FlowRef flow={flow.flow} grow showQualifiers={false} size={22}/><span class="implicit-tag" title="环境自带（隐式免费，编辑成本可转为手动输入）">隐</span>
+        <input class="num" type="number" min="0" step="any" value="0" aria-label={`外部成本：${label(flow.flow)}`} title="编辑成本后保存为手动外部输入" disabled={pending[`${project}:${universe.id}:${key(flow)}`]} onchange={e=>{const value=Number(e.currentTarget.value);if(e.currentTarget.value.trim()&&Number.isFinite(value)&&value>=0)promote(flow,internal(flow.flow,value)).catch(()=>{});}}/>
         <span class="row-actions">
           <button class="icon-btn" aria-label="设为手动外部输入" disabled={pending[`${project}:${universe.id}:${key(flow)}`]} onclick={()=>promote(flow,0).catch(()=>{})}>+</button>
           <button class="icon-btn danger" aria-label={`禁用环境资源：${label(flow.flow)}`} title="将该地点的外部输入成本设为 10¹²" disabled={pending[`${project}:${universe.id}:${key(flow)}`]} onclick={()=>promote(flow,1e12).catch(()=>{})}>⊘</button>
@@ -182,26 +188,43 @@
     background: color-mix(in srgb, var(--panel) 92%, var(--accent) 4%);
     margin: 2px 0;
   }
-  .implicit-chip {
-    padding: 0 5px;
-    min-height: 19px;
-    font-size: 9.5px;
+  .implicit-tag {
     flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    min-height: 18px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px dashed var(--line-strong);
+    border-radius: 3px;
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1.2;
   }
   .row-actions {
     display: inline-flex;
     align-items: center;
     gap: 2px;
     flex: 0 0 auto;
+    opacity: 0.65;
+    transition: opacity var(--transition-fast);
+  }
+  .input-row:hover .row-actions,
+  .input-row:focus-within .row-actions {
+    opacity: 1;
   }
   .row-actions .icon-btn {
-    width: 21px;
-    height: 22px;
-    font-size: 11px;
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    font-size: 12px;
   }
   .num {
-    width: 50px;
-    min-height: 24px;
+    width: 52px;
+    min-height: 26px;
     padding: 0 5px;
     flex: 0 0 auto;
     color: var(--text);
@@ -218,13 +241,32 @@
     outline: none;
     box-shadow: 0 0 0 1px var(--accent);
   }
+  .list-head,
   .implicit-hint {
-    margin: 10px 0 4px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0 6px;
     color: var(--faint);
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
+  }
+  .list-head {
+    margin: 2px 0 4px;
+  }
+  .implicit-hint {
+    margin: 10px 0 4px;
+  }
+  .list-head-cost {
+    flex: 0 0 auto;
+    padding-right: 28px;
+    color: var(--muted);
+  }
+  .implicit-hint .list-head-cost {
+    padding-right: 52px;
   }
   .empty-hint {
     padding: 12px 4px;
