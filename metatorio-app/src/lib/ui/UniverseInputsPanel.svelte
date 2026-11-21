@@ -76,7 +76,7 @@
     {#each dragInputs as input (input.id)}
       <div class="input-row">
         <LocationPicker value={input.flow.location} label="外部输入地点" onChange={location=>setFlow(input,input.flow.flow,location)}/>
-        <FlowRef flow={input.flow.flow} grow showQualifiers={false} size={22} showBadge={!(typeof input.flow.flow==='object'&&'Fluid' in input.flow.flow)} onClick={()=>choose(input)} />
+        <FlowRef flow={input.flow.flow} grow showQualifiers={false} size={22} showBadge={!(typeof input.flow.flow==='object'&&'Fluid' in input.flow.flow)} hint="点击更改外部输入流" onClick={()=>choose(input)} />
         <FlowRangeEditor flow={input.flow.flow} onChange={flow=>setFlow(input,flow)} />
         {#if input.penalty===1e12}<span class="chip">已禁用</span>{/if}
         <input class="num" type="number" min="0" step="any" aria-label={`外部输入成本：${label(input.flow.flow)}`} title={isEnergyFlow(input.flow.flow)?'每 MW 成本':'当前时间单位下的外部输入成本'} value={displayed(input.flow.flow,input.penalty ?? NaN)} onchange={e=>{const value=Number(e.currentTarget.value);if(e.currentTarget.value.trim()&&Number.isFinite(value)&&value>=0)writer()({'set-external-input-penalty':{input:input.id,penalty:internal(input.flow.flow,value)}}).catch(()=>{});}} />

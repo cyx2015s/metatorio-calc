@@ -41,7 +41,12 @@
   } from "$lib/ui/WorkspaceDialogs.svelte";
   import { locationKey, locationLabel, transportLabel, universeView } from "$lib/mechanics/located";
   import { createMechanicActions } from "$lib/mechanics/actions";
-  import { DEFAULT_MECHANIC_VIEW, type MechanicViewMode } from "$lib/mechanics/workspace";
+  import {
+    DEFAULT_MECHANIC_VIEW,
+    type FlowTraceRequest,
+    type MechanicFocusRequest,
+    type MechanicViewMode,
+  } from "$lib/mechanics/workspace";
   import { mechanicKindLabels, mechanicPrimary } from "$lib/mechanics/presentation";
   import { presentFlow } from "$lib/dual-var";
 
@@ -171,7 +176,7 @@
   let renameTarget = $state<RenameTargetState | null>(null);
   let closeProjectState = $state<CloseProjectState | null>(null);
 
-  // 轻量提示（自动消失）；noticeTone 供 Stage 2 传给 ErrorBanner Toast
+  // 轻量提示（自动消失）；noticeTone 传给 ErrorBanner Toast
   let notice = $state<string | null>(null);
   let noticeTone = $state<"info" | "warn" | "danger">("info");
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -491,23 +496,12 @@
     }
   }
 
-  // ── 宇宙星球快速筛选条 & Stage 2 跨组件联动接口 ───────────────
-  // Stage 2 wire: pass universeLocationFilter, workspaceFocusRequest, workspaceTraceRequest,
-  // searchFocusSeq, handleTraceFlow, handleRevealInList, handleRevealInNetwork to MechanicWorkspace.
+  // ── 宇宙星球快速筛选条 & 跨组件联动接口 ──────────────────────────
   let universeLocationFilter = $state<Location | null>(null);
   let searchFocusSeq = $state(0);
   let linkageSeq = 0;
-  let workspaceFocusRequest = $state<{
-    mechanicId?: number;
-    flow?: DualVar;
-    location?: Location;
-    seq: number;
-  } | null>(null);
-  let workspaceTraceRequest = $state<{
-    flow: DualVar;
-    side: "input" | "output";
-    seq: number;
-  } | null>(null);
+  let workspaceFocusRequest = $state<MechanicFocusRequest | null>(null);
+  let workspaceTraceRequest = $state<FlowTraceRequest | null>(null);
 
   let lastScopeTag = $state("");
   $effect(() => {
@@ -571,10 +565,20 @@
     });
   }
 
-  // Stage 2 wire: pass to MechanicWorkspace / MechanicNetworkView
+  function ensureUniverseLocationVisible(location?: Location) {
+    if (!universe || !universeLocationFilter) return;
+    if (!location || locationKey(universeLocationFilter) !== locationKey(location)) {
+      universeLocationFilter = null;
+    }
+  }
+
   function handleRevealInList(mechanicId: number) {
+    if (universe && universeLocationFilter) {
+      const entry = mechanics.find((m) => m.id === mechanicId);
+      ensureUniverseLocationVisible(entry?.location);
+    }
     mechanicView = "list";
-    workspaceFocusRequest = { mechanicId, seq: ++linkageSeq };
+    workspaceFocusRequest = { mechanicId, targetView: "list", seq: ++linkageSeq };
     void tick().then(() => {
       document
         .querySelector(`[data-mechanic-row="${mechanicId}"]`)
@@ -582,13 +586,15 @@
     });
   }
 
-  // Stage 2 wire: pass to MechanicWorkspace / MechanicListView
   function handleRevealInNetwork(mechanicId: number) {
+    if (universe && universeLocationFilter) {
+      const entry = mechanics.find((m) => m.id === mechanicId);
+      ensureUniverseLocationVisible(entry?.location);
+    }
     mechanicView = "network";
-    workspaceFocusRequest = { mechanicId, seq: ++linkageSeq };
+    workspaceFocusRequest = { mechanicId, targetView: "network", seq: ++linkageSeq };
   }
 
-  // Stage 2 wire: pass to MechanicWorkspace / SolvePanel
   function handleTraceFlow(
     flow: DualVar,
     mode: "producers" | "consumers" | "network" | "suggest",
@@ -598,9 +604,10 @@
       void openSuggestions(flow, location);
       return;
     }
+    if (location) ensureUniverseLocationVisible(location);
     if (mode === "network") {
       mechanicView = "network";
-      workspaceFocusRequest = { flow, location, seq: ++linkageSeq };
+      workspaceFocusRequest = { flow, location, targetView: "network", seq: ++linkageSeq };
       return;
     }
     mechanicView = "list";
@@ -612,7 +619,6 @@
     };
   }
 
-  // Stage 2 wire: pass to SolvePanel / DiagnosticView
   function handleAddExternalInputFromDiagnostic(flow: DualVar, location?: Location) {
     if (!project || !factory) return;
     if (universe) {
@@ -631,7 +637,6 @@
       .catch(() => {});
   }
 
-  // Stage 2 wire: pass to SolvePanel / DiagnosticView
   function handleAddTargetFromDiagnostic(flow: DualVar, location?: Location) {
     if (!project || !factory) return;
     if (universe) {
@@ -650,7 +655,6 @@
       .catch(() => {});
   }
 
-  // Stage 2 wire: pass to SolvePanel / DiagnosticView
   function handleDisableStrictSink() {
     if (!project || !factory) return;
     if (universe) {
@@ -667,29 +671,6 @@
       .then(() => showNotice("已关闭严格消耗"))
       .catch(() => {});
   }
-
-  // Stage 2 wire helper anchor (ensures zero unused-symbol warnings in Stage 1 while keeping handlers ready)
-  const _stage2WireHooks = {
-    get noticeTone() {
-      return noticeTone;
-    },
-    get searchFocusSeq() {
-      return searchFocusSeq;
-    },
-    get workspaceFocusRequest() {
-      return workspaceFocusRequest;
-    },
-    get workspaceTraceRequest() {
-      return workspaceTraceRequest;
-    },
-    handleRevealInList,
-    handleRevealInNetwork,
-    handleTraceFlow,
-    handleAddExternalInputFromDiagnostic,
-    handleAddTargetFromDiagnostic,
-    handleDisableStrictSink,
-  };
-  void _stage2WireHooks;
 
   // ── 添加机制并尝试自动打开主原型选择器 ──────────────────────────
   async function addMechanicAndPick(kind: MechanicKind) {
@@ -1075,13 +1056,17 @@
     onSaveProjectAs={() => void saveProjectAsAction()}
   />
 
-  <!-- Stage 2 wire: pass {noticeTone} to ErrorBanner -->
   <ErrorBanner
     {notice}
+    {noticeTone}
     {missingProjectContext}
     onOpenData={() => (dataOpen = true)}
     onSuggest={openSuggestions}
     onNotice={showNotice}
+    onDismissNotice={() => {
+      clearTimeout(noticeTimer);
+      notice = null;
+    }}
   />
 
   <!-- ══ 工作区 ══ -->
@@ -1144,7 +1129,8 @@
                   <button
                     class="icon-btn"
                     class:empty={!factory.settings.planet}
-                    title={`星球：${factory.settings.planet ? runtime.localizedName("planet", factory.settings.planet) : "未选择"}`}
+                    aria-label={`星球：${factory.settings.planet ? runtime.localizedName("planet", factory.settings.planet) : "未选择"}`}
+                    title={factory.settings.planet ? undefined : "星球：未选择"}
                     onclick={() =>
                       openSelector({
                         kind: "planet",
@@ -1157,6 +1143,7 @@
                       name={factory.settings.planet || "planet"}
                       size={24}
                       detailKind={factory.settings.planet ? "planet" : undefined}
+                      hint="点击选择星球"
                     />
                   </button>
                   <span class="sub">
@@ -1176,7 +1163,8 @@
                   <button
                     class="icon-btn"
                     class:empty={!factory.settings.surface}
-                    title={`地表：${factory.settings.surface ? runtime.localizedName("surface", factory.settings.surface) : "未选择"}`}
+                    aria-label={`地表：${factory.settings.surface ? runtime.localizedName("surface", factory.settings.surface) : "未选择"}`}
+                    title={factory.settings.surface ? undefined : "地表：未选择"}
                     onclick={() =>
                       openSelector({
                         kind: "surface",
@@ -1189,6 +1177,7 @@
                       name={factory.settings.surface || "surface"}
                       size={24}
                       detailKind={factory.settings.surface ? "surface" : undefined}
+                      hint="点击选择地表"
                     />
                   </button>
                   <span class="sub">
@@ -1516,11 +1505,6 @@
         {/if}
       </div>
 
-      <!-- Stage 2 wire: pass locationFilter={universe ? universeLocationFilter : null}
-           focusRequest={workspaceFocusRequest} traceRequest={workspaceTraceRequest}
-           {searchFocusSeq} onTraceFlow={handleTraceFlow}
-           onRevealInList={handleRevealInList} onRevealInNetwork={handleRevealInNetwork}
-           to MechanicWorkspace -->
       <MechanicWorkspace
         project={project?.id ?? null}
         factory={factory?.id ?? null}
@@ -1532,8 +1516,15 @@
         {mergeRecipes}
         groupLocations={!!universe && groupLocations}
         view={mechanicView}
+        locationFilter={universe ? universeLocationFilter : null}
+        focusRequest={workspaceFocusRequest}
+        traceRequest={workspaceTraceRequest}
+        {searchFocusSeq}
         onFilterActiveChange={(active) => (filterActive = active)}
         onFilterClose={() => (filterOpen = false)}
+        onTraceFlow={handleTraceFlow}
+        onRevealInList={handleRevealInList}
+        onRevealInNetwork={handleRevealInNetwork}
       />
     </section>
 
@@ -1586,17 +1577,19 @@
 
     <!-- 右栏：求解结果（数据上下文移到顶部「数据」入口） -->
     <aside class="col rail rail-right" class:collapsed={rightCollapsed} aria-hidden={rightCollapsed || undefined}>
-      <!-- Stage 2 wire: pass {mechanics} solutions={solveMap} onTraceFlow={handleTraceFlow}
-           onAddExternalInput={handleAddExternalInputFromDiagnostic}
-           onAddTarget={handleAddTargetFromDiagnostic}
-           onDisableStrictSink={handleDisableStrictSink} to SolvePanel -->
       <SolvePanel
         solve={universe ? null : solve}
         universeSolve={universe ? runtime.universeSolve : null}
         error={universe ? runtime.universeSolveError : runtime.solveError}
         diagnostic={universe ? runtime.universeSolveDiagnostic : null}
         busy={universe ? universeBusy || runtime.universeSolving : !!runtime.solving}
+        {mechanics}
+        solutions={solveMap}
         onSuggest={openSuggestions}
+        onTraceFlow={handleTraceFlow}
+        onAddExternalInput={handleAddExternalInputFromDiagnostic}
+        onAddTarget={handleAddTargetFromDiagnostic}
+        onDisableStrictSink={handleDisableStrictSink}
       />
     </aside>
   </main>
@@ -1668,8 +1661,7 @@
   onNotice={showNotice}
 />
 
-<!-- Stage 2 wire: pass existingMechanics={mechanics} to SuggestionsModal -->
-<SuggestionsModal bind:suggestions />
+<SuggestionsModal bind:suggestions existingMechanics={mechanics} />
 
 <CommandPalette bind:open={commandPaletteOpen} commands={paletteCommands} />
 

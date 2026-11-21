@@ -13,6 +13,7 @@
     type MechanicSolutionMap,
     type MechanicViewMode,
   } from '$lib/mechanics/workspace';
+  import { locationKey } from '$lib/mechanics/located';
   import MechanicFilter from './MechanicFilter.svelte';
   import MechanicListView from './MechanicListView.svelte';
   import MechanicNetworkView from './MechanicNetworkView.svelte';
@@ -60,9 +61,6 @@
     onRevealInNetwork?: (mechanicId: number) => void;
     searchFocusSeq?: number;
   } = $props();
-
-  // Stage 2 wire: pass {onRevealInList} to MechanicNetworkView when network-ux merges.
-  const _stage2RevealInList = $derived(onRevealInList);
 
   function flowFilterFromDualVar(flow: DualVar): FlowFilter {
     if (typeof flow !== "string") {
@@ -118,16 +116,30 @@
       localize: (kind, name) => runtime.localizedName(kind, name),
     };
   }, (project, factory, id, mechanic) => actions!.loadFlow(id, mechanic));
-  $effect(() => { workspace.syncScope(); });
-  $effect(() => { void runtime.flowRevision; return workspace.loadIndex(); });
+  let prevWorkspaceScope = untrack(() => scope);
+  let lastTraceSeq = 0;
+  let lastFocusSeq = 0;
+  let consumedNetworkFocusSeq = $state(0);
 
   $effect(() => {
-    if (locationFilter !== undefined) {
-      workspace.locationFilter = locationFilter;
+    const currentScope = scope;
+    workspace.syncScope();
+    if (currentScope !== prevWorkspaceScope) {
+      prevWorkspaceScope = currentScope;
+      untrack(() => {
+        highlightMechanicId = null;
+        if (focusRequest) {
+          lastFocusSeq = focusRequest.seq;
+          consumedNetworkFocusSeq = focusRequest.seq;
+        }
+        if (traceRequest) {
+          lastTraceSeq = traceRequest.seq;
+        }
+      });
     }
   });
+  $effect(() => { void runtime.flowRevision; return workspace.loadIndex(); });
 
-  let lastTraceSeq = 0;
   $effect(() => {
     if (!traceRequest || traceRequest.seq === lastTraceSeq) return;
     lastTraceSeq = traceRequest.seq;
@@ -139,11 +151,19 @@
     });
   });
 
-  let lastFocusSeq = 0;
   let highlightMechanicId = $state<number | null>(null);
   let highlightSeq = $state(0);
   $effect(() => {
+    if (view !== "list") {
+      highlightMechanicId = null;
+    }
+  });
+  $effect(() => {
     if (!focusRequest || focusRequest.seq === lastFocusSeq) return;
+    if (focusRequest.targetView === "network") {
+      lastFocusSeq = focusRequest.seq;
+      return;
+    }
     if (view !== "list" || focusRequest.mechanicId == null) return;
     lastFocusSeq = focusRequest.seq;
     const targetId = focusRequest.mechanicId;
@@ -173,6 +193,23 @@
 
   let visibleIds = $derived(workspace.visibleIds);
   let filterActive = $derived(workspace.active);
+  const effectiveLocationFilter = $derived(locationFilter !== undefined ? locationFilter : workspace.locationFilter);
+  const hasVisibleListEntries = $derived.by(() => {
+    const visibleSet = visibleIds === null ? null : new Set(visibleIds);
+    const locKey = effectiveLocationFilter ? locationKey(effectiveLocationFilter) : null;
+    return entries.some(
+      (entry) =>
+        (visibleSet === null || visibleSet.has(entry.id)) &&
+        (locKey === null || locationKey(entry.location) === locKey),
+    );
+  });
+  const networkFocusRequest = $derived(
+    focusRequest &&
+      focusRequest.targetView !== "list" &&
+      focusRequest.seq !== consumedNetworkFocusSeq
+      ? focusRequest
+      : null,
+  );
   $effect(() => { onFilterActiveChange(filterActive); });
 </script>
 
@@ -188,14 +225,33 @@
     />
   {/key}
 {/if}
-{#if (filterActive || groupLocations) && view === 'list'}<div class="filter-order-note">筛选或地点聚类时暂停手动排序，关闭后恢复原始顺序。</div>{/if}
+{#if (filterActive || effectiveLocationFilter != null || groupLocations) && view === 'list'}<div class="filter-order-note">筛选或地点聚类时暂停手动排序，关闭后恢复原始顺序。</div>{/if}
 
 {#if project !== null && factory !== null && actions && view === 'network'}
   {#key scope}
-    <!-- Stage 2 wire: pass {locationFilter} {focusRequest} {onRevealInList} {searchFocusSeq} to MechanicNetworkView -->
-    <MechanicNetworkView {project} {factory} {entries} {visibleIds} {mergeRecipes} {groupLocations} {actions} {solutions} {solved} {workspace} {scrollState} {filterOpen} {onFilterClose} viewState={networkState} />
+    <MechanicNetworkView
+      {project}
+      {factory}
+      {entries}
+      {visibleIds}
+      {mergeRecipes}
+      {groupLocations}
+      locationFilter={effectiveLocationFilter}
+      focusRequest={networkFocusRequest}
+      onFocusHandled={(seq) => (consumedNetworkFocusSeq = seq)}
+      {onRevealInList}
+      {searchFocusSeq}
+      {actions}
+      {solutions}
+      {solved}
+      {workspace}
+      {scrollState}
+      {filterOpen}
+      {onFilterClose}
+      viewState={networkState}
+    />
   {/key}
-{:else if project !== null && factory !== null && actions && entries.length > 0 && (visibleIds === null || visibleIds.length > 0)}
+{:else if project !== null && factory !== null && actions && entries.length > 0 && hasVisibleListEntries}
   {#if view === 'list'}
     {#key scope}
       <MechanicListView
@@ -205,7 +261,7 @@
         {visibleIds}
         {mergeRecipes}
         {groupLocations}
-        locationFilter={locationFilter ?? workspace.locationFilter}
+        locationFilter={effectiveLocationFilter}
         {highlightMechanicId}
         {highlightSeq}
         {onTraceFlow}
@@ -223,6 +279,9 @@
     {#if filterActive}
       <strong>没有匹配的机制</strong>
       <span>可更换搜索关键词、消耗或产出条件，或清除筛选查看全部机制。读取进度见筛选栏。</span>
+    {:else if effectiveLocationFilter && entries.length > 0}
+      <strong>当前地点暂无机制</strong>
+      <span>点击上方「全部」查看全部地点，或为当前地点添加机制。</span>
     {:else if project !== null && factory !== null}
       <strong>还没有机制</strong>
       <span>从「+ 添加机制」开始，或让「自动规划」生成候选。</span>

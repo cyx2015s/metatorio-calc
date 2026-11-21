@@ -38,7 +38,8 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT||5198), externalUrl: process
   const rows=page.locator('.search-list > button');
   await rows.first().waitFor();assert.equal(await rows.count(),1);
   assert.equal(await rows.first().getAttribute('aria-label'),'量子点催化剂');
-  assert.ok(!(await rows.first().getAttribute('title')).includes('[color='));
+  assert.equal(await rows.first().getAttribute('title'),null);
+  assert.ok(!(await rows.first().getAttribute('aria-label')).includes('[color='));
   await search.fill('FF4040');assert.equal(await rows.count(),0);
   await search.fill('ＱＵＡＮＴＵＭ＿ＤＯＴ');assert.equal(await rows.count(),1);
   await search.fill('铁板');assert.ok(await rows.count()>0);

@@ -193,39 +193,41 @@
     <div class="configuration">
       {#if entry.location}<LocationPicker value={entry.location} planetsOnly={!!entry.transport} label="机制地点" onChange={location => actions.setLocation(entry.id, location).catch(() => {})} />{/if}
       <button class="icon-btn primary" aria-label={`更换${kindText}：${primaryLabel || "未设置"}`} onclick={() => onPick(primary.kind)}>
-        <HoverIcon type={primaryIcon} name={primaryName || "+"} size={24} detailKind={primaryName ? primary.kind : undefined} quality={primaryQuality} />
+        <HoverIcon type={primaryIcon} name={primaryName || "+"} size={24} detailKind={primaryName ? primary.kind : undefined} quality={primaryQuality} hint={primaryName ? `点击更换${kindText}` : undefined} />
       </button>
       {#if hasMachine}
         <button class="icon-btn machine-button" aria-label={`更换机器：${machineLabel || "未选择"}`}
           onclick={() => onPick(kind === "tile-extract" ? "offshore-pump" : machineKind())}>
-          <HoverIcon type="entity" name={machineName || "+"} size={24} detailKind={machineName ? machineKind() : undefined} quality={machineQuality} />
+          <HoverIcon type="entity" name={machineName || "+"} size={24} detailKind={machineName ? machineKind() : undefined} quality={machineQuality} hint={machineName ? "点击更换机器" : undefined} />
         </button>
       {:else if kind === "tile-dispose"}
         <button class="icon-btn" aria-label="选择可销毁物品的地格" onclick={() => onPick("tile")}>
-          <HoverIcon type="tile" name={entry.mechanic.tile || "+"} size={24} detailKind={entry.mechanic.tile ? "tile" : undefined} />
+          <HoverIcon type="tile" name={entry.mechanic.tile || "+"} size={24} detailKind={entry.mechanic.tile ? "tile" : undefined} hint={entry.mechanic.tile ? "点击更换地格" : undefined} />
         </button>
       {:else if kind === "generator" || kind === "boiler"}
         <button class="icon-btn" aria-label={`更换流体：${fluidLabel || "未选择"}`} onclick={() => onPick("fluid")}>
-          <HoverIcon type="fluid" name={fluidName || "+"} size={24} detailKind={fluidName ? "fluid" : undefined} />
+          <HoverIcon type="fluid" name={fluidName || "+"} size={24} detailKind={fluidName ? "fluid" : undefined} hint={fluidName ? "点击更换流体" : undefined} />
         </button>
       {:else if kind === "solar" && !solarContinuous}
         <button class="icon-btn" aria-label="更换蓄电器" onclick={() => onPick("accumulator")}>
-          <HoverIcon type="entity" name={entry.mechanic.accumulator?.id || "+"} size={24} quality={entry.mechanic.accumulator?.quality} detailKind={entry.mechanic.accumulator ? "accumulator" : undefined} />
+          <HoverIcon type="entity" name={entry.mechanic.accumulator?.id || "+"} size={24} quality={entry.mechanic.accumulator?.quality} detailKind={entry.mechanic.accumulator ? "accumulator" : undefined} hint={entry.mechanic.accumulator ? "点击更换蓄电器" : undefined} />
         </button>
       {/if}
       {#if hasModules}
         <SecondaryMenu title="插件与插件塔" onOpenChange={(open) => menus.modules = open}>
           {#snippet trigger(toggle, open)}
+            {@const previewSummary = `编辑插件与插件塔：${entry.mechanic.module_config?.modules.length ?? 0} 个机器插件，${beaconCount} 座塔（${beacons.length} 组配置）`}
             <button class="config-preview" onclick={toggle} aria-expanded={open} aria-haspopup="dialog"
-              title={`编辑插件与插件塔：${entry.mechanic.module_config?.modules.length ?? 0} 个机器插件，${beaconCount} 座塔（${beacons.length} 组配置）`}>
+              aria-label={previewSummary}
+              title={!moduleGroups.length && !beacons.length ? previewSummary : undefined}>
               {#each moduleGroups.slice(0, 2) as group}
-                <span class="preview-item"><HoverIcon type="item" name={group.item.id} detailKind="module" quality={group.item.quality} size={18} /><small>×{group.count}</small></span>
+                <span class="preview-item"><HoverIcon type="item" name={group.item.id} detailKind="module" quality={group.item.quality} size={18} hint="点击编辑插件与插件塔" /><small>×{group.count}</small></span>
               {/each}
               {#if moduleGroups.length > 2}<small>+{moduleGroups.length - 2}种</small>{/if}
               {#each beacons.slice(0, 1) as beacon}
-                <span class="preview-item"><HoverIcon type="entity" name={beacon.beacon.id} detailKind="beacon" quality={beacon.beacon.quality} size={18} /><small>×{beacon.count}</small></span>
+                <span class="preview-item"><HoverIcon type="entity" name={beacon.beacon.id} detailKind="beacon" quality={beacon.beacon.quality} size={18} hint="点击编辑插件与插件塔" /><small>×{beacon.count}</small></span>
                 {#each beacon.modules.slice(0, 1) as [module, count]}
-                  <span class="preview-item tower-module"><HoverIcon type="item" name={module.id} detailKind="module" quality={module.quality} size={18} /><small>×{count}</small></span>
+                  <span class="preview-item tower-module"><HoverIcon type="item" name={module.id} detailKind="module" quality={module.quality} size={18} hint="点击编辑插件与插件塔" /><small>×{count}</small></span>
                 {/each}
                 {#if beacon.modules.length > 1}<small>+{beacon.modules.length - 1}种</small>{/if}
               {/each}
@@ -259,7 +261,7 @@
             <div class="row2">
               {#if kind === "generator" || kind === "boiler"}
                 <button class="icon-btn" class:empty={!fluidName} aria-label={`流体：${fluidLabel || "未选择"} · 点击更换`} onclick={() => onPick("fluid")}>
-                  <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
+                  <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} hint={fluidName ? "点击更换流体" : undefined} />
                 </button>
                 <span class="sub">{fluidLabel || "选择流体"}</span>
                 <label class="sub temp" title="输入流体温度（留空 = 默认温度）">
@@ -342,6 +344,7 @@
                     size={24}
                     detailKind={entry.mechanic.accumulator?.id ? "accumulator" : undefined}
                     quality={entry.mechanic.accumulator?.quality}
+                    hint={entry.mechanic.accumulator?.id ? "点击更换蓄电器" : undefined}
                   />
                 </button>
                 <span class="sub">

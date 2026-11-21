@@ -45,6 +45,9 @@ withBrowser({ port: 5224 }, async (browser, url) => {
   await page.getByLabel('搜索网络节点').fill('ordinary marker');
   await page.getByRole('button',{name:/添加机制/}).click();
   await page.getByRole('button',{name:'物品燃料',exact:true}).click();
+  await page.locator('.backdrop [aria-modal="true"]').waitFor();
+  await page.keyboard.press('Escape');
+  await page.locator('.backdrop [aria-modal="true"]').waitFor({state:'detached'});
   await waitFor(async()=>page.evaluate(async()=>{const {runtime:r}=await import('/src/lib/runtime/store.svelte.ts');return r.selectedFactory.mechanics.length===1}));
   const canvas=page.locator('.network-canvas');
   await waitFor(async()=>canvas.evaluate(el=>el._cyreg?.cy.nodes('[kind="mechanic"]').length===1)).catch(async error=>{

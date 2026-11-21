@@ -162,13 +162,27 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5203), preview: !!process
     await page.waitForTimeout(200); // finish the selection's short centering animation
     const popupPosition = () => graph.locator('.network-details').evaluate(node => ({left: node.offsetLeft, top: node.offsetTop}));
     const popupBefore = await popupPosition();
+    assert.ok(popupBefore.left > 0, 'inspector is docked on the right side of the network stage');
+    // Chain highlight: selected node lights up chain-highlight while unrelated elements are dimmed.
+    const chainCounts = () => graph.locator('.network-canvas').evaluate(node => {
+      const cy = node._cyreg.cy;
+      return {
+        highlighted: cy.elements('.chain-highlight').length,
+        dimmed: cy.elements('.dimmed').length,
+      };
+    });
+    await waitFor(async () => (await chainCounts()).highlighted > 0 && (await chainCounts()).dimmed > 0);
+    await graph.getByRole('button', { name: '直接相邻', exact: true }).click();
+    await waitFor(async () => (await chainCounts()).highlighted > 0);
+    await graph.getByRole('button', { name: '完整上下游', exact: true }).click();
     await graph.locator('.network-canvas').evaluate(node => node._cyreg.cy.panBy({x: 0, y: 15}));
-    await waitFor(async () => (await popupPosition()).top > popupBefore.top + 10);
+    await page.waitForTimeout(80);
+    assert.deepEqual(await popupPosition(), popupBefore, 'docked inspector remains stable when panning the canvas');
     assert.equal(await card.getAttribute('data-mechanic-editor'), '1');
     await card.locator('.config-preview').click();
     const moduleMenu = page.getByRole('dialog', {name: '插件与插件塔', exact: true});
     await moduleMenu.waitFor();
-    await moduleMenu.locator('[title="插件槽 1（点击更换）"]').click();
+    await moduleMenu.locator('[aria-label^="插件槽 1"]').click();
     await page.locator('.backdrop [aria-modal="true"]').waitFor();
     await page.keyboard.press('Escape');
     assert.equal(await moduleMenu.count(), 1, 'closing the selector keeps the parent configuration menu');
@@ -185,7 +199,9 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5203), preview: !!process
     await ready();
     // The second member must remain the editor target when an edit changes
     // its merged graph ID, and when it rejoins an existing group afterwards.
-    await graph.locator('.variant-options').getByRole('button', {name: '机制 #2', exact: true}).click();
+    const variantTwo = graph.locator('.variant-options [data-mechanic-id="2"]');
+    assert.match(await variantTwo.textContent(), /稀有/);
+    await variantTwo.click();
     const editor = await card.elementHandle();
     const editPrototype = async (button, name) => {
       await card.locator(button).click();
@@ -205,7 +221,13 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5203), preview: !!process
     await editPrototype('.machine-button', '锅炉');
     await editPrototype('.primary', '铁板');
     await editPrototype('.machine-button', '组装机 2 型');
-    assert.equal(await graph.locator('.variant-options .active').textContent(), '机制 #2');
+    assert.equal(await graph.locator('.variant-options .active').getAttribute('data-mechanic-id'), '2');
+    // Cross-view reveal: network -> list -> network preserves target focus without leaving stale highlight.
+    await graph.getByRole('button', {name: '在列表中定位', exact: true}).click();
+    await waitFor(async () => await page.locator('[data-mechanic-row="2"].highlighted').count() === 1);
+    await page.locator('[data-mechanic-id="2"] [aria-label="在网络定位"]').click();
+    await ready();
+    await waitFor(async () => await graph.locator('.network-details [data-mechanic-editor="2"]').count() === 1);
     await page.getByRole('button', {name: '列表', exact: true}).click();
     assert.equal(await graph.count(), 0);
     await page.locator('.center').evaluate(node => { node.scrollTop = 1200; });
@@ -312,6 +334,7 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5203), preview: !!process
     await panel.getByRole('button', {name: '关闭网络详情', exact: true}).click();
     assert.equal(await panel.count(), 0);
     assert.equal(await graph.locator('.network-canvas').evaluate(node => node._cyreg.cy.$(':selected').length), 0, 'closing the editor clears graph selection');
+    assert.equal(await graph.locator('.network-canvas').evaluate(node => node._cyreg.cy.elements('.dimmed, .chain-highlight').length), 0, 'closing the editor clears chain highlighting');
     await page.waitForTimeout(200);
     await graph.locator('.network-canvas').evaluate(node => {node.scrollIntoView({block:'center'});const cy=node._cyreg.cy;cy.zoom(Math.max(.65,cy.zoom()));cy.center(cy.nodes('[kind="mechanic"]').first());});
     await page.waitForTimeout(100);

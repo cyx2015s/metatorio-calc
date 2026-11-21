@@ -297,7 +297,7 @@
       </div>
       <div class="rows">
         {#each implicitInputs as flow (JSON.stringify(flow))}
-          <div class="row-item one-line implicit" title="当前地表或轨道的可用资源，严格供给下也免费">
+          <div class="row-item one-line implicit">
             <FlowRef
               {flow}
               grow

@@ -117,7 +117,7 @@ async function checkRows(page) {
     leftOverflow: card.querySelector(".identity").scrollWidth > card.querySelector(".identity").clientWidth,
   })));
   assert.ok(geometry.length > 0);
-  assert.ok(geometry.every((card) => card.height === 72), JSON.stringify(geometry));
+  assert.ok(geometry.every((card) => card.height === 84), JSON.stringify(geometry));
   assert.ok(geometry.every((card) => !card.leftOverflow), "mechanism configuration overflows its column");
   assert.equal(await page.evaluate(() => document.body.scrollWidth > innerWidth), false);
 }
@@ -131,19 +131,34 @@ async function run() {
     await page.waitForSelector('.mech-card[data-mechanic-id="1"]');
     await waitFor(async () => (await page.locator('.mech-card .amount').count()) === 65);
     await checkRows(page);
-    // The same cached detail must display the quality of the hovered icon.
-    await page.locator('[data-mechanic-id="1"] .config-preview .hover-icon').first().hover();
+    // HoverCard updates position on same-icon movement, stays open when entered, shows hint, and emits no native title.
+    const configPreviewIcon = page.locator('[data-mechanic-id="1"] .config-preview .hover-icon').first();
+    assert.equal(await page.locator('[data-mechanic-id="1"] .config-preview').getAttribute('title'), null, 'no native title on config-preview with HoverIcon');
+    assert.equal(await configPreviewIcon.getAttribute('title'), null, 'HoverIcon trigger omits native title');
+    assert.equal(await configPreviewIcon.locator('img, .placeholder').first().getAttribute('title'), null, 'inner Icon suppresses native title');
+    const previewIconBox = await configPreviewIcon.boundingBox();
+    await page.mouse.move(previewIconBox.x + 3, previewIconBox.y + 3);
     await page.getByRole('tooltip').waitFor();
     assert.ok((await page.getByRole('tooltip').textContent()).includes('稀有基础值'));
     assert.ok((await page.getByRole('tooltip').textContent()).includes('+100%'));
+    assert.match(await page.getByRole('tooltip').locator('.hover-hint').textContent(), /点击编辑插件与插件塔/);
+    const tooltipBeforeMove = await page.getByRole('tooltip').boundingBox();
+    await page.mouse.move(previewIconBox.x + previewIconBox.width - 3, previewIconBox.y + previewIconBox.height - 3);
+    await waitFor(async () => {
+      const next = await page.getByRole('tooltip').boundingBox();
+      return next && (Math.abs(next.x - tooltipBeforeMove.x) >= 3 || Math.abs(next.y - tooltipBeforeMove.y) >= 3);
+    });
+    const tooltipBeforeEnter = await page.getByRole('tooltip').boundingBox();
     await page.getByRole('tooltip').hover();
-    await pause(200);
+    await pause(220);
     assert.equal(await page.getByRole('tooltip').count(),1,'tooltip can be entered for scrolling');
+    assert.deepEqual(await page.getByRole('tooltip').boundingBox(), tooltipBeforeEnter, 'tooltip stays frozen while hovered');
     await page.mouse.move(1200,80);
     await page.getByRole('tooltip').waitFor({state:'detached'});
     await page.locator('[data-mechanic-id="1"] .flow-strip .hover-icon').first().hover();
     await page.getByRole('tooltip').waitFor();
     assert.match(await page.getByRole('tooltip').textContent(),/实际消耗.*8 kW/);
+    assert.match(await page.getByRole('tooltip').locator('.hover-hint').textContent(),/左键打开快捷操作/);
     await page.mouse.move(1200,80);
     await page.getByRole('tooltip').waitFor({state:'detached'});
     // Repeated products retain their productivity split without raw probability metadata.
@@ -187,17 +202,32 @@ async function run() {
     await page.locator('.center').evaluate(node=>node.scrollTop=0);
     assert.equal(await page.locator('.mechanic-row').count(), 65);
     const first = page.locator('[data-mechanic-id="1"]');
-    assert.match(await first.locator('.config-preview').getAttribute('title'), /8 座塔（1 组配置）/);
+    assert.match(await first.locator('.config-preview').getAttribute('aria-label'), /8 座塔（1 组配置）/);
+    assert.equal(await first.locator('.config-preview').getAttribute('title'), null);
     await first.locator('.enabled').click();
     await waitFor(async () => (await first.locator('.enabled').getAttribute('aria-checked')) === 'false');
     await first.locator('.enabled').click();
     await first.locator('.config-preview').click();
     const editor = page.getByRole('dialog', { name: '插件与插件塔', exact: true });
     await editor.waitFor();
-    await editor.locator('[title="插件槽 1（点击更换）"]').click();
+    await editor.locator('[aria-label^="插件槽 1"]').click();
     await page.locator('.backdrop [aria-modal="true"]').waitFor();
     const prototypePicker=page.locator('.backdrop [aria-modal="true"]');
-    await prototypePicker.locator('.q-chip[title="传说"]').click();
+    // Space in search input and pointer drag from inside modal to backdrop must not close the modal.
+    const pickerSearch = prototypePicker.getByRole('textbox');
+    await pickerSearch.focus();
+    await page.keyboard.type('iron plate');
+    assert.equal(await prototypePicker.count(), 1, 'typing Space inside search input keeps modal open');
+    assert.equal(await pickerSearch.inputValue(), 'iron plate');
+    await pickerSearch.fill('');
+    const modalHeadBox = await prototypePicker.locator('.modal-head').boundingBox();
+    await page.mouse.move(modalHeadBox.x + modalHeadBox.width / 2, modalHeadBox.y + modalHeadBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(10, 10);
+    await page.mouse.up();
+    await pause(80);
+    assert.equal(await prototypePicker.count(), 1, 'dragging out from inside modal to backdrop does not close modal');
+    await prototypePicker.locator('.q-chip[aria-label="传说"]').click();
     await prototypePicker.locator('.sg-items > button[aria-label="品质插件 3"]').hover();
     await page.getByRole('tooltip').waitFor();
     assert.match(await page.getByRole('tooltip').textContent(),/传说基础值/);
@@ -334,7 +364,7 @@ async function run() {
     });
     assert.deepEqual(selectionChecks, [[1,2],[10001,10002],[10001,10003],[10001,10002],[1,2],[10001,10002],[1,2],[1,null],[1,2],[null,null],[1,2],[11,12]]);
     assert.deepEqual(errors,[]);
-    console.log(JSON.stringify({rows:1000,initialMounted:mounted,initialFlowRequests:requests,rowHeight:72,checks:'layout, nested selectors, focus, parameters, group reorder, virtual mounting, project/factory selection'},null,2));
+    console.log(JSON.stringify({rows:1000,initialMounted:mounted,initialFlowRequests:requests,rowHeight:84,checks:'layout, nested selectors, hover tracking, backdrop drag/space safety, focus, parameters, group reorder, virtual mounting, project/factory selection'},null,2));
   });
 }
 if (require.main === module) run().catch(error=>{console.error(error);process.exitCode=1});

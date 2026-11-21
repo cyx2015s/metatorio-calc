@@ -6,21 +6,22 @@
   import HoverIcon from "./HoverIcon.svelte";
   import RichText from "./RichText.svelte";
   let { flow, match, size = 22, showName = true, showQualifiers = true, showBadge = true, grow = false, nested = false,
-    title, onClick, onContextMenu, flowRate, rateBasis }: {
+    title, hint, onClick, onContextMenu, flowRate, rateBasis }: {
     flow: DualVar; match?: FlowMatch; size?: number; showName?: boolean; showQualifiers?: boolean; showBadge?: boolean; grow?: boolean; nested?: boolean;
-    title?: string; onClick?: (event: MouseEvent) => void; onContextMenu?: (event: MouseEvent) => void;
+    title?: string; hint?: string; onClick?: (event: MouseEvent) => void; onContextMenu?: (event: MouseEvent) => void;
     flowRate?: number; rateBasis?: "solution" | "unit";
   } = $props();
   const info = $derived(presentFlow(flow, (kind, name) => runtime.localizedName(kind, name), match));
   const richLabel = $derived(flowName(flow, (kind, name) => runtime.richName(kind, name)));
   const tip = $derived(title ? `${info.description} · ${title}` : info.description);
+  const hoverHint = $derived(hint ?? title);
   const visibleQualifiers = $derived(info.qualifiers.filter(value => !showBadge || value !== info.badge));
 </script>
 
 <span class="flow-ref" class:grow data-flow-kind={info.kind} data-wildcard={info.wildcard || undefined}>
   <span class="flow-symbol">
     <HoverIcon type={info.type} name={info.name} detailKind={info.detailKind} quality={info.quality} {size}
-      {flow} {match} {flowRate} {rateBasis} title={tip} {onClick} {onContextMenu} focusable={!nested} />
+      {flow} {match} {flowRate} {rateBasis} title={tip} hint={hoverHint} {onClick} {onContextMenu} focusable={!nested} />
     {#if info.wildcard && info.kind !== "Fluid"}<span class="wildcard" aria-label="任意品质">*</span>{/if}
   </span>
   {#if showBadge && info.badge}<span class="semantic-badge">{info.badge}</span>{/if}

@@ -13,6 +13,7 @@ export interface MechanicFocusRequest {
   mechanicId?: number;
   flow?: DualVar;
   location?: Location;
+  targetView?: 'list' | 'network';
   seq: number;
 }
 export interface FlowTraceRequest {

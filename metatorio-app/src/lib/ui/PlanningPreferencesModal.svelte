@@ -149,7 +149,8 @@
               <div class="prefs-row">
                 <button
                   class="icon-btn"
-                  title="选择插件塔"
+                  aria-label="选择插件塔"
+                  title={beacon ? undefined : "选择插件塔"}
                   onclick={() =>
                     onOpenSelector({
                       kind: "beacon",
@@ -163,7 +164,7 @@
                     })}
                 >
                   {#if beacon}
-                    <HoverIcon type="entity" name={beacon.id} size={24} detailKind="beacon" quality={beacon.quality} />
+                    <HoverIcon type="entity" name={beacon.id} size={24} detailKind="beacon" quality={beacon.quality} hint="点击更换插件塔" />
                   {:else}
                     <Icon type="entity" name="beacon" size={24} title="选择插件塔" />
                   {/if}

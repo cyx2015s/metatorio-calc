@@ -348,7 +348,7 @@
         {#each expression.terms as term (term.id)}
           <div class="row-item expr-term">
             {#if term.location}<LocationPicker value={term.location} label="表达式项地点" onChange={location=>editTerm(expression.id,term,term.flow,location)} />{/if}
-            <FlowRef flow={term.flow} grow size={20} onClick={()=>editTerm(expression.id,term)} />
+            <FlowRef flow={term.flow} grow size={20} hint="点击更改表达式流" onClick={()=>editTerm(expression.id,term)} />
             <FlowRangeEditor flow={term.flow} onChange={flow=>editTerm(expression.id,term,flow)} />
             <input class="num" type="number" aria-label="表达式系数" value={term.coefficient} onchange={e=>{const coefficient=Number(e.currentTarget.value);if(Number.isFinite(coefficient))writer()({'target-expression':{'set-term-coefficient':{expression:expression.id,term:term.id,coefficient}}},{'set-target-expression-term-coefficient':{expression:expression.id,term:term.id,coefficient}})}} />
             <button class="icon-btn danger" title="移除项" onclick={()=>writer()({'target-expression':{'remove-term':{expression:expression.id,term:term.id}}},{'remove-target-expression-term':{expression:expression.id,term:term.id}})}>×</button>

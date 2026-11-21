@@ -246,7 +246,7 @@
                 actions.commands.setModuleSlot(entry.id, i, null).catch(() => {});
               }}
             >
-              <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" quality={modules[i].quality} />
+              <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" quality={modules[i].quality} hint="点击更换 · 右键移除" />
             </button>
             <button
               class="me-x"
@@ -337,6 +337,7 @@
                 size={24}
                 detailKind={beacon.beacon.id ? "beacon" : undefined}
                 quality={beacon.beacon.quality}
+                hint={beacon.beacon.id ? "点击更换插件塔" : undefined}
               />
             </button>
             <label class="me-num" title="插件塔的座数（不是塔内插件数）：塔内插件上限 = 塔数 × 每塔插件槽数">
@@ -370,7 +371,7 @@
             {#each beacon.modules as [module, count], mi (mi)}
               <div class="me-beacon-module">
                 <button class="icon-btn" aria-label="选择塔内插件" onclick={() => onPickBeaconModule(bi, mi)}>
-                  <HoverIcon type="item" name={module.id} size={20} detailKind="module" quality={module.quality} />
+                  <HoverIcon type="item" name={module.id} size={20} detailKind="module" quality={module.quality} hint="点击更换塔内插件" />
                 </button>
                 <input
                   type="number"

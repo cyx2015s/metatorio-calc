@@ -174,7 +174,7 @@
     onclick={toggleMenu}
     oncontextmenu={handleContextMenu}
   >
-    <FlowRef {flow} {size} {showName} showQualifiers={showName} nested flowRate={amount * scale} rateBasis={solved ? "solution" : "unit"} />
+    <FlowRef {flow} {size} {showName} showQualifiers={showName} nested flowRate={amount * scale} rateBasis={solved ? "solution" : "unit"} hint="左键打开快捷操作 · 右键查看建议" />
     <span class="mono">{formattedQty}</span>
   </button>
 {:else}

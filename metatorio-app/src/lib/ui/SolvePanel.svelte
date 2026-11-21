@@ -249,6 +249,7 @@
       size={20}
       flowRate={row.amount}
       rateBasis="solution"
+      hint={onSuggest || onTraceFlow ? "左键/右键查看供给与消耗建议" : undefined}
       onClick={onSuggest || onTraceFlow ? () => triggerPrimaryFlow(row.flow, row.location) : undefined}
       onContextMenu={onSuggest || onTraceFlow ? () => triggerPrimaryFlow(row.flow, row.location) : undefined}
     />

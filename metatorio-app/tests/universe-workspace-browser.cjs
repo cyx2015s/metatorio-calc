@@ -92,7 +92,7 @@ withBrowser({ port: 5214 }, async (browser, url) => {
   assert.equal(await page.evaluate(()=>window.__universeWrites.filter(w=>w.action.action['reorder-external-input']).length),beforeInputReorder+1);
   const card=page.locator('[data-mechanic-id="101"]');
   const ordinaryBeforeModuleEdit=await page.evaluate(()=>JSON.stringify(window.__layoutDocument.projects[0].factories));
-  await card.locator('button[title^="编辑插件与插件塔"]').click();
+  await card.locator('button.config-preview').click();
   await page.getByTitle('移除塔内插件',{exact:true}).click();
   await waitFor(async()=>page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics[0].mechanic.mechanic.module_config.beacons[0].modules.length===0));
   const moduleWrite=await page.evaluate(()=>window.__universeWrites.find(w=>w.action.action.mechanic?.action.recipe?.module?.['remove-beacon-module']));
@@ -217,6 +217,24 @@ withBrowser({ port: 5214 }, async (browser, url) => {
   await page.getByRole('button',{name:'添加',exact:true}).click();
   await waitFor(async()=>page.evaluate(()=>window.__universeWrites.some(w=>w.action.action['add-local-mechanic'])));
   assert.equal(await page.evaluate(()=>window.__layoutDocument.projects[0].universes[0].mechanics.at(-1).mechanic.location.kind),'space');
+  await page.getByRole('button',{name:'✓ 已添加',exact:true}).waitFor();
+  await page.getByRole('button',{name:'关闭',exact:true}).click();
+  // Stage 2 cross-view verification: universe scope strip filters both list & network, and SolvePanel traces flows.
+  const scopeStrip = page.getByRole('group', { name: '宇宙星球快速筛选', exact: true });
+  await scopeStrip.getByRole('button', { name: /fulgora/ }).click();
+  await waitFor(async () => (await page.locator('.mech-card').count()) < 8);
+  await page.getByRole('button', { name: '网络', exact: true }).click();
+  await waitFor(async () => await page.getByRole('region', { name: '机制网络视图' }).getAttribute('data-network-ready') === 'true');
+  assert.equal(await page.locator('.network-filter').count(), 0, 'scope strip filtering must not pop open network-filter');
+  await scopeStrip.getByRole('button', { name: /^全部/ }).click();
+  await waitFor(async () => await page.getByRole('region', { name: '机制网络视图' }).getAttribute('data-network-ready') === 'true');
+  const solvePanel = page.locator('.solve-panel');
+  await solvePanel.getByRole('tab', { name: /^建筑清单/ }).click();
+  await solvePanel.getByText('机器与装置', { exact: true }).waitFor();
+  await solvePanel.getByRole('tab', { name: /^流平衡/ }).click();
+  await solvePanel.getByRole('button', { name: '筛选产出机制' }).first().click();
+  await waitFor(async () => await page.getByRole('button', { name: '列表', exact: true }).getAttribute('aria-pressed') === 'true');
+  await page.getByRole('button', { name: '清除筛选', exact: true }).click();
   await page.getByRole('button',{name:'65 机制 · 混合品质',exact:true}).click();await page.getByRole('button',{name:'列表',exact:true}).click();await page.locator('.mech-card').first().waitFor();
   assert.equal(await page.getByLabel('机制地点').count(),0);
   assert.deepEqual(errors,[]);

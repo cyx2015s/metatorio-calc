@@ -44,6 +44,7 @@
     focusRequest = null,
     onRevealInList,
     searchFocusSeq = 0,
+    onFocusHandled,
   }: MechanicViewProps & {
     mergeRecipes: boolean;
     groupLocations?: boolean;
@@ -54,6 +55,7 @@
     focusRequest?: { mechanicId?: number; flow?: DualVar; location?: Location; seq: number } | null;
     onRevealInList?: (mechanicId: number) => void;
     searchFocusSeq?: number;
+    onFocusHandled?: (seq: number) => void;
   } = $props();
   let container = $state<HTMLDivElement>();
   let detailsPanel = $state<HTMLElement>(), searchBox = $state<HTMLDivElement>(), searchInput = $state<HTMLInputElement>();
@@ -463,6 +465,7 @@
       const ele = cy.getElementById(target.elementId);
       if (!ele.empty()) {
         handledFocusSeq = req.seq;
+        onFocusHandled?.(req.seq);
         if (ele.isNode() && ele.data('kind') === 'location') {
           cy.animate({ center: { eles: ele }, duration: 150 });
         } else {
@@ -485,6 +488,7 @@
     }
     if (!workspace.pending) {
       handledFocusSeq = req.seq;
+      onFocusHandled?.(req.seq);
     }
   });
 
@@ -766,7 +770,7 @@
       </div>
     {/if}
     {#if filterOpen || workspace.active}
-      <div class="network-filter">
+      <div class="network-filter" class:expanded={filterOpen}>
         {#if filterOpen}<header><strong>机制流筛选</strong><button class="icon-btn" aria-label="收起机制筛选" onclick={onFilterClose}>×</button></header>{/if}
         <MechanicFilter {workspace} {entries} expanded={filterOpen} />
       </div>
@@ -1182,7 +1186,7 @@
   }
   .network-filter {
     position: absolute;
-    z-index: 20;
+    z-index: 12;
     top: 8px;
     right: 8px;
     width: min(640px, calc(100% - 16px));
@@ -1193,6 +1197,17 @@
     border: 1px solid var(--line-strong);
     border-radius: var(--radius);
     box-shadow: var(--shadow-strong);
+    transition: right var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      width var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .network-filter.expanded {
+    z-index: 20;
+  }
+  @media (min-width: 700px) {
+    .network-stage.has-details .network-filter {
+      right: calc(min(390px, calc(100% - 16px)) + 16px);
+      width: min(640px, calc(100% - min(390px, calc(100% - 16px)) - 24px));
+    }
   }
   .network-filter header {
     display: flex;

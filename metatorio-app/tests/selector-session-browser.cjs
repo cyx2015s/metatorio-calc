@@ -30,7 +30,7 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5200) }, async (browser, 
     assert.equal(await modal.locator('.q-chip.active .q-name').textContent(), '稀有');
     assert.equal(await selectedName(), '铁板');
     await modal.getByTitle('选择实体类流').click();
-    await modal.getByTitle('传说', {exact: true}).filter({has: page.locator('.q-name')}).click();
+    await modal.locator('.q-chip[aria-label="传说"]').click();
     await search().fill('草稿搜索');
     const oldFlowModal = await modal.elementHandle();
     // Refreshing catalog data must preserve the current draft and DOM instance.
@@ -66,7 +66,7 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5200) }, async (browser, 
     await modal.waitFor();
     assert.equal(await selectedName(), '铁板');
     await modal.locator('.sg-items > button.active').click();
-    await modal.getByTitle('传说', {exact: true}).filter({has: page.locator('.q-name')}).click();
+    await modal.locator('.q-chip[aria-label="传说"]').click();
     await search().fill('草稿');
     const oldCatalogModal = await modal.elementHandle();
     await replaceRequest(page.locator('[data-mechanic-id="1"] .machine-button'));
@@ -147,6 +147,23 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT || 5200) }, async (browser, 
     await waitFor(async () => page.evaluate(() => window.__layoutCalls.some(c => c.command === 'dispatch' && c.args.message.action?.action?.['external-input']?.add)));
     const inputAdd = await page.evaluate(() => window.__layoutCalls.find(c => c.command === 'dispatch' && c.args.message.action?.action?.['external-input']?.add).args.message);
     assert.deepEqual(inputAdd, {scope: 'factory', action: {project: 1, factory: 99, action: {'external-input': {add: {input: {id: 0, flow: 'Heat', penalty: 1}}}}}});
+    // Full keyboard loop in Selector: Space in search box does not close modal, ArrowDown + Enter confirms selection.
+    await page.evaluate(async () => {
+      const {runtime} = await import('/src/lib/runtime/store.svelte.ts');
+      await runtime.selectFactory(2);
+    });
+    await page.locator('[data-mechanic-id="1"] .primary').click();
+    await modal.waitFor();
+    await search().focus();
+    await page.keyboard.type('iron plate');
+    assert.equal(await modal.count(), 1, 'typing Space inside Selector search keeps modal open');
+    await search().fill('铁');
+    await search().press('ArrowDown');
+    await modal.locator('.search-list > button[data-kbd-active="true"]').waitFor();
+    const kbdLabel = await modal.locator('.search-list > button[data-kbd-active="true"]').getAttribute('aria-label');
+    assert.ok(kbdLabel && kbdLabel.includes('铁'));
+    await search().press('Enter');
+    await modal.waitFor({state: 'detached'});
     assert.deepEqual(errors, []);
-    console.log('Selector sessions passed: draft lifecycle, shared editor policies, tile purposes, scoped callbacks and stale asynchronous requests.');
+    console.log('Selector sessions passed: draft lifecycle, shared editor policies, tile purposes, scoped callbacks, keyboard loop and stale asynchronous requests.');
 }).catch(error => { console.error(error); process.exitCode = 1; });

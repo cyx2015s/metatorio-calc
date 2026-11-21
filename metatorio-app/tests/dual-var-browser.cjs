@@ -66,7 +66,7 @@ withBrowser({ port: Number(process.env.UI_TEST_PORT||5202) }, async (browser, ur
   await page.evaluate(async()=>{
    const {runtime}=await import('/src/lib/runtime/store.svelte.ts');
    window.__rejectDiagnostic={code:'invalid-flow',message:'该流不在当前上下文中',flows:[{Item:{id:'missing-item',quality:'rare'}}],no_provider:[],no_consumer:[]};
-   try {await runtime.setTargetFlow(1,window.__rejectDiagnostic.flows[0])}catch{}
+   try {await runtime.addTargetFlow(window.__rejectDiagnostic.flows[0],1)}catch{}
   });
   const operation=page.locator('.err-strip [data-diagnostic-code="invalid-flow"]');await operation.waitFor();
   assert.equal(await operation.locator('.flow-ref').count(),1);
