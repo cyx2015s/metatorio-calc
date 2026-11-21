@@ -14,6 +14,7 @@
     title,
     bare = false,
     fallbackLabel,
+    suppressTitle = false,
   }: {
     type?: string;
     name?: string;
@@ -23,6 +24,8 @@
     bare?: boolean;
     /** Inline rich-text references retain readable content if no icon exists. */
     fallbackLabel?: string;
+    /** 为 true 时不渲染原生 title 属性（保留 alt），防止与自定义 HoverCard 碰撞。 */
+    suppressTitle?: boolean;
   } = $props();
 
   let asyncState = $state<{ key: string; url: string | null } | null>(null);
@@ -93,17 +96,17 @@
       asyncState = { key: currentKey, url: null };
     }}
     alt={displayLabel}
-    title={tip}
+    title={suppressTitle ? undefined : tip}
     style={`width:${size}px;height:${size}px`}
     draggable="false"
   />
 {:else if fallbackLabel}
-  <span class="text-fallback" title={tip}>{fallbackLabel}</span>
+  <span class="text-fallback" title={suppressTitle ? undefined : tip}>{fallbackLabel}</span>
 {:else}
   <span
     class="icon placeholder"
     class:bare={bare || type === "quality"}
-    title={tip}
+    title={suppressTitle ? undefined : tip}
     style={`width:${size}px;height:${size}px;font-size:${Math.max(9, Math.round(size * 0.32))}px`}
   >{label ? label.slice(0, 2) : "?"}</span>
 {/if}

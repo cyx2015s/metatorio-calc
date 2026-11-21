@@ -13,15 +13,82 @@
 
 <script lang="ts">
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { locationKey } from "$lib/mechanics/located";
+  import type { MechanicEntry } from "$lib/runtime/types";
   import FlowRef from "$lib/ui/FlowRef.svelte";
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
-  import { backdropKeydown } from "$lib/ui/WorkspaceDialogs.svelte";
+  import { createBackdropClose } from "$lib/ui/modal-backdrop";
 
   let {
     suggestions = $bindable<SuggestionsState | null>(null),
+    existingMechanics = [],
   }: {
     suggestions: SuggestionsState | null;
+    existingMechanics?: MechanicEntry[];
   } = $props();
+
+  const suggestionsBackdrop = createBackdropClose(() => (suggestions = null));
+
+  let addedKeys = $state<Set<string>>(new Set());
+  let pendingKeys = $state<Set<string>>(new Set());
+
+  $effect(() => {
+    if (!suggestions || suggestions.loading) {
+      addedKeys = new Set();
+      pendingKeys = new Set();
+    }
+  });
+
+  function candidateKey(candidate: Suggestion): string {
+    return `${candidate.kind}:${candidate.name}`;
+  }
+
+  function mechanicMatchesCandidate(entry: MechanicEntry, candidate: Suggestion): boolean {
+    const targetLoc = suggestions?.location;
+    if (targetLoc && entry.location && locationKey(entry.location) !== locationKey(targetLoc)) {
+      return false;
+    }
+    const m = entry.mechanic;
+    switch (candidate.kind) {
+      case "recipe":
+        return m.type === "recipe" && m.recipe?.id === candidate.name;
+      case "resource":
+        return m.type === "mining" && m.resource === candidate.name;
+      case "item-fuel":
+        return m.type === "item-fuel" && m.item?.id === candidate.name;
+      case "virtual-science":
+        return m.type === "virtual-science" && m.item?.id === candidate.name;
+      case "generator":
+        return m.type === "generator" && m.generator?.id === candidate.name;
+      case "fusion-reactor":
+        return m.type === "fusion-reactor" && m.reactor?.id === candidate.name;
+      case "fusion-generator":
+        return m.type === "fusion-generator" && m.generator?.id === candidate.name;
+      default:
+        return false;
+    }
+  }
+
+  function isExisting(candidate: Suggestion): boolean {
+    return existingMechanics.some((entry) => mechanicMatchesCandidate(entry, candidate));
+  }
+
+  async function addCandidate(candidate: Suggestion) {
+    if (!suggestions) return;
+    const key = candidateKey(candidate);
+    if (pendingKeys.has(key) || addedKeys.has(key)) return;
+    pendingKeys = new Set([...pendingKeys, key]);
+    try {
+      await runtime.addSuggestion(candidate, suggestions.scope, suggestions.location);
+      addedKeys = new Set([...addedKeys, key]);
+    } catch {
+      /* runtime.lastError 已展示 */
+    } finally {
+      const next = new Set(pendingKeys);
+      next.delete(key);
+      pendingKeys = next;
+    }
+  }
 
   function suggestionKindLabel(kind: string): string {
     return (
@@ -50,7 +117,7 @@
 </script>
 
 {#if suggestions}
-  <div class="backdrop low" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) suggestions = null; }} onkeydown={(e) => backdropKeydown(e, () => (suggestions = null))}>
+  <div class="backdrop low" role="button" tabindex="0" {...suggestionsBackdrop}>
     <div class="prefs-modal">
       <div class="mini-title">建议：<FlowRef flow={suggestions.flow} /></div>
       {#if suggestions.loading}
@@ -58,66 +125,46 @@
       {:else if suggestions.items.length === 0}
         <span class="muted">没有找到与该流相关的候选机制</span>
       {:else}
-        {@const producers = suggestions.items.filter((s) => s.role !== "consumer")}
-        {@const consumers = suggestions.items.filter((s) => s.role === "consumer")}
-        {#if producers.length > 0}
-          <div class="prefs-title">产出该流</div>
-          <div class="prefs-list">
-            {#each producers as candidate (candidate.kind + candidate.name)}
-              {@const icon = suggestionIcon(candidate.kind)}
-              <div class="prefs-item">
-                <HoverIcon
-                  type={icon.type}
-                  name={candidate.name}
-                  size={22}
-                  detailKind={icon.detailKind}
-                />
-                <span class="prefs-name" title={candidate.name}>
-                  {suggestionName(candidate.kind, candidate.name)}
-                  <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
-                </span>
-                <button
-                  class="btn"
-                  title="添加该机制"
-                  onclick={() =>
-                    runtime
-                      .addSuggestion(candidate, suggestions?.scope, suggestions?.location)
-                      .catch(() => {})
-                      .then(() => (suggestions = null))}
-                >添加</button>
-              </div>
-            {/each}
-          </div>
-        {/if}
-        {#if consumers.length > 0}
-          <div class="prefs-title">消耗该流</div>
-          <div class="prefs-list">
-            {#each consumers as candidate (candidate.kind + candidate.name)}
-              {@const icon = suggestionIcon(candidate.kind)}
-              <div class="prefs-item">
-                <HoverIcon
-                  type={icon.type}
-                  name={candidate.name}
-                  size={22}
-                  detailKind={icon.detailKind}
-                />
-                <span class="prefs-name" title={candidate.name}>
-                  {suggestionName(candidate.kind, candidate.name)}
-                  <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
-                </span>
-                <button
-                  class="btn"
-                  title="添加该机制"
-                  onclick={() =>
-                    runtime
-                      .addSuggestion(candidate, suggestions?.scope, suggestions?.location)
-                      .catch(() => {})
-                      .then(() => (suggestions = null))}
-                >添加</button>
-              </div>
-            {/each}
-          </div>
-        {/if}
+        {@const sections = [
+          { title: "产出该流", items: suggestions.items.filter((s) => s.role !== "consumer") },
+          { title: "消耗该流", items: suggestions.items.filter((s) => s.role === "consumer") },
+        ]}
+        {#each sections as section (section.title)}
+          {#if section.items.length > 0}
+            <div class="prefs-title">{section.title}</div>
+            <div class="prefs-list">
+              {#each section.items as candidate (candidate.kind + candidate.name)}
+                {@const icon = suggestionIcon(candidate.kind)}
+                {@const key = candidateKey(candidate)}
+                {@const added = addedKeys.has(key)}
+                {@const pending = pendingKeys.has(key)}
+                {@const existed = !added && isExisting(candidate)}
+                <div class="prefs-item">
+                  <HoverIcon
+                    type={icon.type}
+                    name={candidate.name}
+                    size={22}
+                    detailKind={icon.detailKind}
+                  />
+                  <span class="prefs-name" title={candidate.name}>
+                    {suggestionName(candidate.kind, candidate.name)}
+                    <span class="muted">（{suggestionKindLabel(candidate.kind)}）</span>
+                  </span>
+                  {#if existed}
+                    <span class="chip muted" title="当前工厂中已存在该机制">已存在</span>
+                  {/if}
+                  <button
+                    class="btn"
+                    class:on={added}
+                    disabled={added || pending}
+                    title={added ? "已添加到当前工厂" : "添加该机制"}
+                    onclick={() => addCandidate(candidate)}
+                  >{pending ? "添加中…" : added ? "✓ 已添加" : "添加"}</button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {/each}
       {/if}
       <div class="mini-actions">
         <button class="btn primary" onclick={() => (suggestions = null)}>关闭</button>

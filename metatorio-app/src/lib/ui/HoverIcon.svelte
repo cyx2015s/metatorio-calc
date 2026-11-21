@@ -2,8 +2,14 @@
   // 带悬停详情的游戏内图标：鼠标悬停显示信息卡片（详情按需拉取 + 缓存）。
   // `detailKind` 是目录 kind（item/recipe/fluid/machine/module/...）；
   // 缺省或为合成流（flow/quality）时不启用悬停。
-  import { onDestroy, onMount } from "svelte";
-  import { dismissHover, registerHoverDismiss } from "./hover-controller";
+  import { onDestroy, onMount, untrack } from "svelte";
+  import {
+    dismissHover,
+    hoverOpenDelay,
+    markHoverActive,
+    markHoverInactive,
+    registerHoverDismiss,
+  } from "./hover-controller";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import Icon from "./Icon.svelte";
   import HoverCard from "./HoverCard.svelte";
@@ -15,6 +21,7 @@
     name = "",
     size = 28,
     title,
+    hint,
     detailKind,
     quality,
     onClick,
@@ -29,6 +36,8 @@
     name?: string;
     size?: number;
     title?: string;
+    /** 悬停卡片底部操作提示（如左键/右键动作）。 */
+    hint?: string;
     detailKind?: string;
     /** 带品质时在图标左下角叠加品质角标（边长为主图标一半）。 */
     quality?: string;
@@ -65,24 +74,124 @@
   // 抽象流（无原型详情）也会触发悬停，只要它能提供具体参数（定温流体/燃料类别等）。
   let flowActive = $derived(!!flow);
   let enabled = $derived((!!detailKind && detailKind !== "flow") || flowActive);
+  const hoverToken = Symbol("hover-icon");
+  let openTimer: ReturnType<typeof setTimeout> | undefined;
   let leaveTimer: ReturnType<typeof setTimeout> | undefined;
-  function keepOpen() { clearTimeout(leaveTimer); }
-  onDestroy(() => clearTimeout(leaveTimer));
-  onMount(() => registerHoverDismiss(() => { keepOpen(); hoverActive = false; }));
+  let rafId: number | undefined;
+  let pendingPos: { x: number; y: number } | null = null;
+  let inLeaveBuffer = false;
+  let insideCard = false;
+
+  function cancelPendingPosition() {
+    if (rafId != null) {
+      cancelAnimationFrame(rafId);
+      rafId = undefined;
+    }
+    pendingPos = null;
+  }
+
+  function clearTimers() {
+    clearTimeout(openTimer);
+    openTimer = undefined;
+    clearTimeout(leaveTimer);
+    leaveTimer = undefined;
+  }
+
+  function closeHover() {
+    clearTimers();
+    cancelPendingPosition();
+    inLeaveBuffer = false;
+    insideCard = false;
+    if (hoverActive) {
+      hoverActive = false;
+      markHoverInactive(hoverToken);
+    }
+  }
+
+  function activateHover() {
+    dismissHover();
+    hoverActive = true;
+    markHoverActive(hoverToken);
+  }
+
+  function keepOpen() {
+    clearTimeout(leaveTimer);
+    leaveTimer = undefined;
+    inLeaveBuffer = false;
+    insideCard = true;
+  }
+
+  function leaveCard() {
+    insideCard = false;
+    leave();
+  }
+
+  onDestroy(closeHover);
+  onMount(() => registerHoverDismiss(closeHover));
 
   function enter(event: MouseEvent | FocusEvent) {
     if (!enabled || !name) return;
-    dismissHover();
-    keepOpen();
-    hoverActive = true;
+    clearTimeout(leaveTimer);
+    leaveTimer = undefined;
+    inLeaveBuffer = false;
+    insideCard = false;
+    cancelPendingPosition();
+    if (event instanceof MouseEvent) {
+      pos = { x: event.clientX, y: event.clientY };
+      if (hoverActive) return;
+      clearTimeout(openTimer);
+      openTimer = undefined;
+      const delay = hoverOpenDelay();
+      if (delay <= 0) {
+        activateHover();
+      } else {
+        openTimer = setTimeout(() => {
+          openTimer = undefined;
+          activateHover();
+        }, delay);
+      }
+      return;
+    }
+    clearTimeout(openTimer);
+    openTimer = undefined;
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    pos = event instanceof MouseEvent ? { x: event.clientX, y: event.clientY } : {x: rect.left, y: rect.bottom};
+    pos = { x: rect.left, y: rect.bottom };
+    activateHover();
+  }
+
+  function move(event: MouseEvent) {
+    if (!enabled || !name || inLeaveBuffer || insideCard) return;
+    if (!hoverActive && openTimer == null) return;
+    pendingPos = { x: event.clientX, y: event.clientY };
+    if (rafId == null) {
+      rafId = requestAnimationFrame(() => {
+        rafId = undefined;
+        if (pendingPos && !inLeaveBuffer && !insideCard) {
+          pos = pendingPos;
+        }
+        pendingPos = null;
+      });
+    }
   }
 
   function leave() {
+    clearTimeout(openTimer);
+    openTimer = undefined;
+    cancelPendingPosition();
+    if (!hoverActive) return;
+    inLeaveBuffer = true;
     clearTimeout(leaveTimer);
-    leaveTimer = setTimeout(() => { hoverActive = false; }, 160);
+    leaveTimer = setTimeout(() => {
+      leaveTimer = undefined;
+      closeHover();
+    }, 180);
   }
+
+  $effect(() => {
+    if (!enabled || !name) {
+      untrack(closeHover);
+    }
+  });
 
   $effect(() => {
     if (!hoverActive || !detailKind || !name) {
@@ -109,13 +218,14 @@
   class="hover-icon"
   class:clickable={interactive}
   type={interactive ? "button" : undefined}
-  title={tip}
+  title={enabled ? undefined : tip}
   aria-label={tip || name}
   role={!interactive && focusable ? "img" : undefined}
   tabindex={!interactive && focusable && enabled ? 0 : undefined}
   onfocus={enter}
   onblur={leave}
   onmouseenter={enter}
+  onmousemove={move}
   onmouseleave={leave}
   onclick={onClick}
   oncontextmenu={onContextMenu
@@ -134,16 +244,22 @@
       }
     : undefined}
 >
-  <Icon {type} {name} {size} title={tip} />
+  <Icon {type} {name} {size} title={enabled ? undefined : tip} suppressTitle={enabled} />
   {#if quality && quality !== "normal"}
     <span class="quality-corner" style={`--corner:${Math.max(10, Math.round(size / 2))}px`}>
-      <Icon type="quality" name={quality} size={Math.max(10, Math.round(size / 2))} title={runtime.localizedName("quality", quality)} />
+      <Icon
+        type="quality"
+        name={quality}
+        size={Math.max(10, Math.round(size / 2))}
+        title={enabled ? undefined : runtime.localizedName("quality", quality)}
+        suppressTitle={enabled}
+      />
     </span>
   {/if}
 </svelte:element>
 
 {#if hoverActive && (detail || flowActive)}
-  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} {quality} {flowRate} {rateBasis} {match} onEnter={keepOpen} onLeave={leave} />
+  <HoverCard kind={detailKind ?? ""} {detail} x={pos.x} y={pos.y} {flow} {quality} {flowRate} {rateBasis} {match} {hint} onEnter={keepOpen} onLeave={leaveCard} />
 {/if}
 
 <style>
