@@ -6,22 +6,32 @@
 
   let {
     notice,
+    noticeTone = "info",
     missingProjectContext,
     onOpenData,
     onSuggest,
     onNotice,
+    onDismissNotice,
   }: {
     notice: string | null;
+    noticeTone?: "info" | "warn" | "danger";
     missingProjectContext: boolean;
     onOpenData: () => void;
     onSuggest: (flow: DualVar, location?: Location) => void;
     onNotice: (message: string) => void;
+    onDismissNotice?: () => void;
   } = $props();
 
   // 顶端报错条：最多 3 行，过长省略；被截断时给一个复制按钮把完整内容取回来。
   // 求解器的报错会把缺供给的物品全列出来，原文能把顶部撑满、挤掉下面的内容。
   let errLines = $state<HTMLElement | null>(null);
   let errTruncated = $state(false);
+  let dismissed = $state(false);
+
+  $effect(() => {
+    void notice;
+    dismissed = false;
+  });
 
   function errorStripText(): string {
     return [
@@ -34,7 +44,6 @@
             (kind, name) => runtime.localizedName(kind, name),
           )}`
         : "",
-      notice ? `提示：${notice}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -50,12 +59,11 @@
   }
 
   // 量「有没有被截断」：纵向溢出（超过 3 行）或任一行横向溢出（省略号生效）。
-  // 三个数据源都读一遍，任一变化就重新量；resize 时窗口宽度变了也要重量。
+  // 持久型数据源变化或窗口宽度变化时重新量。
   $effect(() => {
     const node = errLines;
     void runtime.contextError;
     void runtime.lastError;
-    void notice;
     if (!node) {
       errTruncated = false;
       return;
@@ -87,7 +95,7 @@
   </div>
 {/if}
 
-{#if runtime.contextError || runtime.lastError || notice}
+{#if runtime.contextError || runtime.lastError}
   <div class="err-strip">
     <div
       class="err-lines"
@@ -111,13 +119,34 @@
           />
         </div>
       {/if}
-      {#if notice}
-        <span class="err-line notice" title={notice}>提示：{notice}</span>
-      {/if}
     </div>
     {#if errTruncated}
       <button class="err-copy" title="复制完整报错" onclick={copyErrorStrip}>复制</button>
     {/if}
+  </div>
+{/if}
+
+{#if notice && !dismissed}
+  <div
+    class="toast-notice"
+    class:tone-warn={noticeTone === "warn"}
+    class:tone-danger={noticeTone === "danger"}
+    class:tone-info={noticeTone === "info"}
+    role="status"
+    aria-live="polite"
+  >
+    <span class="toast-dot" aria-hidden="true"></span>
+    <span class="toast-text">{notice}</span>
+    <button
+      class="icon-btn toast-close"
+      type="button"
+      title="关闭提示"
+      aria-label="关闭提示"
+      onclick={() => {
+        dismissed = true;
+        onDismissNotice?.();
+      }}
+    >×</button>
   </div>
 {/if}
 
@@ -167,10 +196,6 @@
     white-space: nowrap;
   }
 
-  .err-line.notice {
-    color: var(--muted);
-  }
-
   .err-lines.structured {
     max-height: min(260px, 35vh);
     overflow: auto;
@@ -191,5 +216,64 @@
 
   .err-copy:hover {
     background: color-mix(in srgb, var(--danger) 14%, transparent);
+  }
+
+  .toast-notice {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 70;
+    max-width: min(380px, calc(100vw - 32px));
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px 7px 12px;
+    color: var(--text);
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-strong);
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+
+  .toast-dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  .toast-notice.tone-warn {
+    color: var(--warn);
+    background: var(--warn-dim);
+    border-color: var(--warn-line);
+  }
+
+  .toast-notice.tone-warn .toast-dot {
+    background: var(--warn);
+  }
+
+  .toast-notice.tone-danger {
+    color: var(--danger);
+    background: var(--danger-dim);
+    border-color: var(--danger-line);
+  }
+
+  .toast-notice.tone-danger .toast-dot {
+    background: var(--danger);
+  }
+
+  .toast-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .toast-close {
+    flex: 0 0 auto;
+    color: inherit;
   }
 </style>

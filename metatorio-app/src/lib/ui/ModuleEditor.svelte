@@ -1,6 +1,13 @@
+<script module lang="ts">
+  import type { ModuleConfig } from "$lib/runtime/types";
+
+  // 模块级共享内存剪贴板：在任意机制卡之间一键复制/粘贴插件与插件塔配置。
+  let copiedConfig = $state<ModuleConfig | null>(null);
+</script>
+
 <script lang="ts">
   // 插件配置编辑器（复刻旧 egui ModuleConfigEditor）：
-  // - 机器插件槽：已填槽图标（点击更换，× 移除）+ 空槽（点击添加），
+  // - 机器插件槽：已填槽图标（点击更换，右键 / × 移除）+ 空槽（点击添加），
   //   槽位上限来自机器原型的 module_slots（后端 ClampModules 兜底钳制）。
   // - 插件塔：插件塔实体（点击选择）、数量、共享比例、塔内插件（图标 + 数量）。
   import { runtime } from "$lib/runtime/store.svelte.ts";
@@ -29,6 +36,8 @@
   let machineDetail = $state<PrototypeDetail | null>(null);
   /** #15：插件塔数量/插件数量校验失败时的可见提示（原先只有 console.warn，用户看不到）。 */
   let beaconWarning = $state<string | null>(null);
+  let batchBusy = $state(false);
+  let batchNotice = $state<string | null>(null);
 
   let modules = $derived(entry.mechanic.module_config?.modules ?? []);
   let beacons = $derived(entry.mechanic.module_config?.beacons ?? []);
@@ -39,6 +48,8 @@
 
   // 机器变化时拉取槽位信息。
   $effect(() => {
+    void entry.id;
+    batchNotice = null;
     const machineId = entry.mechanic.machine?.id;
     const detailKind = entry.mechanic.type === "mining" ? "mining-machine" : "machine";
     if (!machineId) {
@@ -53,6 +64,109 @@
       alive = false;
     };
   });
+
+  async function fillRemainingSlots() {
+    if (batchBusy || modules.length === 0 || modules.length >= slotCount) return;
+    const last = modules[modules.length - 1];
+    batchBusy = true;
+    batchNotice = null;
+    try {
+      for (let slot = modules.length; slot < slotCount; slot++) {
+        await actions.commands.setModuleSlot(entry.id, slot, last.id, last.quality);
+      }
+    } catch {
+      batchNotice = "填满剩余插件槽失败";
+    } finally {
+      batchBusy = false;
+    }
+  }
+
+  async function clearAllModules() {
+    if (batchBusy || modules.length === 0) return;
+    batchBusy = true;
+    batchNotice = null;
+    try {
+      await actions.commands.clearModules(entry.id);
+    } catch {
+      batchNotice = "清空插件失败";
+    } finally {
+      batchBusy = false;
+    }
+  }
+
+  function copyModuleConfig() {
+    copiedConfig = JSON.parse(
+      JSON.stringify({
+        modules: entry.mechanic.module_config?.modules ?? [],
+        beacons: entry.mechanic.module_config?.beacons ?? [],
+      }),
+    ) as ModuleConfig;
+    batchNotice = "已复制整套插件配置";
+  }
+
+  async function pasteModuleConfig() {
+    if (batchBusy || !copiedConfig) return;
+    batchBusy = true;
+    batchNotice = null;
+    beaconWarning = null;
+    try {
+      const snapshot = JSON.parse(JSON.stringify(copiedConfig)) as ModuleConfig;
+      const machineId = entry.mechanic.machine?.id;
+      const detailKind = entry.mechanic.type === "mining" ? "mining-machine" : "machine";
+      const detail = machineDetail ?? (machineId ? await runtime.getDetail(detailKind, machineId) : null);
+      const maxSlots = detail?.module_slots ?? 0;
+      const allowBeacons = detail?.uses_beacon_effects ?? true;
+      const targetModules = snapshot.modules.slice(0, maxSlots);
+      const truncated = snapshot.modules.length > maxSlots;
+
+      if (modules.length > 0) {
+        await actions.commands.clearModules(entry.id);
+      }
+      for (let slot = 0; slot < targetModules.length; slot++) {
+        const mod = targetModules[slot];
+        await actions.commands.setModuleSlot(entry.id, slot, mod.id, mod.quality);
+      }
+
+      let skippedBeacons = false;
+      if (allowBeacons) {
+        for (let bi = beacons.length - 1; bi >= 0; bi--) {
+          await actions.commands.moduleMessage(entry.id, { "remove-beacon": { beacon: bi } });
+        }
+        for (let bi = 0; bi < snapshot.beacons.length; bi++) {
+          const beaconCfg = snapshot.beacons[bi];
+          await actions.commands.moduleMessage(entry.id, {
+            "add-beacon": { beacon: { id: beaconCfg.beacon.id, quality: beaconCfg.beacon.quality } },
+          });
+          await actions.commands.moduleMessage(entry.id, {
+            "set-beacon-count": { beacon: bi, count: beaconCfg.count },
+          });
+          await actions.commands.moduleMessage(entry.id, {
+            "set-beacon-share": { beacon: bi, share: beaconCfg.share },
+          });
+          for (let mi = 0; mi < beaconCfg.modules.length; mi++) {
+            const [mod, count] = beaconCfg.modules[mi];
+            await actions.commands.moduleMessage(entry.id, {
+              "add-beacon-module": { beacon: bi, module: { id: mod.id, quality: mod.quality } },
+            });
+            await actions.commands.moduleMessage(entry.id, {
+              "set-beacon-module-count": { beacon: bi, module: mi, count },
+            });
+          }
+        }
+      } else if (snapshot.beacons.length > 0) {
+        skippedBeacons = true;
+      }
+
+      const notes: string[] = [];
+      if (truncated) notes.push(`机器插件已按 ${maxSlots} 槽上限截断`);
+      if (skippedBeacons) notes.push("当前机器不受插件塔影响，已跳过插件塔");
+      batchNotice = notes.length > 0 ? `已粘贴配置（${notes.join("；")}）` : "已粘贴插件配置";
+    } catch {
+      batchNotice = "粘贴配置失败";
+    } finally {
+      batchBusy = false;
+    }
+  }
 
   function beaconCountChange(beacon: number, event: Event) {
     const input = event.currentTarget as HTMLInputElement;
@@ -123,17 +237,26 @@
       {#each Array.from({ length: slotCount }) as _, i (i)}
         {#if i < modules.length}
           <div class="me-slot">
-            <button class="icon-btn" title={`插件槽 ${i + 1}（点击更换）`} onclick={() => onPickModule(i)}>
+            <button
+              class="icon-btn"
+              aria-label={`插件槽 ${i + 1}（点击更换，右键移除）`}
+              onclick={() => onPickModule(i)}
+              oncontextmenu={(event) => {
+                event.preventDefault();
+                actions.commands.setModuleSlot(entry.id, i, null).catch(() => {});
+              }}
+            >
               <HoverIcon type="item" name={modules[i].id} size={24} detailKind="module" quality={modules[i].quality} />
             </button>
             <button
               class="me-x"
+              aria-label={`移除插件槽 ${i + 1}`}
               title="移除插件"
               onclick={() => actions.commands.setModuleSlot(entry.id, i, null).catch(() => {})}
             >×</button>
           </div>
         {:else}
-          <button class="icon-btn empty" title={`空插件槽 ${i + 1}`} onclick={() => onPickModule(i)}>
+          <button class="icon-btn empty" title={`空插件槽 ${i + 1}`} aria-label={`空插件槽 ${i + 1}`} onclick={() => onPickModule(i)}>
             <Icon type="item" name="+" size={22} title={`空插件槽 ${i + 1}`} />
           </button>
         {/if}
@@ -142,6 +265,41 @@
         <span class="muted">当前机器无插件槽</span>
       {/if}
     </div>
+    <div class="me-slot-actions">
+      {#if slotCount > 0}
+        <button
+          type="button"
+          class="btn me-batch-btn"
+          disabled={batchBusy || modules.length === 0 || modules.length >= slotCount}
+          title="用当前最后一个插件填满所有空槽"
+          onclick={fillRemainingSlots}
+        >填满剩余槽</button>
+        <button
+          type="button"
+          class="btn ghost me-batch-btn"
+          disabled={batchBusy || modules.length === 0}
+          title="清空全部机器插件"
+          onclick={clearAllModules}
+        >清空</button>
+      {/if}
+      <button
+        type="button"
+        class="btn ghost me-batch-btn"
+        disabled={batchBusy || (modules.length === 0 && beacons.length === 0)}
+        title="复制当前机器插件与插件塔配置"
+        onclick={copyModuleConfig}
+      >复制配置</button>
+      <button
+        type="button"
+        class="btn ghost me-batch-btn"
+        disabled={batchBusy || !copiedConfig}
+        title="粘贴已复制的插件与插件塔配置（按槽位上限截断）"
+        onclick={pasteModuleConfig}
+      >粘贴配置</button>
+    </div>
+    {#if batchNotice}
+      <div class="me-batch-note" role="status">{batchNotice}</div>
+    {/if}
   </div>
 
   {#if beacons.length > 0}
@@ -170,7 +328,7 @@
             <button
               class="icon-btn"
               class:empty={!beacon.beacon.id}
-              title="选择插件塔"
+              aria-label="选择插件塔"
               onclick={() => onPickBeacon(bi)}
             >
               <HoverIcon
@@ -211,7 +369,7 @@
           <div class="me-beacon-modules">
             {#each beacon.modules as [module, count], mi (mi)}
               <div class="me-beacon-module">
-                <button class="icon-btn" title="选择塔内插件" onclick={() => onPickBeaconModule(bi, mi)}>
+                <button class="icon-btn" aria-label="选择塔内插件" onclick={() => onPickBeaconModule(bi, mi)}>
                   <HoverIcon type="item" name={module.id} size={20} detailKind="module" quality={module.quality} />
                 </button>
                 <input
@@ -266,15 +424,34 @@
   .me-slots {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 7px;
     align-items: center;
   }
 
   .me-slots-row {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .me-slot-actions {
+    display: flex;
     flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .me-batch-btn {
+    min-height: 24px;
+    padding: 0 7px;
+    font-size: 10.5px;
+  }
+
+  .me-batch-note {
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 1.4;
   }
 
   .me-slots-row .me-label {
@@ -288,10 +465,10 @@
 
   .me-x {
     position: absolute;
-    top: -5px;
-    right: -5px;
-    width: 14px;
-    height: 14px;
+    top: -6px;
+    right: -6px;
+    width: 18px;
+    height: 18px;
     display: grid;
     place-items: center;
     padding: 0;
@@ -299,7 +476,7 @@
     background: var(--danger-dim);
     border: 1px solid var(--danger-line);
     border-radius: 50%;
-    font-size: 9px;
+    font-size: 11px;
     line-height: 1;
     cursor: pointer;
     transition: background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),

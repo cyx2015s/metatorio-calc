@@ -67,6 +67,8 @@ export interface NetworkSource {
   onlyEnabled: boolean;
   /** Display internal flows without cross-partition connections. */
   isolateLocations?: boolean;
+  /** Optional location filter: keep mechanics belonging to this location and their cross-location connecting flows. */
+  locationFilter?: Location | null;
 }
 
 /** Exact identity. Category sets are unordered; quality, temperature and burnt slots matter. */
@@ -126,6 +128,7 @@ function utility(flow: DualVar): boolean {
 export function buildNetwork(source: NetworkSource): NetworkModel {
   const nodes = new Map<string, NetworkNode>(), edges = new Map<string, NetworkEdge>();
   const visible = source.visibleIds === null ? null : new Set(source.visibleIds);
+  const filterLocationKey = source.locationFilter ? locationKey(source.locationFilter) : null;
   const scopedKey = (flow: DualVar, location?: Location) => `${locationKey(location)}|${networkFlowKey(flow)}`;
   const targetKeys = new Set([...source.targets.map(flow => scopedKey(flow)), ...(source.locatedTargets ?? []).map(f => scopedKey(f.flow, f.location))]);
   // 若电力或热量本身是生产目标，则属于该工厂主生产链，不按可选公共流隐藏。
@@ -148,6 +151,7 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
   };
   for (const entry of source.entries) {
     if (visible && !visible.has(entry.id) || source.onlyEnabled && !entry.enabled) continue;
+    if (filterLocationKey !== null && locationKey(entry.location) !== filterLocationKey) continue;
     const m = entry.mechanic;
     const group = source.mergeRecipes && m.type === 'recipe'
       ? JSON.stringify(['recipe', locationKey(entry.location), m.recipe?.id, m.machine?.id]) : String(entry.id);
@@ -185,10 +189,13 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     if (machine) node.label += `\n${source.localize('entity', machine.id)}`;
   }
   // 完整视图保留孤立目标，使缺少供给的生产缺口保持可见。
-  if (source.visibleIds === null) for (const flow of source.targets) {
+  if (source.visibleIds === null && filterLocationKey === null) for (const flow of source.targets) {
     if (source.showUtilities || !isUtility(flow)) flowNode(flow);
   }
-  if (source.visibleIds === null) for (const target of source.locatedTargets ?? []) { if (source.showUtilities || !isUtility(target.flow, target.location)) flowNode(target.flow, target.location); }
+  if (source.visibleIds === null) for (const target of source.locatedTargets ?? []) {
+    if (filterLocationKey !== null && locationKey(target.location) !== filterLocationKey) continue;
+    if (source.showUtilities || !isUtility(target.flow, target.location)) flowNode(target.flow, target.location);
+  }
   const usedFlows = [...nodes.values()].filter(node => node.flow);
   const externals = [
     ...source.externalInputs.map(external => ({flow: external.flow, external, implicit: false, location: undefined as Location | undefined})),
@@ -198,7 +205,8 @@ export function buildNetwork(source: NetworkSource): NetworkModel {
     ...(source.locatedImplicitInputs ?? []).filter(input=>!(source.locatedExternalInputs??[]).some(e=>scopedKey(e.flow.flow,e.flow.location)===scopedKey(input.flow,input.location))).map(input => ({flow: input.flow, location: input.location, external: undefined, implicit: true})),
   ];
   for (const input of externals) {
-    if (!source.showUtilities && isUtility(input.flow)) continue;
+    if (filterLocationKey !== null && locationKey(input.location) !== filterLocationKey) continue;
+    if (!source.showUtilities && isUtility(input.flow, input.location)) continue;
     if (!usedFlows.some(node => locationKey(node.location) === locationKey(input.location) && (networkFlowKey(node.flow!) === networkFlowKey(input.flow) || networkCompatible(input.flow, node.flow!)))) continue;
     const flow = flowNode(input.flow, input.location), id = input.implicit ? `implicit:${flow.id}` : `external:${input.external!.id}`;
     const info = presentFlow(input.flow, source.localize);
@@ -256,6 +264,7 @@ export interface NetworkViewState {
   selected?: string;
   selectedMechanic?: number | null;
   iconScale?: number;
+  chainScope?: 'direct' | 'chain';
 }
 export function createNetworkViewState(): NetworkViewState {
   return {positions: new Map(), collapse: true, showUtilities: false, onlyEnabled: false, query: ''};

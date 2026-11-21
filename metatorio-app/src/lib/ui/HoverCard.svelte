@@ -9,10 +9,10 @@
   import Icon from "./Icon.svelte";
   import RichText from "./RichText.svelte";
 
-  let { kind, detail, x, y, flow, quality = "normal", flowRate, rateBasis, match, onEnter, onLeave }: {
+  let { kind, detail, x, y, flow, quality = "normal", flowRate, rateBasis, match, hint, onEnter, onLeave }: {
     kind: string; detail: PrototypeDetail | null; x: number; y: number;
     flow?: DualVar; quality?: string; flowRate?: number; rateBasis?: "solution" | "unit"; onEnter?: () => void; onLeave?: () => void;
-    match?: FlowMatch;
+    match?: FlowMatch; hint?: string;
   } = $props();
   const labels: Record<string, string> = {item:"物品",fluid:"流体",recipe:"配方",module:"插件",machine:"制造机","mining-machine":"采矿机","offshore-pump":"抽水机",generator:"发电机",boiler:"锅炉",reactor:"反应堆",beacon:"插件塔",resource:"资源",entity:"实体",technology:"科技",planet:"星球",surface:"地表",quality:"品质",tile:"地格","solar-panel":"太阳能板",accumulator:"蓄电器"};
   const flowHelp: Record<string,string> = {
@@ -52,19 +52,71 @@
   let viewport = $state({ width: typeof window === "undefined" ? 1024 : window.innerWidth, height: typeof window === "undefined" ? 768 : window.innerHeight });
   let card = $state<HTMLDivElement>();
   let dimensions = $state({ width: 440, height: 0 });
+  let contentHeight = $state(0);
   $effect(() => {
     if (!card) return;
     const element = card;
-    const observer = new ResizeObserver(() => { dimensions = {width:element.offsetWidth,height:element.offsetHeight}; });
+    const measure = () => {
+      dimensions = { width: element.offsetWidth, height: element.offsetHeight };
+      contentHeight = element.scrollHeight;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
   });
-  // 将浮层保持在指针一侧；若把较高的面板钳制压回源图标上方，会遮挡该图标导致无法点击。
-  let above = $derived(viewport.height - y - 22 < 200 && y > viewport.height - y);
-  let maxHeight = $derived(Math.max(80, above ? y - 22 : viewport.height - y - 22));
-  let left = $derived(Math.max(8,
-    x + 14 + dimensions.width <= viewport.width - 8 ? x + 14 : x - dimensions.width - 14 >= 8 ? x - dimensions.width - 14 : viewport.width - dimensions.width - 8));
-  let top = $derived(Math.max(8, above ? y - Math.min(dimensions.height, maxHeight) - 14 : y + 14));
+
+  // 将浮层保持在指针一侧，加入边缘滞后（hysteresis）防止临界像素抖动，并做可靠视口钳制。
+  const MARGIN = 8;
+  const OFFSET = 14;
+  const HYSTERESIS = 24;
+
+  let placeLeft = $state(false);
+  let placeAbove = $state(false);
+
+  $effect.pre(() => {
+    const w = dimensions.width;
+    const rightSpace = viewport.width - MARGIN - (x + OFFSET);
+    const leftSpace = (x - OFFSET) - MARGIN;
+    if (!placeLeft) {
+      if (rightSpace < w && (leftSpace >= w || leftSpace > rightSpace + HYSTERESIS)) {
+        placeLeft = true;
+      }
+    } else if (rightSpace >= w + HYSTERESIS || (leftSpace < w && rightSpace > leftSpace + HYSTERESIS)) {
+      placeLeft = false;
+    }
+
+    const cy = Math.min(Math.max(MARGIN, y), Math.max(MARGIN, viewport.height - MARGIN));
+    const belowSpace = Math.max(0, viewport.height - MARGIN - (cy + OFFSET));
+    const aboveSpace = Math.max(0, (cy - OFFSET) - MARGIN);
+    const desiredH = Math.max(180, Math.min(contentHeight || 220, 320));
+    if (!placeAbove) {
+      if (belowSpace < desiredH && aboveSpace > belowSpace + HYSTERESIS) {
+        placeAbove = true;
+      }
+    } else if (belowSpace >= desiredH + HYSTERESIS || (aboveSpace < desiredH && belowSpace > aboveSpace + HYSTERESIS)) {
+      placeAbove = false;
+    }
+  });
+
+  let clampedY = $derived(Math.min(Math.max(MARGIN, y), Math.max(MARGIN, viewport.height - MARGIN)));
+  let maxHeight = $derived(
+    Math.min(
+      Math.max(80, placeAbove ? clampedY - OFFSET - MARGIN : viewport.height - MARGIN - (clampedY + OFFSET)),
+      Math.max(80, viewport.height - MARGIN * 2),
+    ),
+  );
+  let left = $derived.by(() => {
+    const raw = placeLeft ? x - dimensions.width - OFFSET : x + OFFSET;
+    const maxLeft = Math.max(MARGIN, viewport.width - dimensions.width - MARGIN);
+    return Math.min(Math.max(MARGIN, raw), maxLeft);
+  });
+  let top = $derived.by(() => {
+    const renderedH = Math.min(dimensions.height, maxHeight);
+    const raw = placeAbove ? clampedY - renderedH - OFFSET : clampedY + OFFSET;
+    const maxTop = Math.max(MARGIN, viewport.height - renderedH - MARGIN);
+    return Math.min(Math.max(MARGIN, raw), maxTop);
+  });
   function portal(node: HTMLElement) { document.body.appendChild(node); return {destroy:() => node.remove()}; }
   function flowNotes(entry: FlowAmount) {
     const notes: string[] = [];
@@ -90,7 +142,7 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div use:portal bind:this={card} class="hover-card" role="tooltip" style:left={`${left}px`} style:top={`${top}px`} style:max-height={`${maxHeight}px`} onmouseenter={onEnter} onmouseleave={onLeave}>
     <header>
-      <Icon type={iconType} name={iconName} size={30} />
+      <Icon type={iconType} name={iconName} size={30} suppressTitle />
       <div class="heading"><strong>{#if flowKey === "Custom"}{heading}{:else}<RichText text={heading} />{/if}</strong><code>{flowInfo?.identifier || detail?.name || flowKey}</code></div>
       <div class="badges"><span>{flowInfo?.kindLabel || labels[kind] || "计算流"}</span>
         {#if match}<span>筛选条件</span>{/if}
@@ -110,7 +162,7 @@
     {/if}
     {#if tile}
       <section class="tile-capabilities"><strong>地格用途</strong>
-        <div><span>抽取流体</span>{#if tile.fluid}<Icon type="fluid" name={tile.fluid} size={20} /><b><RichText text={runtime.richName("fluid",tile.fluid)} /></b>{:else}<b>不支持</b>{/if}</div>
+        <div><span>抽取流体</span>{#if tile.fluid}<Icon type="fluid" name={tile.fluid} size={20} suppressTitle /><b><RichText text={runtime.richName("fluid",tile.fluid)} /></b>{:else}<b>不支持</b>{/if}</div>
         <div><span>销毁物品</span><b>{tile.destroys_dropped_items ? "支持" : "不支持"}</b></div>
       </section>
     {/if}
@@ -120,14 +172,14 @@
     {#if research}
       <section><h4>科研需求<small>未计实验室速度、品质与产能</small></h4>
         <div class="facts"><span>研究单位数</span><strong>{research.units == null ? "由等级公式决定" : compactNumber(research.units)}</strong><span>每单位时间（速度 1）</span><strong>{compactNumber(research.unit_seconds)} s</strong></div>
-        {#each research.ingredients as ingredient}<div class="flow-row"><Icon type="item" name={ingredient.name} size={22} /><span class="flow-copy"><RichText text={runtime.richName("item",ingredient.name)} /></span><span class="quantity">{ingredient.per_unit}/单位{#if ingredient.total != null}<small>共 {compactNumber(ingredient.total)}</small>{/if}</span></div>{/each}
+        {#each research.ingredients as ingredient}<div class="flow-row"><Icon type="item" name={ingredient.name} size={22} suppressTitle /><span class="flow-copy"><RichText text={runtime.richName("item",ingredient.name)} /></span><span class="quantity">{ingredient.per_unit}/单位{#if ingredient.total != null}<small>共 {compactNumber(ingredient.total)}</small>{/if}</span></div>{/each}
         {#if research.prerequisites.length}<div class="facts"><span>前置科技</span><strong>{research.prerequisites.map((name) => runtime.localizedName("technology",name)).join(" / ")}</strong></div>{/if}
       </section>
     {/if}
     {#if detail?.calculation?.item_weight}
       {@const weight = detail.calculation.item_weight}
       <div class="facts"><span>重量来源</span><strong>{weight.source === "explicit" ? "原型指定" : weight.source === "cursor" ? "光标生成物品（零重量）" : weight.source === "recipe" ? "由配方推导" : "默认重量"}</strong></div>
-      {#if weight.recipe}<div class="flow-row"><Icon type="recipe" name={weight.recipe} size={22} /><RichText text={runtime.richName("recipe", weight.recipe)} /></div>{/if}
+      {#if weight.recipe}<div class="flow-row"><Icon type="recipe" name={weight.recipe} size={22} suppressTitle /><RichText text={runtime.richName("recipe", weight.recipe)} /></div>{/if}
       {#if weight.fallback}<div class="facts"><span>回退原因</span><strong>{({"no-recipe":"无可用于重量计算的配方", "recipe-cycle":"配方依赖循环", "zero-recipe-weight":"原料总重量为零", "zero-product-count":"物品产物期望数量为零", "invalid-recipe-weight":"无法推导有效重量"} as Record<string,string>)[weight.fallback] ?? weight.fallback}</strong></div>{/if}
       <p class="weight-note">重量不随品质变化；载量按默认火箭运力估算，发射时按火箭仓实际运力结算。</p>
     {/if}
@@ -150,15 +202,15 @@
         {#if detail.quality_next}<span>下一品质</span><strong><RichText text={runtime.richName("quality",detail.quality_next)} /> · {compactNumber((detail.quality_next_probability ?? 0) * 100)}%</strong>{/if}
       </div>
       {#each [{label:"燃烧产物",kind:"item",name:detail.burnt_result},{label:"变质产物",kind:"item",name:detail.spoil_result},{label:"种植实体",kind:"entity",name:detail.plant_result},...(detail.rocket_launch_products ?? []).map((name) => ({label:"火箭产物",kind:"item",name}))] as reference}
-        {#if reference.name}<div class="reference"><span>{reference.label}</span><Icon type={reference.kind} name={reference.name} size={20} /><strong><RichText text={runtime.richName(reference.kind,reference.name)} /></strong></div>{/if}
+        {#if reference.name}<div class="reference"><span>{reference.label}</span><Icon type={reference.kind} name={reference.name} size={20} suppressTitle /><strong><RichText text={runtime.richName(reference.kind,reference.name)} /></strong></div>{/if}
       {/each}
       {#each [{label:"原料",items:detail.ingredients ?? [],output:false},{label:"产物",items:detail.results ?? [],output:true}] as section}
         {#if section.items.length}
           <section class="recipe-flows"><h4>{section.label}<small>期望量 / 次 · 速度 1 时的基准速率</small></h4>
             <div class="flow-table">
               {#each section.items as entry, i (`${entry.kind}/${entry.name}#${i}`)}
-                <div class="flow-row" title={flowNotes(entry)}>
-                  <Icon type={entry.kind} name={entry.name} size={22} />
+                <div class="flow-row" title={flowNotes(entry) || undefined}>
+                  <Icon type={entry.kind} name={entry.name} size={22} suppressTitle />
                   <div class="flow-copy"><strong><RichText text={runtime.richName(entry.kind, entry.name)} /></strong>{#if flowNotes(entry)}<small>{flowNotes(entry)}</small>{/if}</div>
                   <div class="quantity"><strong>{#if section.output}{compactNumber((entry.amount ?? NaN) - (entry.productivity ?? NaN))} + {compactNumber(entry.productivity)}{:else}{compactNumber(entry.amount)}{/if}</strong>{#if entry.base_rate != null}<small>{compactNumber(entry.base_rate)}/s</small>{/if}</div>
                 </div>
@@ -169,6 +221,7 @@
       {/each}
       {#if detail.results?.length}<p class="note">产物数量 = 不受产能加成部分 + 可享受产能加成部分，均为期望数量；右侧速率为两部分之和。</p>{/if}
     {/if}
+    {#if hint}<p class="hover-hint">{hint}</p>{/if}
   </div>
 {/if}
 
@@ -267,5 +320,13 @@
   .quantity { display: grid; gap: 2px; text-align: right; }
   .quantity small, .note { color: var(--muted); font-size: 10px; }
   .note { margin: 6px 0 0; line-height: 1.45; }
+  .hover-hint {
+    margin: 8px 0 0;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    color: var(--faint);
+    font-size: 10px;
+    line-height: 1.4;
+  }
   @media (max-width: 460px) { .stats { grid-template-columns: 1fr; } }
 </style>

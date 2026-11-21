@@ -27,6 +27,51 @@
   {/snippet}
 </SecondaryMenu>
 <style>
-  .location-picker,.location-choice{display:inline-flex;align-items:center;justify-content:center;padding:3px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--panel);color:var(--text);cursor:pointer;flex:0 0 auto}
-  .location-grid{display:flex;flex-wrap:wrap;gap:6px}.location-choice{padding:6px}.selected,.location-picker:hover,.location-choice:hover{border-color:var(--accent);background:var(--panel-alt,var(--panel))}
+  .location-picker,
+  .location-choice {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--panel-elev);
+    color: var(--text);
+    cursor: pointer;
+    transition:
+      background var(--transition-fast),
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
+  .location-picker {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 2px;
+  }
+  .location-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .location-choice {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 6px;
+  }
+  .location-picker:hover,
+  .location-choice:hover {
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+  .location-picker:focus-visible,
+  .location-choice:focus-visible {
+    outline: 1.5px solid var(--focus);
+    outline-offset: 1px;
+  }
+  .selected,
+  .selected:hover {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
 </style>

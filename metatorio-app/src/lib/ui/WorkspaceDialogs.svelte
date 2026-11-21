@@ -1,4 +1,6 @@
 <script module lang="ts">
+  export { backdropKeydown } from "$lib/ui/modal-backdrop";
+
   export type ConfirmState = {
     message: string;
     action: () => void;
@@ -20,18 +22,12 @@
     project: number;
     name: string;
   };
-
-  /** 遮罩/可点击背景的键盘访达：Enter/Space/Esc 与点击一致（a11y）。 */
-  export function backdropKeydown(event: KeyboardEvent, close: () => void): void {
-    if (event.key === "Enter" || event.key === " " || event.key === "Escape") {
-      event.preventDefault();
-      close();
-    }
-  }
 </script>
 
 <script lang="ts">
+  import { tick } from "svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
+  import { createBackdropClose } from "$lib/ui/modal-backdrop";
 
   let {
     newProjectOpen = $bindable(false),
@@ -106,6 +102,25 @@
     renameCtx = null;
   }
 
+  const newProjectBackdrop = createBackdropClose(() => (newProjectOpen = false));
+  const newUniverseBackdrop = createBackdropClose(() => (newUniverseOpen = false));
+  const newFactoryBackdrop = createBackdropClose(() => (newFactoryOpen = false));
+  const confirmBackdrop = createBackdropClose(() => (confirmState = null));
+  const renameCtxBackdrop = createBackdropClose(() => (renameCtx = null));
+  const renameTargetBackdrop = createBackdropClose(() => (renameTarget = null));
+  const closeProjectBackdrop = createBackdropClose(() => (closeProjectState = null));
+
+  function autoSelect(node: HTMLInputElement) {
+    void tick()
+      .then(() => tick())
+      .then(() => {
+        if (node.isConnected) {
+          node.focus();
+          node.select();
+        }
+      });
+  }
+
   function confirmRenameTarget() {
     const name = renameTargetName.trim();
     if (!renameTarget || !name) {
@@ -122,13 +137,14 @@
 </script>
 
 {#if newProjectOpen}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newProjectOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newProjectOpen = false))}>
+  <div class="backdrop" role="button" tabindex="0" {...newProjectBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">新建项目</div>
       <input
+        use:autoSelect
         bind:value={newProjectName}
         onkeydown={(event) => {
-          if (event.key === "Enter") createProject();
+          if (event.key === "Enter" && !event.isComposing) createProject();
         }}
       />
       <div class="mini-actions">
@@ -140,13 +156,14 @@
 {/if}
 
 {#if newUniverseOpen}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newUniverseOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newUniverseOpen = false))}>
+  <div class="backdrop" role="button" tabindex="0" {...newUniverseBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">新建宇宙工厂</div>
       <input
+        use:autoSelect
         bind:value={newUniverseName}
         onkeydown={(event) => {
-          if (event.key === "Enter") createUniverse();
+          if (event.key === "Enter" && !event.isComposing) createUniverse();
         }}
       />
       <div class="mini-actions">
@@ -158,13 +175,14 @@
 {/if}
 
 {#if newFactoryOpen}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) newFactoryOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (newFactoryOpen = false))}>
+  <div class="backdrop" role="button" tabindex="0" {...newFactoryBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">新建工厂</div>
       <input
+        use:autoSelect
         bind:value={newFactoryName}
         onkeydown={(event) => {
-          if (event.key === "Enter") createFactory();
+          if (event.key === "Enter" && !event.isComposing) createFactory();
         }}
       />
       <div class="mini-actions">
@@ -177,7 +195,7 @@
 
 {#if confirmState}
   {@const confirm = confirmState}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) confirmState = null; }} onkeydown={(e) => backdropKeydown(e, () => (confirmState = null))}>
+  <div class="backdrop" role="button" tabindex="0" {...confirmBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">确认</div>
       <div class="confirm-text">{confirm.message}</div>
@@ -196,13 +214,14 @@
 {/if}
 
 {#if renameCtx}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) renameCtx = null; }} onkeydown={(e) => backdropKeydown(e, () => (renameCtx = null))}>
+  <div class="backdrop" role="button" tabindex="0" {...renameCtxBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">重命名上下文</div>
       <input
+        use:autoSelect
         bind:value={renameCtxName}
         onkeydown={(event) => {
-          if (event.key === "Enter") confirmRename();
+          if (event.key === "Enter" && !event.isComposing) confirmRename();
         }}
       />
       <div class="mini-actions">
@@ -214,13 +233,14 @@
 {/if}
 
 {#if renameTarget}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) renameTarget = null; }} onkeydown={(e) => backdropKeydown(e, () => (renameTarget = null))}>
+  <div class="backdrop" role="button" tabindex="0" {...renameTargetBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">{renameTarget.kind === "project" ? "重命名项目" : "重命名工厂"}</div>
       <input
+        use:autoSelect
         bind:value={renameTargetName}
         onkeydown={(event) => {
-          if (event.key === "Enter") confirmRenameTarget();
+          if (event.key === "Enter" && !event.isComposing) confirmRenameTarget();
         }}
       />
       <div class="mini-actions">
@@ -233,7 +253,7 @@
 
 {#if closeProjectState}
   {@const closing = closeProjectState}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) closeProjectState = null; }} onkeydown={(e) => backdropKeydown(e, () => (closeProjectState = null))}>
+  <div class="backdrop" role="button" tabindex="0" {...closeProjectBackdrop}>
     <div class="mini-modal">
       <div class="mini-title">关闭项目「{closing.name}」</div>
       <div class="confirm-text">

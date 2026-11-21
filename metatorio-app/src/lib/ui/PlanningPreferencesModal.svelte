@@ -27,7 +27,7 @@
   import HoverIcon from "$lib/ui/HoverIcon.svelte";
   import Icon from "$lib/ui/Icon.svelte";
   import RichText from "$lib/ui/RichText.svelte";
-  import { backdropKeydown } from "$lib/ui/WorkspaceDialogs.svelte";
+  import { createBackdropClose } from "$lib/ui/modal-backdrop";
 
   let {
     prefsOpen = $bindable(false),
@@ -42,6 +42,7 @@
   } = $props();
 
   let planning = $derived(project?.planning ?? null);
+  const prefsBackdrop = createBackdropClose(() => (prefsOpen = false));
 
   /** 插件塔原型的插件槽数（getDetail 异步；未知时默认 2，与 Factorio 一致）。 */
   async function beaconModuleSlots(beaconId: string | undefined): Promise<number> {
@@ -53,7 +54,7 @@
 
 {#if prefsOpen && planning}
   <!-- z-index 低于选择器（40），从弹窗内打开选择器时选择器叠在上层 -->
-  <div class="backdrop low" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) prefsOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (prefsOpen = false))}>
+  <div class="backdrop low" role="button" tabindex="0" {...prefsBackdrop}>
     <div class="prefs-modal">
       <div class="mini-title">规划偏好</div>
 
@@ -448,15 +449,16 @@
   }
 
   .prefs-chip-x {
-    width: 14px;
-    height: 14px;
+    width: 20px;
+    height: 20px;
     display: grid;
     place-items: center;
     padding: 0;
     color: var(--danger);
     background: transparent;
     border: none;
-    font-size: 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
     line-height: 1;
     cursor: pointer;
   }

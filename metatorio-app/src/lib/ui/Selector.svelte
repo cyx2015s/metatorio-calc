@@ -8,8 +8,15 @@
   // 带品质的场景（物品/配方/实体类）支持"物品 + 品质"任意顺序选择：
   // 点击条目只是选中（高亮，不退出），点品质 chips 设定品质，最后按
   // 「确定」提交（双击条目 = 立即提交）；「取消」/Esc/点背景 = 提前退出。
-  import { onDestroy, onMount, untrack } from "svelte";
-  import { dismissHover, registerHoverDismiss } from "./hover-controller";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
+  import { createBackdropClose } from "./modal-backdrop";
+  import {
+    dismissHover,
+    hoverOpenDelay,
+    markHoverActive,
+    markHoverInactive,
+    registerHoverDismiss,
+  } from "./hover-controller";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import HoverIcon from "./HoverIcon.svelte";
   import Icon from "./Icon.svelte";
@@ -125,11 +132,15 @@
   let activeGroup = $state<string | null>(null);
   let loading = $state(false);
   let searchBox = $state<HTMLInputElement | null>(null);
+  let bodyEl = $state<HTMLDivElement | null>(null);
   /** 已选中（待确认）的条目名；null = 未选。 */
   let selected = $state<string | null>(untrack(() => initialName || null));
+  let highlightedIndex = $state(-1);
 
-  let hover = $state<{ x: number; y: number; kind: string; name: string } | null>(null);
+  let hover = $state<{ kind: string; name: string } | null>(null);
+  let hoverPos = $state({ x: 0, y: 0 });
   let hoverDetail = $state<import("$lib/runtime/types").PrototypeDetail | null>(null);
+  const selectorBackdrop = createBackdropClose(() => onClose());
 
   // 目录模式下用 activeKind；流模式下仅 item/fluid/entity 走目录
   let catalogKind = $derived(
@@ -210,6 +221,16 @@
     }),
   );
   let bySubgroup = $derived(groupBySubgroup(visible));
+  let flatVisible = $derived(
+    searching || catalogKind === "tile"
+      ? visible
+      : bySubgroup.flatMap((section) => section.items),
+  );
+  let highlightedEntry = $derived(
+    highlightedIndex >= 0 && highlightedIndex < flatVisible.length
+      ? flatVisible[highlightedIndex]
+      : null,
+  );
   let isDirect = $derived(flowMode && flowTab in directFlows);
   let isCustom = $derived(flowMode && flowTab === "custom");
   // 品质适用的场景：目录模式且 kind 支持品质；流模式下 item/entity 页签。
@@ -249,6 +270,13 @@
     searchBox?.focus();
   });
 
+  $effect(() => {
+    const len = flatVisible.length;
+    if (untrack(() => highlightedIndex) >= len) {
+      highlightedIndex = len > 0 ? len - 1 : -1;
+    }
+  });
+
   // 上下文变化时重新拉取索引。
   $effect(() => {
     const ctxId = runtime.activeContext?.id;
@@ -262,15 +290,16 @@
     };
   });
 
-  // 悬停详情（防抖由缓存兜底，首次 hover 拉取一次）。
+  // 悬停详情（防抖由缓存兜底，首次 hover 拉取一次；仅依赖条目本身，不随坐标变化重拉）。
   $effect(() => {
     if (!hover) {
       hoverDetail = null;
       return;
     }
+    const { kind: entryKind, name: entryName } = hover;
     let alive = true;
     hoverDetail = null;
-    runtime.getDetail(hover.kind, hover.name).then((detail) => {
+    runtime.getDetail(entryKind, entryName).then((detail) => {
       if (alive) hoverDetail = detail;
     });
     return () => {
@@ -282,6 +311,7 @@
     activeGroup = null;
     query = "";
     selected = null;
+    highlightedIndex = -1;
   }
 
   function labelOf(entry: IndexEntry): string {
@@ -375,19 +405,181 @@
     onClose();
   }
 
+  const hoverToken = Symbol("selector-hover");
+  let hoverOpenTimer: ReturnType<typeof setTimeout> | undefined;
   let hoverLeaveTimer: ReturnType<typeof setTimeout> | undefined;
-  function keepHover() { clearTimeout(hoverLeaveTimer); }
-  function leaveHover() { clearTimeout(hoverLeaveTimer); hoverLeaveTimer = setTimeout(() => hover = null, 160); }
-  onDestroy(() => clearTimeout(hoverLeaveTimer));
-  onMount(() => { dismissHover(); return registerHoverDismiss(() => { keepHover(); hover = null; }); });
-  function showHover(event: MouseEvent, entry: IndexEntry) {
-    keepHover();
-    if (hover?.kind === entry.kind && hover.name === entry.name) return;
+  let hoverRafId: number | undefined;
+  let pendingHoverPos: { x: number; y: number } | null = null;
+  let pendingHoverTarget: { kind: string; name: string } | null = null;
+  let inHoverLeaveBuffer = false;
+  let insideHoverCard = false;
+
+  function cancelHoverRaf() {
+    if (hoverRafId != null) {
+      cancelAnimationFrame(hoverRafId);
+      hoverRafId = undefined;
+    }
+    pendingHoverPos = null;
+  }
+
+  function closeSelectorHover() {
+    clearTimeout(hoverOpenTimer);
+    hoverOpenTimer = undefined;
+    clearTimeout(hoverLeaveTimer);
+    hoverLeaveTimer = undefined;
+    cancelHoverRaf();
+    pendingHoverTarget = null;
+    inHoverLeaveBuffer = false;
+    insideHoverCard = false;
+    if (hover) {
+      hover = null;
+      markHoverInactive(hoverToken);
+    }
+  }
+
+  function keepHover() {
+    clearTimeout(hoverLeaveTimer);
+    hoverLeaveTimer = undefined;
+    inHoverLeaveBuffer = false;
+    insideHoverCard = true;
+  }
+
+  function leaveHoverCard() {
+    insideHoverCard = false;
+    leaveHover();
+  }
+
+  function leaveHover() {
+    clearTimeout(hoverOpenTimer);
+    hoverOpenTimer = undefined;
+    pendingHoverTarget = null;
+    cancelHoverRaf();
+    if (!hover) return;
+    inHoverLeaveBuffer = true;
+    clearTimeout(hoverLeaveTimer);
+    hoverLeaveTimer = setTimeout(() => {
+      hoverLeaveTimer = undefined;
+      closeSelectorHover();
+    }, 180);
+  }
+
+  onDestroy(closeSelectorHover);
+  onMount(() => {
     dismissHover();
-    hover = { x: event.clientX, y: event.clientY, kind: entry.kind, name: entry.name };
+    return registerHoverDismiss(closeSelectorHover);
+  });
+
+  function scheduleHoverPos(x: number, y: number) {
+    pendingHoverPos = { x, y };
+    if (hoverRafId == null) {
+      hoverRafId = requestAnimationFrame(() => {
+        hoverRafId = undefined;
+        if (pendingHoverPos && !inHoverLeaveBuffer && !insideHoverCard) {
+          hoverPos = pendingHoverPos;
+        }
+        pendingHoverPos = null;
+      });
+    }
+  }
+
+  function showHover(event: MouseEvent, entry: IndexEntry) {
+    clearTimeout(hoverLeaveTimer);
+    hoverLeaveTimer = undefined;
+    inHoverLeaveBuffer = false;
+    insideHoverCard = false;
+
+    if (hover?.kind === entry.kind && hover.name === entry.name) {
+      scheduleHoverPos(event.clientX, event.clientY);
+      return;
+    }
+
+    if (pendingHoverTarget?.kind === entry.kind && pendingHoverTarget.name === entry.name) {
+      scheduleHoverPos(event.clientX, event.clientY);
+      return;
+    }
+
+    clearTimeout(hoverOpenTimer);
+    hoverOpenTimer = undefined;
+    pendingHoverTarget = { kind: entry.kind, name: entry.name };
+    cancelHoverRaf();
+    hoverPos = { x: event.clientX, y: event.clientY };
+
+    const delay = hoverOpenDelay();
+    if (delay <= 0) {
+      pendingHoverTarget = null;
+      dismissHover();
+      hover = { kind: entry.kind, name: entry.name };
+      markHoverActive(hoverToken);
+    } else {
+      hoverOpenTimer = setTimeout(() => {
+        hoverOpenTimer = undefined;
+        const target = pendingHoverTarget;
+        pendingHoverTarget = null;
+        if (!target) return;
+        dismissHover();
+        hover = target;
+        markHoverActive(hoverToken);
+      }, delay);
+    }
+  }
+
+  function scrollHighlightedIntoView() {
+    void tick().then(() => {
+      bodyEl
+        ?.querySelector<HTMLElement>('[data-kbd-active="true"]')
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  }
+
+  function handleQualityShortcut(event: KeyboardEvent): boolean {
+    if (!event.altKey || event.ctrlKey || event.metaKey || !hasQuality) return false;
+    const qualities = runtime.catalogIndex?.qualities ?? [];
+    const digit = /^[1-5]$/.test(event.key)
+      ? Number(event.key)
+      : /^Digit([1-5])$/.test(event.code)
+        ? Number(event.code.slice(5))
+        : 0;
+    if (digit < 1 || digit > qualities.length) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    quality = qualities[digit - 1];
+    qualityPicked = true;
+    return true;
+  }
+
+  function onSearchKeydown(event: KeyboardEvent) {
+    if (event.isComposing) return;
+    if (handleQualityShortcut(event)) return;
+    if (event.key === "ArrowDown") {
+      if (flatVisible.length === 0) return;
+      event.preventDefault();
+      highlightedIndex =
+        highlightedIndex < 0 ? 0 : (highlightedIndex + 1) % flatVisible.length;
+      scrollHighlightedIntoView();
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      if (flatVisible.length === 0) return;
+      event.preventDefault();
+      highlightedIndex =
+        highlightedIndex <= 0 ? flatVisible.length - 1 : highlightedIndex - 1;
+      scrollHighlightedIntoView();
+      return;
+    }
+    if (event.key === "Enter") {
+      const target =
+        highlightedEntry ??
+        (searching ? flatVisible[0] : selectedEntry ?? flatVisible[0]);
+      if (target) {
+        event.preventDefault();
+        event.stopPropagation();
+        commitFast(target.name);
+      }
+    }
   }
 
   function onKeydown(event: KeyboardEvent) {
+    if (handleQualityShortcut(event)) return;
     const target = event.target as HTMLElement | null;
     const typing =
       !!target &&
@@ -419,7 +611,14 @@
       }
       return;
     }
-    if (event.key === "Enter" && !typing && selected && !isDirect && !isCustom) {
+    if (
+      event.key === "Enter" &&
+      !typing &&
+      !(target instanceof HTMLButtonElement) &&
+      selected &&
+      !isDirect &&
+      !isCustom
+    ) {
       event.stopPropagation();
       confirm();
     }
@@ -428,7 +627,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="backdrop" role="button" tabindex="0" onclick={(event) => { if (event.target === event.currentTarget) onClose(); }} onkeydown={(event) => { if (event.key === "Enter" || event.key === " " || event.key === "Escape") { event.preventDefault(); onClose(); } }}>
+<div class="backdrop" role="button" tabindex="0" {...selectorBackdrop}>
   <div
     class="modal"
     role="dialog"
@@ -484,6 +683,8 @@
         title="按内部 id 或中文名搜索原型"
         aria-label="搜索原型"
         spellcheck="false"
+        oninput={() => (highlightedIndex = -1)}
+        onkeydown={onSearchKeydown}
       />
 
       {#if hasQuality}
@@ -493,7 +694,7 @@
             <button
               class:active={quality === q}
               class="q-chip"
-              title={runtime.localizedName("quality", q)}
+              aria-label={runtime.localizedName("quality", q)}
               onclick={() => pickQuality(q)}
             >
               <HoverIcon type="quality" name={q} size={22} detailKind="quality" title={runtime.localizedName("quality", q)} />
@@ -513,7 +714,10 @@
               class="gtab"
               title={`${runtime.localizedName("item-group", group)}（${group}）`}
               aria-label={runtime.localizedName("item-group", group)}
-              onclick={() => (activeGroup = activeGroup === group ? null : group)}
+              onclick={() => {
+                activeGroup = activeGroup === group ? null : group;
+                highlightedIndex = -1;
+              }}
             >
               <Icon
                 type="item-group"
@@ -527,7 +731,7 @@
       {/if}
     {/if}
 
-    <div class="body">
+    <div class="body" bind:this={bodyEl}>
       {#if isDirect}
         {@const flow = directFlows[flowTab]!}
         <div class="direct-panel">
@@ -557,22 +761,24 @@
       {:else if searching || catalogKind === "tile"}
         <div class="search-list">
           {#each visible as entry (entry.kind + entry.name)}
+            {@const isKbdActive = highlightedEntry?.kind === entry.kind && highlightedEntry?.name === entry.name}
             <button
               class="row"
               aria-label={labelOf(entry)}
               class:active={selected === entry.name}
-              title={`选择：${labelOf(entry)}（${entry.name}）`}
+              class:kbd-active={isKbdActive}
+              data-kbd-active={isKbdActive ? "true" : undefined}
               onclick={() => toggleSelect(entry.name)}
               ondblclick={() => commitFast(entry.name)}
               onmouseenter={(event) => showHover(event, entry)}
               onmousemove={(event) => showHover(event, entry)}
               onmouseleave={leaveHover}
             >
-              <Icon type={entry.icon_type} name={entry.name} size={28} title={labelOf(entry)} />
+              <Icon type={entry.icon_type} name={entry.name} size={28} suppressTitle />
               <span class="row-name"><RichText text={entry.localized_name || entry.name} /></span>
               {#if entry.tile}
                 <span class="tile-use">
-                  {#if entry.tile.fluid}<Icon type="fluid" name={entry.tile.fluid} size={20} /><span>→ {runtime.localizedName("fluid",entry.tile.fluid)}</span>{/if}
+                  {#if entry.tile.fluid}<Icon type="fluid" name={entry.tile.fluid} size={20} suppressTitle /><span>→ {runtime.localizedName("fluid",entry.tile.fluid)}</span>{/if}
                   {#if entry.tile.destroys_dropped_items}<span>可销毁物品</span>{/if}
                 </span>
               {/if}
@@ -589,10 +795,12 @@
             <div class="sg-label"><RichText text={runtime.richName("item-subgroup", section.subgroup)} /></div>
             <div class="sg-items">
               {#each section.items as entry (entry.kind + "/" + entry.name)}
+                {@const isKbdActive = highlightedEntry?.kind === entry.kind && highlightedEntry?.name === entry.name}
                 <button
                   class="icon-btn"
                   class:active={selected === entry.name}
-                  title={`选择：${labelOf(entry)}（${entry.name}）`}
+                  class:kbd-active={isKbdActive}
+                  data-kbd-active={isKbdActive ? "true" : undefined}
                   aria-label={labelOf(entry)}
                   onclick={() => toggleSelect(entry.name)}
                   ondblclick={() => commitFast(entry.name)}
@@ -600,7 +808,7 @@
                   onmousemove={(event) => showHover(event, entry)}
                   onmouseleave={leaveHover}
                 >
-                  <Icon type={entry.icon_type} name={entry.name} size={34} title={labelOf(entry)} />
+                  <Icon type={entry.icon_type} name={entry.name} size={34} suppressTitle />
                 </button>
               {/each}
             </div>
@@ -635,7 +843,16 @@
 </div>
 
 {#if hover}
-  <HoverCard kind={hover.kind} detail={hoverDetail} x={hover.x} y={hover.y} {quality} onEnter={keepHover} onLeave={leaveHover} />
+  <HoverCard
+    kind={hover.kind}
+    detail={hoverDetail}
+    x={hoverPos.x}
+    y={hoverPos.y}
+    {quality}
+    hint={hasQuality ? "点击选中 · 双击或 Enter 确认 · Alt+1~5 切换品质" : "点击选择 · Enter/E 确认"}
+    onEnter={keepHover}
+    onLeave={leaveHoverCard}
+  />
 {/if}
 
 <style>
@@ -904,6 +1121,16 @@
     box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 1px var(--accent);
   }
 
+  .sg-items .icon-btn.kbd-active {
+    border-color: var(--focus);
+    background: var(--card-hover);
+    box-shadow: 0 0 0 1.5px var(--focus);
+  }
+
+  .sg-items .icon-btn.active.kbd-active {
+    box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px var(--focus);
+  }
+
   .search-list {
     display: grid;
     gap: 2px;
@@ -934,6 +1161,12 @@
   .row.active {
     background: var(--accent-dim);
     border-color: var(--accent-line);
+  }
+
+  .row.kbd-active {
+    background: var(--card-hover);
+    border-color: var(--focus);
+    box-shadow: inset 2px 0 0 var(--focus);
   }
 
   .row-name {

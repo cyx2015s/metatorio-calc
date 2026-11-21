@@ -13,10 +13,8 @@
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { pickGameExecutable, pickModDir } from "$lib/runtime/client";
   import type { ProjectDocument } from "$lib/runtime/types";
-  import {
-    backdropKeydown,
-    type ConfirmState,
-  } from "$lib/ui/WorkspaceDialogs.svelte";
+  import { createBackdropClose } from "$lib/ui/modal-backdrop";
+  import type { ConfirmState } from "$lib/ui/WorkspaceDialogs.svelte";
 
   let {
     dataOpen = $bindable(false),
@@ -106,6 +104,10 @@
     return lines.join("\n");
   }
 
+  const dataBackdrop = createBackdropClose(() => (dataOpen = false));
+  const fontSettingsBackdrop = createBackdropClose(() => (fontSettingsOpen = false));
+  const loadGameBackdrop = createBackdropClose(() => (loadGameOpen = false));
+
   function handleWindowKeydown(event: KeyboardEvent): void {
     if (event.key === "Escape" && fontSettingsOpen) {
       fontSettingsOpen = false;
@@ -121,8 +123,7 @@
     class="backdrop"
     role="button"
     tabindex="0"
-    onclick={(event) => { if (event.target === event.currentTarget) dataOpen = false; }}
-    onkeydown={(event) => backdropKeydown(event, () => (dataOpen = false))}
+    {...dataBackdrop}
   >
     <div class="modal data-modal" role="dialog" aria-modal="true" aria-label="游戏数据与上下文">
       <header class="modal-head">
@@ -236,8 +237,7 @@
     class="backdrop"
     role="button"
     tabindex="0"
-    onclick={(event) => { if (event.target === event.currentTarget) fontSettingsOpen = false; }}
-    onkeydown={(event) => backdropKeydown(event, () => (fontSettingsOpen = false))}
+    {...fontSettingsBackdrop}
   >
     <div class="mini-modal font-modal" role="dialog" aria-modal="true" aria-label="字体设置">
       <div class="mini-title">字体设置</div>
@@ -307,7 +307,7 @@
 {/if}
 
 {#if loadGameOpen}
-  <div class="backdrop" role="button" tabindex="0" onclick={(e) => { if (e.target === e.currentTarget) loadGameOpen = false; }} onkeydown={(e) => backdropKeydown(e, () => (loadGameOpen = false))}>
+  <div class="backdrop" role="button" tabindex="0" {...loadGameBackdrop}>
     <div class="mini-modal load-game">
       <div class="mini-title">加载游戏数据</div>
       <div class="path-field">
@@ -317,7 +317,7 @@
             bind:value={gameExePath}
             placeholder="游戏可执行文件路径"
             onkeydown={(event) => {
-              if (event.key === "Enter") submitLoadGame();
+              if (event.key === "Enter" && !event.isComposing) submitLoadGame();
             }}
           />
           <button class="btn" onclick={browseGameExe} disabled={pickingExe}>
@@ -332,7 +332,7 @@
             bind:value={gameModDir}
             placeholder="留空使用原版"
             onkeydown={(event) => {
-              if (event.key === "Enter") submitLoadGame();
+              if (event.key === "Enter" && !event.isComposing) submitLoadGame();
             }}
           />
           <button class="btn" onclick={browseGameMod} disabled={pickingMod}>

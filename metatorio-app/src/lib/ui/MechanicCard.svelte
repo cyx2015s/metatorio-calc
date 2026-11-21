@@ -6,15 +6,18 @@
   import { mechanicKindLabels as kindLabel } from "$lib/mechanics/presentation";
   import type { MechanicEntry } from "$lib/runtime/types";
   import type { MechanicActions } from "$lib/mechanics/actions";
+  import type { FlowTraceHandler } from "$lib/mechanics/workspace";
   import FlowChip from "./FlowChip.svelte";
   import LocationIcon from "./LocationIcon.svelte";
   import SecondaryMenu from "./SecondaryMenu.svelte";
   import MechanicEditor from "./MechanicEditor.svelte";
 
-  let {entry, solution = null, project, factory, actions, onInteractionChange}: {
+  let {entry, solution = null, project, factory, actions, onInteractionChange, onTraceFlow, onRevealInNetwork}: {
     entry: MechanicEntry; solution?: {amount: number; cost: number} | null;
     project: number; factory: number; actions: MechanicActions;
     onInteractionChange?: (active: boolean) => void;
+    onTraceFlow?: FlowTraceHandler;
+    onRevealInNetwork?: (mechanicId: number) => void;
   } = $props();
   let editorActive = $state(false), flowsOpen = $state(false);
   $effect(() => { onInteractionChange?.(editorActive || flowsOpen); });
@@ -61,7 +64,7 @@
 </script>
 
 <article data-mechanic-id={entry.id} class="mech-card" class:off={!entry.enabled} aria-label={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel}`}>
-  <MechanicEditor {entry} {solution} {project} {factory} {actions} onInteractionChange={active => editorActive = active} />
+  <MechanicEditor {entry} {solution} {project} {factory} {actions} {onRevealInNetwork} onInteractionChange={active => editorActive = active} />
   <div class="flow-lanes" aria-label="机制流量">
     {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
       <div class="flow-lane">
@@ -70,7 +73,7 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <div class="flow-strip" tabindex="0" role="region" aria-label={`${lane.label}流量，可横向滚动`}>
           {#each lane.items as item (item.key)}
-            {#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} />
+            {#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} location={item.location ?? entry.location} {onTraceFlow} />
           {:else}<span class="no-flow">{loadingFlows ? "加载中…" : "—"}</span>{/each}
         </div>
       </div>
@@ -81,7 +84,7 @@
         <p>{solution ? "当前求解用量下的流量" : "未求解：以下为单位机制流量"}</p>
         {#each [{ label: "输入", items: inputs }, { label: "输出", items: outputs }] as lane}
           <h4>{lane.label}（{lane.items.length}）</h4>
-          {#each lane.items as item (item.key)}{#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName />{/each}
+          {#each lane.items as item (item.key)}{#if entry.transport && item.location}<LocationIcon location={item.location} size={18} />{/if}<FlowChip flow={item.flow} amount={item.amount} {scale} solved={solution !== null} showName location={item.location ?? entry.location} {onTraceFlow} />{/each}
         {/each}
       </div>
     </SecondaryMenu>
@@ -90,8 +93,9 @@
 
 <style>
   .mech-card {
-    height: var(--mechanic-row-height);
-    min-height: var(--mechanic-row-height);
+    height: var(--mechanic-row-height, 84px);
+    min-height: var(--mechanic-row-height, 84px);
+    overflow: hidden;
     display: grid;
     grid-template-columns: clamp(248px, 38%, 360px) minmax(0, 1fr);
     padding: 0;
@@ -139,10 +143,10 @@
     font-size: 9.5px;
   }
   .lane-label small:empty { display: none; }
-  .flow-strip { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; height: 34px; overflow-x: auto; overflow-y: hidden; }
+  .flow-strip { display: flex; flex: 1; align-items: center; gap: 4px; min-width: 0; height: 100%; min-height: 28px; overflow-x: auto; overflow-y: hidden; }
   .flow-strip :global(.flow-chip) { flex: 0 0 auto; }
   .no-flow { color: var(--faint); font-size: 11px; }
-  .flow-lanes :global(.menu-anchor) { position: absolute; top: 23px; right: 4px; }
+  .flow-lanes :global(.menu-anchor) { position: absolute; top: 50%; transform: translateY(-50%); right: 4px; }
   .all-flows {
     width: 22px;
     height: 24px;

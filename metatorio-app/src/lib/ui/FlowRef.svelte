@@ -17,7 +17,7 @@
   const visibleQualifiers = $derived(info.qualifiers.filter(value => !showBadge || value !== info.badge));
 </script>
 
-<span class="flow-ref" class:grow data-flow-kind={info.kind} data-wildcard={info.wildcard || undefined} title={tip}>
+<span class="flow-ref" class:grow data-flow-kind={info.kind} data-wildcard={info.wildcard || undefined}>
   <span class="flow-symbol">
     <HoverIcon type={info.type} name={info.name} detailKind={info.detailKind} quality={info.quality} {size}
       {flow} {match} {flowRate} {rateBasis} title={tip} {onClick} {onContextMenu} focusable={!nested} />

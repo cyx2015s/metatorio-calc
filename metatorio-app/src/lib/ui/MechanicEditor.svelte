@@ -25,6 +25,7 @@
     factory,
     actions,
     onInteractionChange,
+    onRevealInNetwork,
   }: {
     entry: MechanicEntry;
     solution?: { amount: number; cost: number } | null;
@@ -33,6 +34,7 @@
     factory: number;
     actions: MechanicActions;
     onInteractionChange?: (active: boolean) => void;
+    onRevealInNetwork?: (mechanicId: number) => void;
   } = $props();
 
   const onPick = (kind: CatalogKind | 'beacon-module', a?: number, b?: number) => actions.pick(entry.id, kind, a, b);
@@ -172,30 +174,43 @@
   let hasFuel = $derived(((kind === "recipe" || kind === "mining") && machineEnergySource === "burner") || kind === "boiler" || (kind === "reactor" || kind === "fusion-reactor"));
   let hasSettings = $derived(!entry.transport && (hasFuel || ["generator", "fusion-generator", "boiler", "reactor", "fusion-reactor", "solar", "fluid-heat", "item-launch"].includes(kind)));
   let amountUnit = $derived(entry.transport ? "件/s" : hasMachine || ["generator", "fusion-generator", "boiler", "reactor", "fusion-reactor", "solar"].includes(kind) ? "台" : "系数");
+  const kindText = $derived(entry.transport ? transportLabel(entry.transport) : kindLabel[kind]);
+  const qualitySuffix = $derived(
+    primaryQuality && primaryQuality !== "normal"
+      ? ` (${runtime.localizedName("quality", primaryQuality)})`
+      : "",
+  );
+  const displayTitle = $derived(
+    primaryLabel ? `${primaryLabel}${qualitySuffix}` : `未设置${kindText}`,
+  );
 </script>
 
-<div class="identity" class:off={!entry.enabled} data-mechanic-editor={entry.id} aria-label={`${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel}`}>
+<div class="identity" class:off={!entry.enabled} data-mechanic-editor={entry.id} aria-label={`${kindText}：${primaryLabel}`}>
+    <div class="title-row">
+      <span class="primary-title" title={displayTitle}>{displayTitle}</span>
+      <span class="kind-label">{kindText}</span>
+    </div>
     <div class="configuration">
       {#if entry.location}<LocationPicker value={entry.location} planetsOnly={!!entry.transport} label="机制地点" onChange={location => actions.setLocation(entry.id, location).catch(() => {})} />{/if}
-      <button class="icon-btn primary" title={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} aria-label={`更换${entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}：${primaryLabel || "未设置"}`} onclick={() => onPick(primary.kind)}>
-        <HoverIcon type={primaryIcon} name={primaryName || "+"} size={28} detailKind={primaryName ? primary.kind : undefined} quality={primaryQuality} />
+      <button class="icon-btn primary" aria-label={`更换${kindText}：${primaryLabel || "未设置"}`} onclick={() => onPick(primary.kind)}>
+        <HoverIcon type={primaryIcon} name={primaryName || "+"} size={24} detailKind={primaryName ? primary.kind : undefined} quality={primaryQuality} />
       </button>
       {#if hasMachine}
-        <button class="icon-btn machine-button" title={`更换机器：${machineLabel || "未选择"}`} aria-label={`更换机器：${machineLabel || "未选择"}`}
+        <button class="icon-btn machine-button" aria-label={`更换机器：${machineLabel || "未选择"}`}
           onclick={() => onPick(kind === "tile-extract" ? "offshore-pump" : machineKind())}>
-          <HoverIcon type="entity" name={machineName || "+"} size={28} detailKind={machineName ? machineKind() : undefined} quality={machineQuality} />
+          <HoverIcon type="entity" name={machineName || "+"} size={24} detailKind={machineName ? machineKind() : undefined} quality={machineQuality} />
         </button>
       {:else if kind === "tile-dispose"}
-        <button class="icon-btn" title="选择可销毁物品的地格" aria-label="选择可销毁物品的地格" onclick={() => onPick("tile")}>
-          <HoverIcon type="tile" name={entry.mechanic.tile || "+"} size={26} detailKind={entry.mechanic.tile ? "tile" : undefined} />
+        <button class="icon-btn" aria-label="选择可销毁物品的地格" onclick={() => onPick("tile")}>
+          <HoverIcon type="tile" name={entry.mechanic.tile || "+"} size={24} detailKind={entry.mechanic.tile ? "tile" : undefined} />
         </button>
       {:else if kind === "generator" || kind === "boiler"}
-        <button class="icon-btn" title={`流体：${fluidLabel || "未选择"}`} aria-label={`更换流体：${fluidLabel || "未选择"}`} onclick={() => onPick("fluid")}>
-          <HoverIcon type="fluid" name={fluidName || "+"} size={26} detailKind={fluidName ? "fluid" : undefined} />
+        <button class="icon-btn" aria-label={`更换流体：${fluidLabel || "未选择"}`} onclick={() => onPick("fluid")}>
+          <HoverIcon type="fluid" name={fluidName || "+"} size={24} detailKind={fluidName ? "fluid" : undefined} />
         </button>
       {:else if kind === "solar" && !solarContinuous}
-        <button class="icon-btn" title="更换蓄电器" aria-label="更换蓄电器" onclick={() => onPick("accumulator")}>
-          <HoverIcon type="entity" name={entry.mechanic.accumulator?.id || "+"} size={26} quality={entry.mechanic.accumulator?.quality} detailKind={entry.mechanic.accumulator ? "accumulator" : undefined} />
+        <button class="icon-btn" aria-label="更换蓄电器" onclick={() => onPick("accumulator")}>
+          <HoverIcon type="entity" name={entry.mechanic.accumulator?.id || "+"} size={24} quality={entry.mechanic.accumulator?.quality} detailKind={entry.mechanic.accumulator ? "accumulator" : undefined} />
         </button>
       {/if}
       {#if hasModules}
@@ -204,18 +219,18 @@
             <button class="config-preview" onclick={toggle} aria-expanded={open} aria-haspopup="dialog"
               title={`编辑插件与插件塔：${entry.mechanic.module_config?.modules.length ?? 0} 个机器插件，${beaconCount} 座塔（${beacons.length} 组配置）`}>
               {#each moduleGroups.slice(0, 2) as group}
-                <span class="preview-item"><HoverIcon type="item" name={group.item.id} detailKind="module" quality={group.item.quality} size={20} /><small>×{group.count}</small></span>
+                <span class="preview-item"><HoverIcon type="item" name={group.item.id} detailKind="module" quality={group.item.quality} size={18} /><small>×{group.count}</small></span>
               {/each}
               {#if moduleGroups.length > 2}<small>+{moduleGroups.length - 2}种</small>{/if}
               {#each beacons.slice(0, 1) as beacon}
-                <span class="preview-item"><HoverIcon type="entity" name={beacon.beacon.id} detailKind="beacon" quality={beacon.beacon.quality} size={20} /><small>×{beacon.count}</small></span>
+                <span class="preview-item"><HoverIcon type="entity" name={beacon.beacon.id} detailKind="beacon" quality={beacon.beacon.quality} size={18} /><small>×{beacon.count}</small></span>
                 {#each beacon.modules.slice(0, 1) as [module, count]}
-                  <span class="preview-item tower-module" title="塔内插件总数"><HoverIcon type="item" name={module.id} detailKind="module" quality={module.quality} size={20} /><small>×{count}</small></span>
+                  <span class="preview-item tower-module"><HoverIcon type="item" name={module.id} detailKind="module" quality={module.quality} size={18} /><small>×{count}</small></span>
                 {/each}
                 {#if beacon.modules.length > 1}<small>+{beacon.modules.length - 1}种</small>{/if}
               {/each}
               {#if beacons.length > 1}<small>+{beacons.length - 1}组</small>{/if}
-              {#if !moduleGroups.length && !beacons.length}<span>＋ 插件 / 插件塔</span>{/if}
+              {#if !moduleGroups.length && !beacons.length}<span class="preview-empty">＋ 插件 / 插件塔</span>{/if}
               <span class="disclosure">▾</span>
             </button>
           {/snippet}
@@ -243,7 +258,7 @@
             {#if ["generator", "fusion-generator", "boiler", "tile-extract", "reactor", "fusion-reactor", "solar", "fluid-heat"].includes(kind)}
             <div class="row2">
               {#if kind === "generator" || kind === "boiler"}
-                <button class="icon-btn" class:empty={!fluidName} title={`流体：${fluidLabel || "未选择"} · 点击更换`} onclick={() => onPick("fluid")}>
+                <button class="icon-btn" class:empty={!fluidName} aria-label={`流体：${fluidLabel || "未选择"} · 点击更换`} onclick={() => onPick("fluid")}>
                   <HoverIcon type="fluid" name={fluidName || "fluid"} size={24} detailKind={fluidName ? "fluid" : undefined} />
                 </button>
                 <span class="sub">{fluidLabel || "选择流体"}</span>
@@ -287,7 +302,7 @@
                     onchange={event=>{const raw=event.currentTarget.value;const value=raw===""?null:Number(raw);if(value===null||Number.isInteger(value))actions.commands.setMechanicTemperature(entry.id,value).catch(()=>{});}} />
                 </label>
               {:else if kind === "tile-extract"}
-                <button class="icon-btn" class:empty={!machineName} title={`抽水机：${machineLabel || "未选择"} · 点击更换`} onclick={() => onPick("offshore-pump")}>
+                <button class="icon-btn" class:empty={!machineName} aria-label={`抽水机：${machineLabel || "未选择"} · 点击更换`} onclick={() => onPick("offshore-pump")}>
                   <HoverIcon type="entity" name={machineName || "offshore-pump"} size={24} quality={machineQuality} />
                 </button>
                 <span class="sub">{machineLabel || "选择抽水机"}</span>
@@ -316,7 +331,7 @@
                 {#if !solarContinuous}<button
                   class="icon-btn"
                   class:empty={!entry.mechanic.accumulator?.id}
-                  title={entry.mechanic.accumulator?.id
+                  aria-label={entry.mechanic.accumulator?.id
                     ? `蓄电器：${runtime.localizedName("entity", entry.mechanic.accumulator.id)} · 点击更换`
                     : "选择蓄电器"}
                   onclick={() => onPick("accumulator")}
@@ -406,14 +421,20 @@
       {/if}
     </div>
     <div class="metadata">
-      <span class="kind-label">{entry.transport ? transportLabel(entry.transport) : kindLabel[kind]}</span>
       {#if solution}
-        <span class="amount mono" title={`用量 ${solution.amount} · 单位成本 ${solution.cost} · 总成本 ${solution.amount * solution.cost}`}>
+        <span
+          class="amount mono"
+          class:trace-amount={solution.amount < 0.01}
+          title={`用量 ${solution.amount} · 单位成本 ${solution.cost} · 总成本 ${solution.amount * solution.cost}`}
+        >
           <strong>{compactNumber(solution.amount)}</strong> {amountUnit}
           <span class="cost">总成本 {compactNumber(solution.amount * solution.cost)}</span>
         </span>
       {:else}<span class="unsolved">未求解 · 单位流量</span>{/if}
       <div class="actions">
+        {#if onRevealInNetwork}
+          <button class="icon-btn" title="在网络定位" aria-label="在网络定位" onclick={() => onRevealInNetwork?.(entry.id)}>◎</button>
+        {/if}
         <button class="icon-btn enabled" class:on={entry.enabled} role="switch" aria-checked={entry.enabled}
           aria-label={entry.enabled ? "停用机制" : "启用机制"} title={entry.enabled ? "已启用，点击停用" : "已停用，点击启用"} onclick={onToggleEnabled}>{entry.enabled ? "✓" : "○"}</button>
         <button class="icon-btn" title="克隆机制" aria-label="克隆机制" onclick={onClone}>⧉</button>
@@ -423,24 +444,62 @@
   </div>
 
 <style>
-  .identity { min-width: 0; display: grid; grid-template-rows: 30px 24px; gap: 4px; padding: 6px 10px; }
-  .configuration, .metadata { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .primary, .machine-button { flex: 0 0 auto; width: 30px; height: 30px; }
-  .kind-label { color: var(--muted); font-size: 10px; font-weight: 500; white-space: nowrap; }
-  .actions { display: flex; flex: 0 0 auto; gap: 0; margin-left: auto; }
-  .actions .icon-btn { width: 22px; height: 24px; font-size: 12px; }
+  .identity {
+    min-width: 0;
+    display: grid;
+    grid-template-rows: 16px minmax(24px, 1fr) 26px;
+    gap: 2px;
+    padding: 4px 10px;
+  }
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .primary-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: 11.5px;
+    font-weight: 600;
+    line-height: 1.25;
+  }
+  .configuration, .metadata { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; }
+  .configuration :global(.location-picker) { width: 28px; height: 28px; padding: 2px; overflow: hidden; }
+  .primary, .machine-button { flex: 0 0 auto; width: 28px; height: 28px; }
+  .kind-label { flex: 0 0 auto; color: var(--faint); font-size: 9.5px; font-weight: 600; white-space: nowrap; }
+  .actions { display: flex; align-items: center; flex: 0 0 auto; gap: 3px; margin-left: auto; }
+  .actions .icon-btn { width: 26px; height: 26px; font-size: 13px; }
+  .actions .icon-btn.danger { margin-left: 6px; }
   .enabled.on { color: var(--ok); }
-  .amount { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; line-height: 1.1; font-variant-numeric: tabular-nums; }
-  .amount strong { font-size: 12px; font-weight: 700; }
+  .amount {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+    font-size: 10px;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+  .amount strong { font-size: 12px; font-weight: 700; color: var(--text); }
+  .amount.trace-amount { color: var(--muted); opacity: 0.72; }
+  .amount.trace-amount strong { font-weight: 500; color: var(--muted); }
   .cost { color: var(--muted); font-size: 10px; margin-left: 6px; }
-  .unsolved { color: var(--faint); font-size: 10px; }
+  .unsolved { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 10px; }
   .config-preview, .settings-button {
     display: flex;
     align-items: center;
     min-width: 0;
     max-width: 100%;
     gap: 4px;
-    padding: 1px 4px;
+    padding: 1px 5px;
     height: 26px;
     border: 1px solid var(--line);
     border-radius: var(--radius-sm);
@@ -457,10 +516,11 @@
     color: var(--text);
     background: var(--card-hover);
   }
-  .config-preview { overflow: hidden; }
+  .config-preview { flex: 0 1 auto; overflow: hidden; }
+  .preview-empty { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .preview-item { display: inline-flex; align-items: center; gap: 1px; flex: 0 0 auto; }
   .preview-item small { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 10px; }
-  .settings-button { flex: 0 0 auto; white-space: nowrap; }
+  .settings-button { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .disclosure { margin-left: auto; }
   .row2, .row2b, .setting-line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
   .sub { color: var(--muted); font-size: 11px; }

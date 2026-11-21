@@ -1,11 +1,168 @@
+<script module lang="ts">
+  type Token =
+    | { type: "num"; value: number }
+    | { type: "op"; op: "+" | "-" | "*" | "/" | "(" | ")" };
+
+  const SUFFIX_MULTIPLIERS: Record<string, number> = {
+    p: 1e-12,
+    P: 1e15,
+    "μ": 1e-6,
+    u: 1e-6,
+    k: 1e3,
+    K: 1e3,
+    m: 1e6,
+    M: 1e6,
+    g: 1e9,
+    G: 1e9,
+    t: 1e12,
+    T: 1e12,
+    E: 1e18,
+    z: 1e21,
+    Z: 1e21,
+    y: 1e24,
+    Y: 1e24,
+    r: 1e27,
+    R: 1e27,
+    q: 1e30,
+    Q: 1e30,
+  };
+
+  /** 安全四则算式解析器（禁止 eval / new Function），支持 + - * /、括号与 k/M 等单位后缀。 */
+  export function parseTargetExpression(raw: string, allowWatt = false): number | null {
+    const text = raw.trim();
+    if (!text) return null;
+
+    const tokens: Token[] = [];
+    let pos = 0;
+
+    while (pos < text.length) {
+      const ch = text[pos];
+      if (/\s/.test(ch)) {
+        pos += 1;
+        continue;
+      }
+      if (ch === "+" || ch === "-" || ch === "*" || ch === "/" || ch === "(" || ch === ")") {
+        tokens.push({ type: "op", op: ch });
+        pos += 1;
+        continue;
+      }
+
+      const slice = text.slice(pos);
+      const numMatch = /^(\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?/.exec(slice);
+      if (!numMatch) return null;
+
+      const baseValue = Number(numMatch[0]);
+      if (!Number.isFinite(baseValue)) return null;
+      pos += numMatch[0].length;
+
+      while (pos < text.length && /\s/.test(text[pos])) pos += 1;
+
+      let multiplier = 1;
+      if (pos < text.length && text[pos] in SUFFIX_MULTIPLIERS) {
+        multiplier = SUFFIX_MULTIPLIERS[text[pos]];
+        pos += 1;
+        while (pos < text.length && /\s/.test(text[pos])) pos += 1;
+      }
+
+      if (allowWatt && pos < text.length && (text[pos] === "W" || text[pos] === "w")) {
+        pos += 1;
+      }
+
+      if (pos < text.length && /[a-zA-Z_]/.test(text[pos])) return null;
+
+      const scaled = baseValue * multiplier;
+      if (!Number.isFinite(scaled)) return null;
+      tokens.push({ type: "num", value: scaled });
+    }
+
+    if (tokens.length === 0) return null;
+    let cursor = 0;
+
+    function parseExpr(): number | null {
+      let left = parseTerm();
+      if (left === null) return null;
+      while (cursor < tokens.length) {
+        const tok = tokens[cursor];
+        if (tok.type === "op" && (tok.op === "+" || tok.op === "-")) {
+          cursor += 1;
+          const right = parseTerm();
+          if (right === null) return null;
+          left = tok.op === "+" ? left + right : left - right;
+          if (!Number.isFinite(left)) return null;
+        } else {
+          break;
+        }
+      }
+      return left;
+    }
+
+    function parseTerm(): number | null {
+      let left = parseUnary();
+      if (left === null) return null;
+      while (cursor < tokens.length) {
+        const tok = tokens[cursor];
+        if (tok.type === "op" && (tok.op === "*" || tok.op === "/")) {
+          cursor += 1;
+          const right = parseUnary();
+          if (right === null) return null;
+          if (tok.op === "/") {
+            if (right === 0) return null;
+            left = left / right;
+          } else {
+            left = left * right;
+          }
+          if (!Number.isFinite(left)) return null;
+        } else {
+          break;
+        }
+      }
+      return left;
+    }
+
+    function parseUnary(): number | null {
+      const tok = tokens[cursor];
+      if (tok?.type === "op" && (tok.op === "+" || tok.op === "-")) {
+        cursor += 1;
+        const inner = parseUnary();
+        if (inner === null) return null;
+        return tok.op === "-" ? -inner : inner;
+      }
+      return parsePrimary();
+    }
+
+    function parsePrimary(): number | null {
+      const tok = tokens[cursor];
+      if (!tok) return null;
+      if (tok.type === "num") {
+        cursor += 1;
+        return tok.value;
+      }
+      if (tok.type === "op" && tok.op === "(") {
+        cursor += 1;
+        const inner = parseExpr();
+        if (inner === null) return null;
+        const close = tokens[cursor];
+        if (!close || close.type !== "op" || close.op !== ")") return null;
+        cursor += 1;
+        return inner;
+      }
+      return null;
+    }
+
+    const result = parseExpr();
+    if (result === null || cursor !== tokens.length || !Number.isFinite(result)) return null;
+    return result;
+  }
+</script>
+
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { reorderIds } from '$lib/reorder';
   import { dndzone } from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
   import type { FactoryAction, UniverseAction, FlowTarget, TargetExpression, DualVar, Location } from '$lib/runtime/types';
   import type { MechanicScope } from '$lib/runtime/mechanic-commands';
   import type { MechanicFlowSelection } from '$lib/mechanics/actions';
-  import { parseCompactNumber } from "$lib/format";
   import { networkRate } from "$lib/mechanics/network";
   import { isEnergyFlow } from '$lib/dual-var';
   import FlowRef from './FlowRef.svelte';
@@ -19,7 +176,66 @@
   $effect(() => { rows=targets; });
   let exprRows=$state<TargetExpression[]>([]);
   $effect(()=>{exprRows=expressions.map(e=>({...e,terms:[...e.terms]}));});
-  const factor=$derived(runtime.selectedProject?.settings.time_scale === 'minutes' ? 60 : runtime.selectedProject?.settings.time_scale === 'hours' ? 3600 : 1);
+  const timeScale=$derived(runtime.selectedProject?.settings.time_scale ?? 'seconds');
+  const timeUnit=$derived(timeScale === 'minutes' ? '/min' : timeScale === 'hours' ? '/h' : '/s');
+  const factor=$derived(timeScale === 'minutes' ? 60 : timeScale === 'hours' ? 3600 : 1);
+
+  let invalidErrors = $state<Record<number, string>>({});
+  const errorTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  onDestroy(() => {
+    for (const timer of errorTimers.values()) clearTimeout(timer);
+    errorTimers.clear();
+  });
+  const activeInvalidMessage = $derived(Object.values(invalidErrors)[0] ?? null);
+
+  function formatTargetValue(target: FlowTarget): string {
+    if (isEnergyFlow(target.flow)) {
+      const amount = target.amount ?? NaN;
+      const prefix = Number.isFinite(amount) && amount < 0 ? "-" : "";
+      return `${prefix}${networkRate(target.flow, amount, "seconds")}`;
+    }
+    const value = (target.amount ?? NaN) * factor;
+    return Number.isFinite(value) ? String(Number(value.toPrecision(12))) : "";
+  }
+
+  function clearTargetError(id: number) {
+    const timer = errorTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      errorTimers.delete(id);
+    }
+    if (id in invalidErrors) {
+      const next = { ...invalidErrors };
+      delete next[id];
+      invalidErrors = next;
+    }
+  }
+
+  function commitTargetAmount(target: FlowTarget, input: HTMLInputElement) {
+    const energy = isEnergyFlow(target.flow);
+    const parsed = parseTargetExpression(input.value, energy);
+    const amount = parsed === null ? NaN : parsed / (energy ? 1 : factor);
+    if (!Number.isFinite(amount)) {
+      input.value = formatTargetValue(target);
+      invalidErrors = { ...invalidErrors, [target.id]: "算式或数值无效，已恢复原值" };
+      const prevTimer = errorTimers.get(target.id);
+      if (prevTimer) clearTimeout(prevTimer);
+      errorTimers.set(
+        target.id,
+        setTimeout(() => clearTargetError(target.id), 2600),
+      );
+      return;
+    }
+    clearTargetError(target.id);
+    input.value = energy
+      ? networkRate(target.flow, amount, "seconds")
+      : String(Number((amount * factor).toPrecision(12)));
+    if (amount === target.amount) return;
+    writer()(
+      { target: { 'set-amount': { target: target.id, amount } } },
+      { 'set-target-amount': { target: target.id, amount } },
+    );
+  }
   function reader() {
     const destination = {...scope};
     return () => runtime.mechanicFactory(destination);
@@ -64,7 +280,9 @@
   <button class="title panel-toggle" aria-expanded={targetsOpen} onclick={() => targetsOpen=!targetsOpen}>
     <span class="toggle-label">
       <span class="chev">{targetsOpen?'▾':'▸'}</span>
-      目标 <span class="count">{targets.length}</span>
+      目标
+      <span class="unit-badge" title={`目标数量按当前项目时间刻度计算（${timeUnit}）`}>{timeUnit}</span>
+      <span class="count">{targets.length}</span>
     </span>
   </button>
   {#if targetsOpen}
@@ -75,14 +293,33 @@
           <FlowRef flow={target.flow} title="左键更改流 · 右键查看建议" grow showQualifiers={false} showBadge={!(typeof target.flow==='object' && 'Fluid' in target.flow)} size={26} onClick={()=>editTarget(target)} onContextMenu={()=>onSuggest?.(target.flow,target.location)} />
           <FlowRangeEditor flow={target.flow} onChange={flow=>setTarget(target,flow)} />
           <span class="target-value">
-          <input class="num" type="text" inputmode="decimal" aria-label="目标数量" value={isEnergyFlow(target.flow)?networkRate(target.flow,target.amount ?? NaN,"seconds"):(target.amount ?? NaN)*factor} onchange={e=>{
-            const raw=e.currentTarget.value.replace(/\s|W$/g,""); const parsed=Number.isFinite(Number(raw))?Number(raw):parseCompactNumber(raw); const amount=parsed == null ? NaN : parsed/(isEnergyFlow(target.flow)?1:factor); if(Number.isFinite(amount)) writer()({target:{'set-amount':{target:target.id,amount}}},{'set-target-amount':{target:target.id,amount}});
-          }} />
+          <input
+            class="num"
+            class:invalid={!!invalidErrors[target.id]}
+            type="text"
+            inputmode="decimal"
+            aria-label="目标数量"
+            aria-invalid={!!invalidErrors[target.id] || undefined}
+            title={`支持四则算式与 k/M 后缀，如 45*4、(120+60)/2、1.5k（单位：${isEnergyFlow(target.flow) ? 'W' : timeUnit}）`}
+            value={formatTargetValue(target)}
+            oninput={() => clearTargetError(target.id)}
+            onkeydown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+            }}
+            onchange={(e) => commitTargetAmount(target, e.currentTarget)}
+          />
+          {#if !isEnergyFlow(target.flow)}<span class="rate-unit" aria-hidden="true">{timeUnit}</span>{/if}
           <button class="icon-btn danger" title="移除目标" onclick={()=>writer()({target:{remove:{target:target.id}}},{'remove-target':{target:target.id}})}>×</button>
           </span>
         </div>
       {/each}
     </div>
+    {#if activeInvalidMessage}
+      <div class="target-error-banner" role="status">{activeInvalidMessage}</div>
+    {/if}
     <button class="btn block" onclick={addTarget}>+ 添加目标</button>
   {/if}
 </section>
@@ -174,6 +411,46 @@
     font-size: 9px;
     font-weight: 500;
     letter-spacing: 0;
+  }
+  .unit-badge {
+    padding: 1px 6px;
+    color: var(--muted);
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0;
+  }
+  .rate-unit {
+    flex: 0 0 auto;
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    user-select: none;
+  }
+  .target-value .icon-btn {
+    opacity: 0.65;
+  }
+  .row-item:hover .target-value .icon-btn,
+  .row-item:focus-within .target-value .icon-btn {
+    opacity: 1;
+  }
+  .num.invalid,
+  .num.invalid:focus {
+    border-color: var(--danger);
+    background: var(--danger-dim);
+    box-shadow: 0 0 0 1px var(--danger);
+  }
+  .target-error-banner {
+    margin: -4px 0 8px;
+    padding: 4px 8px;
+    color: var(--danger);
+    background: var(--danger-dim);
+    border: 1px solid var(--danger-line);
+    border-radius: var(--radius-sm);
+    font-size: 10.5px;
   }
   .rows {
     display: grid;

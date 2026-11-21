@@ -2,33 +2,62 @@
   import {layoutLocations} from "$lib/mechanics/location-layout";
   import {networkPngTiles} from "$lib/mechanics/network-export";
   import {createNetworkPngSnapshot} from "$lib/mechanics/network-render";
-  import {locationLabel} from "$lib/mechanics/located";
+  import {locationKey, locationLabel, transportLabel} from "$lib/mechanics/located";
   import { onMount, untrack, tick } from 'svelte';
   import type { Core, ElementDefinition, StylesheetJson } from 'cytoscape';
   import type { ElkNode } from 'elkjs/lib/elk-api';
   import { runtime } from '$lib/runtime/store.svelte';
   import {beginNetworkPng,writeNetworkPngTile,finishNetworkPng,abortNetworkPng} from '$lib/runtime/client';
-  import { buildNetwork, networkRate, networkIconQualities, type NetworkNode, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
+  import { buildNetwork, networkFlowKey, networkRate, networkIconQualities, type NetworkContribution, type NetworkEdge, type NetworkViewState } from '$lib/mechanics/network';
   import type { MechanicViewProps } from '$lib/mechanics/workspace';
+  import type { DualVar, Location, MechanicEntry } from '$lib/runtime/types';
   import { mechanicPrototype } from '$lib/display-labels';
-  import { presentFlow } from '$lib/dual-var';
+  import { mechanicKindLabels, mechanicPrimary } from '$lib/mechanics/presentation';
+  import { presentFlow, isEnergyFlow } from '$lib/dual-var';
+  import { compactNumber } from '$lib/format';
   import { normalizeSearch } from '$lib/rich-text';
   import { iconTypeForKind, syntheticIconUrls } from './icon-types';
   import FlowRef from './FlowRef.svelte';
+  import Icon from './Icon.svelte';
   import LocationIcon from './LocationIcon.svelte';
   import MechanicEditor from './MechanicEditor.svelte';
   import MechanicFilter from './MechanicFilter.svelte';
   import SecondaryMenu from './SecondaryMenu.svelte';
   import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, visibleIds, solutions, solved, actions, workspace, mergeRecipes, groupLocations = false, viewState, scrollState, filterOpen, onFilterClose}: MechanicViewProps & {
-    mergeRecipes: boolean; groupLocations?: boolean; viewState: NetworkViewState; filterOpen: boolean; onFilterClose: () => void;
+  let {
+    project,
+    factory,
+    entries,
+    visibleIds,
+    solutions,
+    solved,
+    actions,
+    workspace,
+    mergeRecipes,
+    groupLocations = false,
+    viewState,
+    scrollState,
+    filterOpen,
+    onFilterClose,
+    locationFilter = null,
+    focusRequest = null,
+    onRevealInList,
+    searchFocusSeq = 0,
+  }: MechanicViewProps & {
+    mergeRecipes: boolean;
+    groupLocations?: boolean;
+    viewState: NetworkViewState;
+    filterOpen: boolean;
+    onFilterClose: () => void;
+    locationFilter?: Location | null;
+    focusRequest?: { mechanicId?: number; flow?: DualVar; location?: Location; seq: number } | null;
+    onRevealInList?: (mechanicId: number) => void;
+    searchFocusSeq?: number;
   } = $props();
   let container = $state<HTMLDivElement>();
-  let detailsPanel = $state<HTMLElement>(), searchBox = $state<HTMLDivElement>();
+  let detailsPanel = $state<HTMLElement>(), searchBox = $state<HTMLDivElement>(), searchInput = $state<HTMLInputElement>();
   let searchOpen = $state(false), searchIndex = $state(0);
-  let popupLeft = $state(8), popupTop = $state(8);
-  let positionFrame = 0;
   const searchResultsId = $derived(`network-search-${project}-${factory}`);
   let ready = $state(false), busy = $state(false), error = $state('');
   let exporting = $state(false), exportCancelled = $state(false), exportStatus = $state(''), exportError = $state('');
@@ -39,13 +68,18 @@
   let onlyEnabled = $state(untrack(() => ownerState.onlyEnabled));
   let query = $state(untrack(() => ownerState.query));
   let iconScale = $state(untrack(() => ownerState.iconScale ?? 1));
+  let chainScope = $state<'direct' | 'chain'>(untrack(() => ownerState.chainScope ?? 'chain'));
+  let currentZoom = $state(untrack(() => ownerState.zoom ?? 1));
   let selected = $state<string | undefined>(untrack(() => ownerState.selected));
   let selectedMechanic = $state<number | null>(untrack(() => ownerState.selectedMechanic ?? null));
   let renderRevision = $state(0);
   let cy: Core | undefined;
   let elk: {layout: (graph: ElkNode) => Promise<ElkNode>; terminateWorker: () => void} | undefined;
-  let generation = 0, mounted = true, renderedGrouping = untrack(()=>groupLocations);
+  let generation = 0, mounted = true, renderedGrouping = untrack(() => groupLocations);
+  let renderedLocationKey = untrack(() => locationFilter ? locationKey(locationFilter) : '');
   let renderedOwners = new Map<string,string>();
+  let handledFocusSeq = 0;
+  let unfilterAttemptSeq = 0;
   const document = $derived(runtime.document?.projects.find(p => p.id === project));
   const factoryDocument = $derived(actions.commands.scope.kind === "universe" ? null : document?.factories.find(f => f.id === factory));
   const universeDocument = $derived(actions.commands.scope.kind === 'universe' ? document?.universes?.find(u => u.id === factory) : null);
@@ -66,7 +100,9 @@
       ...(factoryDocument?.target_expressions.flatMap(expression => expression.terms.map(term => term.flow)) ?? [])],
     externalInputs: factoryDocument?.external_inputs ?? [], implicitInputs: universeDocument ? [] : runtime.implicitSourcesCache,
     localize: (kind, name) => runtime.localizedName(kind, name), timeScale,
-    mergeRecipes, collapse, showUtilities, onlyEnabled, isolateLocations:groupLocations}));
+    mergeRecipes, collapse, showUtilities, onlyEnabled, isolateLocations: groupLocations, locationFilter}));
+  const entryById = $derived(new Map(entries.map(entry => [entry.id, entry])));
+  const nodeById = $derived(new Map(model.nodes.map(node => [node.id, node])));
   const searchableNodes = $derived(model.nodes.map(node => ({ node, searchKey: normalizeSearch(node.search) })));
   const needle = $derived(normalizeSearch(query));
   const matches = $derived(
@@ -83,7 +119,7 @@
   const editing = $derived(selectedNode?.entries.find(entry => entry.id === selectedMechanic) ?? selectedNode?.entries[0]);
   // 仅在组件存活期间持久保存视图状态；销毁钩子不得在作用域已切换后读取父级派生属性或模型。
   $effect(() => {
-    Object.assign(ownerState, {collapse, showUtilities, onlyEnabled, query, iconScale, selected: selectedId, selectedMechanic});
+    Object.assign(ownerState, {collapse, showUtilities, onlyEnabled, query, iconScale, chainScope, selected: selectedId, selectedMechanic});
   });
   const neighbours = $derived.by(() => {
     const ids = new Set<string>();
@@ -93,12 +129,23 @@
     }
     return model.nodes.filter(node => ids.has(node.id));
   });
+  const selectedEdgeEndpoints = $derived.by(() => {
+    if (!selectedEdge) return [];
+    const list: { role: string; node: (typeof model.nodes)[number] }[] = [];
+    const sourceNode = nodeById.get(selectedEdge.source);
+    const targetNode = nodeById.get(selectedEdge.target);
+    if (sourceNode) list.push({ role: '来源', node: sourceNode });
+    if (targetNode && targetNode.id !== sourceNode?.id) list.push({ role: '去向', node: targetNode });
+    return list;
+  });
 
   function palette(): Record<string, string> {
     const style = getComputedStyle(container!);
     const color = (key: string, fallback: string) => style.getPropertyValue(key).trim() || fallback;
+    const isLight = globalThis.document.documentElement.getAttribute('data-theme') === 'light';
     return {text: color('--text', '#ccd3df'), muted: color('--muted', '#7e8b9d'),
-      panel: color('--panel', '#202632'), line: color('--line-strong', '#627084')};
+      panel: color('--panel', '#202632'), line: color('--line-strong', '#627084'),
+      highlight: isLight ? '#0969da' : '#4ab8ff'};
   }
   function styles(): StylesheetJson {
     const p = palette();
@@ -125,51 +172,194 @@
       {selector: 'edge[utility]', style: {opacity: 0.3, label: '', 'curve-style': 'straight'}},
       {selector: 'edge[kind="collapsed"]', style: {'font-family': uiFont}},
       {selector: 'edge[kind="compatibility"]', style: {'line-style': 'dashed', 'line-color': '#9673af', 'target-arrow-color': '#9673af', 'font-size': 9 * iconScale, 'font-family': uiFont}},
+      {selector: '.dimmed', style: {opacity: 0.16}},
+      {selector: 'node.chain-highlight', style: {'border-color': p.highlight, 'border-width': 3}},
+      {selector: 'edge.chain-highlight', style: {width: 2.5, 'line-color': p.highlight, 'target-arrow-color': p.highlight, opacity: 1}},
       {selector: ':selected, .search-match', style: {'border-color': '#d49b14', 'border-width': 4, 'line-color': '#d49b14', 'target-arrow-color': '#d49b14'}},
     ];
   }
   function saveViewport(savePositions = false) {
     if (!cy || cy.destroyed() || renderRevision === 0) return;
-    ownerState.zoom = cy.zoom(); ownerState.pan = {...cy.pan()};
+    const z = cy.zoom();
+    if (Number.isFinite(z)) currentZoom = z;
+    ownerState.zoom = z; ownerState.pan = {...cy.pan()};
     if (savePositions) {
       for (const node of cy.nodes().filter(n=>!n.isParent())) {
         ownerState.positions.set(node.id(), {...node.position()});
       }
     }
   }
-  function choose(id: string) {
+  function choose(id: string, preferredMechanicId?: number | null) {
     searchOpen = false;
-    selectObject(id);
+    selectObject(id, preferredMechanicId);
     const element = cy?.getElementById(id);
     cy?.elements().unselect(); element?.select();
-    if (element?.isNode() && cy) {
+    if (element && !element.empty() && cy) {
       if (cy.zoom() < 0.65) cy.zoom(0.85);
-      cy.animate({center: {eles: element}, duration: 150});
+      const target = element.isNode() ? element : cy.getElementById(id).connectedNodes();
+      cy.animate({center: {eles: target}, duration: 150});
     }
   }
-  function selectObject(id?: string) {
+  function selectObject(id?: string, preferredMechanicId?: number | null) {
     const changed = selectedId !== id;
     selected = id;
-    if (!id || changed || selectedMechanic === null) selectedMechanic = model.nodes.find(node => node.id === id)?.entries[0]?.id ?? null;
-    if (!id) cy?.elements().unselect();
-    schedulePosition();
+    if (!id) {
+      selectedMechanic = null;
+      if (cy && !cy.destroyed()) {
+        cy.batch(() => {
+          cy!.elements().unselect().removeClass('dimmed chain-highlight');
+        });
+      }
+    } else if (preferredMechanicId !== undefined) {
+      selectedMechanic = preferredMechanicId;
+    } else if (changed || selectedMechanic === null) {
+      selectedMechanic = model.nodes.find(node => node.id === id)?.entries[0]?.id ?? null;
+    }
     if (id && changed) void tick().then(() => detailsPanel?.focus({preventScroll: true}));
   }
-  function positionPopup() {
-    if (!cy || !container || !detailsPanel || !selectedId) return;
-    const element = cy.getElementById(selectedId);
-    if (element.empty()) return;
-    const bounds = element.isNode() ? element.renderedBoundingBox({includeLabels: false}) : undefined;
-    const point = bounds ? {x: bounds.x2, y: bounds.y1} : element.renderedMidpoint();
-    const width = detailsPanel.offsetWidth, height = detailsPanel.offsetHeight;
-    const x = point.x + 12 + width <= container.clientWidth ? point.x + 12 : (bounds?.x1 ?? point.x) - width - 12;
-    popupLeft = Math.max(8, Math.min(x, container.clientWidth - width - 8));
-    popupTop = Math.max(8, Math.min(point.y, container.clientHeight - height - 8));
+  function computeChainIds(): { nodes: Set<string>; edges: Set<string> } | null {
+    if (!selectedNode && !selectedEdge) return null;
+    const highlightNodes = new Set<string>();
+    const highlightEdges = new Set<string>();
+    if (chainScope === 'direct') {
+      if (selectedNode) {
+        highlightNodes.add(selectedNode.id);
+        for (const edge of model.edges) {
+          if (edge.source === selectedNode.id) {
+            highlightNodes.add(edge.target);
+            highlightEdges.add(edge.id);
+          } else if (edge.target === selectedNode.id) {
+            highlightNodes.add(edge.source);
+            highlightEdges.add(edge.id);
+          }
+        }
+      } else if (selectedEdge) {
+        highlightNodes.add(selectedEdge.source);
+        highlightNodes.add(selectedEdge.target);
+        highlightEdges.add(selectedEdge.id);
+      }
+      return { nodes: highlightNodes, edges: highlightEdges };
+    }
+    const incoming = new Map<string, NetworkEdge[]>();
+    const outgoing = new Map<string, NetworkEdge[]>();
+    for (const edge of model.edges) {
+      let list = incoming.get(edge.target);
+      if (!list) { list = []; incoming.set(edge.target, list); }
+      list.push(edge);
+      list = outgoing.get(edge.source);
+      if (!list) { list = []; outgoing.set(edge.source, list); }
+      list.push(edge);
+    }
+    const upstream = new Set<string>();
+    const downstream = new Set<string>();
+    const upQueue: string[] = [];
+    const downQueue: string[] = [];
+    if (selectedNode) {
+      upstream.add(selectedNode.id);
+      downstream.add(selectedNode.id);
+      upQueue.push(selectedNode.id);
+      downQueue.push(selectedNode.id);
+    } else if (selectedEdge) {
+      upstream.add(selectedEdge.source);
+      downstream.add(selectedEdge.target);
+      upQueue.push(selectedEdge.source);
+      downQueue.push(selectedEdge.target);
+      highlightEdges.add(selectedEdge.id);
+    }
+    while (upQueue.length > 0) {
+      const current = upQueue.shift()!;
+      for (const edge of incoming.get(current) ?? []) {
+        highlightEdges.add(edge.id);
+        if (!upstream.has(edge.source)) {
+          upstream.add(edge.source);
+          upQueue.push(edge.source);
+        }
+      }
+    }
+    while (downQueue.length > 0) {
+      const current = downQueue.shift()!;
+      for (const edge of outgoing.get(current) ?? []) {
+        highlightEdges.add(edge.id);
+        if (!downstream.has(edge.target)) {
+          downstream.add(edge.target);
+          downQueue.push(edge.target);
+        }
+      }
+    }
+    for (const id of upstream) highlightNodes.add(id);
+    for (const id of downstream) highlightNodes.add(id);
+    return { nodes: highlightNodes, edges: highlightEdges };
   }
-  function schedulePosition() {
-    if (!mounted) return;
-    cancelAnimationFrame(positionFrame);
-    positionFrame = requestAnimationFrame(positionPopup);
+  function applyChainHighlight() {
+    if (!cy || cy.destroyed()) return;
+    const chain = computeChainIds();
+    cy.batch(() => {
+      const targets = cy!.elements().not('[kind="location"]');
+      targets.removeClass('dimmed chain-highlight');
+      if (!chain) return;
+      for (const ele of targets) {
+        const id = ele.id();
+        const hit = ele.isNode() ? chain.nodes.has(id) : chain.edges.has(id);
+        ele.addClass(hit ? 'chain-highlight' : 'dimmed');
+      }
+    });
+  }
+  function focusMechanicInGraph(mechanicId: number) {
+    const node = model.nodes.find(n => n.entries.some(e => e.id === mechanicId));
+    if (!node) return false;
+    choose(node.id, mechanicId);
+    return true;
+  }
+  function resolveFocusTarget(req: NonNullable<typeof focusRequest>): { elementId: string; mechanicId?: number | null } | null {
+    if (req.mechanicId !== undefined) {
+      const node = model.nodes.find(n => n.entries.some(e => e.id === req.mechanicId));
+      if (node) return { elementId: node.id, mechanicId: req.mechanicId };
+      return null;
+    }
+    if (req.flow !== undefined) {
+      const flowKey = networkFlowKey(req.flow);
+      const locKey = req.location ? locationKey(req.location) : null;
+      const flowNode = model.nodes.find(n =>
+        n.kind === 'flow' &&
+        n.flow &&
+        networkFlowKey(n.flow) === flowKey &&
+        (locKey === null || locationKey(n.location) === locKey)
+      );
+      if (flowNode) return { elementId: flowNode.id, mechanicId: null };
+      const matchingEdge = model.edges.find(e => {
+        if (!e.flow || networkFlowKey(e.flow) !== flowKey) return false;
+        if (locKey === null) return true;
+        return locationKey(nodeById.get(e.source)?.location) === locKey || locationKey(nodeById.get(e.target)?.location) === locKey;
+      });
+      if (matchingEdge) return { elementId: matchingEdge.id, mechanicId: null };
+      return null;
+    }
+    if (req.location) {
+      const locKey = locationKey(req.location);
+      if (groupLocations) {
+        const groupId = `location:${locKey}`;
+        if (cy && !cy.getElementById(groupId).empty()) return { elementId: groupId, mechanicId: null };
+      }
+      const node = model.nodes.find(n => locationKey(n.location) === locKey);
+      if (node) return { elementId: node.id, mechanicId: null };
+    }
+    return null;
+  }
+  function zoomStep(factor: number) {
+    if (!cy || cy.destroyed()) return;
+    const next = Math.max(0.08, Math.min(3, cy.zoom() * factor));
+    cy.zoom({ level: next, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    saveViewport();
+  }
+  function resetZoom() {
+    if (!cy || cy.destroyed()) return;
+    cy.zoom({ level: 1, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+    saveViewport();
+  }
+  function fitGraph() {
+    if (!cy || cy.destroyed() || cy.elements().length === 0) return;
+    cy.fit(undefined, 35);
+    saveViewport();
   }
   function searchKey(event: KeyboardEvent) {
     if (event.key === 'Escape') {
@@ -200,8 +390,7 @@
       elk = new layout.default({workerFactory: () => new worker.default()});
       cy.on('tap', 'node, edge', event => {if(event.target.isNode() && event.target.data('kind')==='location') return; selectObject(event.target.id());});
       cy.on('tap', event => { if (event.target === cy) selectObject(); });
-      cy.on('pan zoom', () => { saveViewport(); schedulePosition(); });
-      cy.on('position', 'node', schedulePosition);
+      cy.on('pan zoom', () => { saveViewport(); });
       cy.on('dragfree', 'node', event => {
         const node = event.target;
         if(node.isParent()) for(const child of node.descendants()) ownerState.positions.set(child.id(), {...child.position()});
@@ -209,9 +398,9 @@
       });
       ready = true;
     }).catch(reason => { if (mounted) error = `无法加载网络绘图库：${String(reason)}`; });
-    const observer = new ResizeObserver(() => { cy?.resize(); schedulePosition(); });
+    const observer = new ResizeObserver(() => { cy?.resize(); });
     observer.observe(container!);
-    const themeObserver = new MutationObserver(() => { if (cy && !cy.destroyed()) { cy.style(styles()); schedulePosition(); } });
+    const themeObserver = new MutationObserver(() => { if (cy && !cy.destroyed()) { cy.style(styles()); } });
     themeObserver.observe(globalThis.document.documentElement, {attributes: true, attributeFilter: ['data-theme', 'class', 'style']});
     const outsideSearch = (event: PointerEvent) => {
       if (!searchBox?.contains(event.target as Node)) searchOpen = false;
@@ -219,13 +408,12 @@
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || (event.target as Element)?.closest('[aria-modal="true"], .secondary-menu')) return;
       if (filterOpen) { onFilterClose(); return; }
-      if (selectedId) { selectObject(); container?.focus({preventScroll: true}); }
+      if (selectedNode || selectedEdge || selectedId) { selectObject(); container?.focus({preventScroll: true}); }
     };
     globalThis.document.addEventListener('pointerdown', outsideSearch);
     window.addEventListener('keydown', escape);
     return () => {
       mounted = false; generation++; saveViewport(true);
-      cancelAnimationFrame(positionFrame);
       globalThis.document.removeEventListener('pointerdown', outsideSearch);
       window.removeEventListener('keydown', escape);
       observer.disconnect(); themeObserver.disconnect(); cy?.destroy(); elk?.terminateWorker(); cy = undefined;
@@ -236,34 +424,78 @@
     if (!ready) return;
     const snapshot = model;
     const grouping = groupLocations;
+    const locKey = locationFilter ? locationKey(locationFilter) : '';
     runtime.iconRevision;
     const revision = ++generation;
     const timer = setTimeout(() => {
-      void draw(snapshot, revision, false, grouping).catch(reason => {
+      void draw(snapshot, revision, false, grouping, locKey).catch(reason => {
         if (revision === generation && mounted) { error = `网络布局失败：${String(reason)}`; busy = false; }
       });
     }, 100);
     return () => { clearTimeout(timer); if (generation === revision) generation++; };
   });
   $effect(() => { needle; matches; renderRevision; highlight(); });
+  $effect(() => { selectedNode; selectedEdge; chainScope; renderRevision; model; applyChainHighlight(); });
   $effect(() => { if (searchIndex >= Math.min(100, matches.length)) searchIndex = 0; });
-  $effect(() => {
-    selectedId; renderRevision;
-    schedulePosition();
-  });
-  $effect(() => {
-    if (!detailsPanel) return;
-    const observer = new ResizeObserver(schedulePosition);
-    observer.observe(detailsPanel);
-    return () => observer.disconnect();
-  });
   // 图标大小调整只更新画布样式，不重新布局，也不重置平移或缩放。
-  $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); schedulePosition(); } });
+  $effect(() => { if (ready && cy) { iconScale; cy.style(styles()); } });
 
-  async function draw(snapshot: typeof model, revision: number, reset = false, grouping = groupLocations) {
+  let prevSearchFocusSeq = untrack(() => searchFocusSeq ?? 0);
+  $effect(() => {
+    const seq = searchFocusSeq ?? 0;
+    if (seq > prevSearchFocusSeq) {
+      prevSearchFocusSeq = seq;
+      void tick().then(() => {
+        searchInput?.focus();
+        searchInput?.select();
+      });
+    } else {
+      prevSearchFocusSeq = seq;
+    }
+  });
+
+  $effect(() => {
+    const req = focusRequest;
+    if (!req || req.seq === handledFocusSeq) return;
+    if (!ready || busy || renderRevision === 0 || !cy || cy.destroyed()) return;
+    const target = resolveFocusTarget(req);
+    if (target) {
+      const ele = cy.getElementById(target.elementId);
+      if (!ele.empty()) {
+        handledFocusSeq = req.seq;
+        if (ele.isNode() && ele.data('kind') === 'location') {
+          cy.animate({ center: { eles: ele }, duration: 150 });
+        } else {
+          choose(target.elementId, target.mechanicId);
+        }
+        return;
+      }
+    }
+    if (req.flow && !showUtilities && unfilterAttemptSeq !== req.seq &&
+        (isEnergyFlow(req.flow) || (typeof req.flow !== 'string' && 'Pollution' in req.flow))) {
+      unfilterAttemptSeq = req.seq;
+      showUtilities = true;
+      return;
+    }
+    if (req.mechanicId !== undefined && onlyEnabled && unfilterAttemptSeq !== req.seq &&
+        entries.some(e => e.id === req.mechanicId && !e.enabled)) {
+      unfilterAttemptSeq = req.seq;
+      onlyEnabled = false;
+      return;
+    }
+    if (!workspace.pending) {
+      handledFocusSeq = req.seq;
+    }
+  });
+
+  async function draw(snapshot: typeof model, revision: number, reset = false, grouping = groupLocations, locKey = renderedLocationKey) {
     if (!cy || !elk || !mounted || revision !== generation) return;
     busy = true; error = '';
-    if(renderedGrouping !== grouping){reset=true;ownerState.positions.clear();ownerState.zoom=undefined;}
+    if (renderedGrouping !== grouping || renderedLocationKey !== locKey) {
+      reset = true;
+      ownerState.positions.clear();
+      ownerState.zoom = undefined;
+    }
     if (!reset) {
       saveViewport(true);
       // 被重命名的分组尽量停留在用户当前编辑位置；若目标分组已存在则保留其原有位置。
@@ -294,6 +526,7 @@
       renderedOwners = clustered.owner;
     } else renderedOwners.clear();
     renderedGrouping = grouping;
+    renderedLocationKey = locKey;
     const hadViewport = ownerState.zoom !== undefined;
     const elements: ElementDefinition[] = snapshot.nodes.map(node => ({data: {id: node.id, label: node.label, kind: node.kind,
       ...(clustered?.owner.has(node.id)?{parent:clustered.owner.get(node.id)}:{}),
@@ -307,7 +540,7 @@
     cy.batch(() => { cy!.elements().remove(); cy!.add(elements); });
     if (hadViewport) { cy.zoom(ownerState.zoom!); cy.pan(ownerState.pan ?? {x: 0, y: 0}); }
     else {
-      cy.fit(undefined, 35);
+      if (elements.length > 0) cy.fit(undefined, 35);
       if (cy.zoom() < 0.4) {
         const focus = snapshot.nodes.find(node => node.target) ?? snapshot.nodes.find(node => node.kind === 'mechanic');
         cy.zoom(0.65);
@@ -315,8 +548,9 @@
       }
     }
     if (selectedId) cy.getElementById(selectedId).select();
-    schedulePosition();
     renderRevision++;
+    const z = cy.zoom();
+    if (Number.isFinite(z)) currentZoom = z;
     // 图标请求由 runtime 缓存统一去重；文档、上下文、工厂或视图切换后，旧代数请求不得再写入画布。
     for (let offset = 0; offset < snapshot.nodes.length && revision === generation && mounted; offset += 8) {
       const updates = await Promise.all(snapshot.nodes.slice(offset, offset + 8).map(async node => {
@@ -395,6 +629,55 @@
     }
   }
 
+  function mechanicUnit(entry: MechanicEntry): string {
+    if (entry.transport) return '件/s';
+    const kind = entry.mechanic.type;
+    if (kind === 'recipe' || kind === 'mining' || kind === 'tile-extract' ||
+        ['generator', 'fusion-generator', 'boiler', 'reactor', 'fusion-reactor', 'solar'].includes(kind)) {
+      return '台';
+    }
+    return '系数';
+  }
+  function machineDisplay(entry: MechanicEntry): string {
+    const machineId = entry.mechanic.machine?.id;
+    if (!machineId) return '';
+    const ns = entry.mechanic.type === 'mining' ? 'mining-machine' : entry.mechanic.type === 'tile-extract' ? 'entity' : 'machine';
+    const name = runtime.localizedName(ns, machineId);
+    const quality = entry.mechanic.machine?.quality;
+    return quality && quality !== 'normal' ? `${name}（${runtime.localizedName('quality', quality)}）` : name;
+  }
+  function variantMeta(entry: MechanicEntry) {
+    const primary = mechanicPrimary(entry.mechanic);
+    const quality = primary.quality;
+    const qualityLabel = runtime.localizedName('quality', quality);
+    const machineLabel = machineDisplay(entry);
+    const sol = solutions.get(entry.id);
+    const unit = mechanicUnit(entry);
+    const amountText = solved ? `${compactNumber(entry.enabled ? (sol?.amount ?? 0) : 0)} ${unit}` : '';
+    return { quality, qualityLabel, machineLabel, amountText, enabled: entry.enabled };
+  }
+  function contributionInfo(item: NetworkContribution) {
+    const entry = entryById.get(item.mechanic);
+    const role = item.unitAmount < 0 ? '消耗' : '产出';
+    const rate = selectedEdge?.flow ? networkRate(selectedEdge.flow, solved ? item.amount : item.unitAmount, timeScale) : '';
+    if (!entry) {
+      return { name: '未知机制', kind: '机制', machine: '', quality: 'normal', location: undefined as Location | undefined, role, rate, enabled: true };
+    }
+    const ref = mechanicPrototype(entry.mechanic);
+    const primary = mechanicPrimary(entry.mechanic);
+    const kind = entry.transport ? transportLabel(entry.transport) : mechanicKindLabels[entry.mechanic.type] ?? entry.mechanic.type;
+    const name = ref.name ? runtime.localizedName(ref.kind, ref.name) : kind;
+    return {
+      name,
+      kind,
+      machine: machineDisplay(entry),
+      quality: primary.quality,
+      location: entry.location,
+      role,
+      rate,
+      enabled: entry.enabled,
+    };
+  }
   function edgeDescription(edge: NetworkEdge) {
     return edge.kind === 'compatibility' ? '可能的兼容转换，未表示实际分配量。'
       : edge.kind === 'collapsed' ? '中间流的依赖折叠；产出与消耗分别计量，不代表点对点运输分配。'
@@ -405,7 +688,7 @@
 <section class="network-view" use:rememberMechanicScroll={scrollState} aria-label="机制网络视图" data-network-ready={ready && !busy && renderRevision > 0}>
   <div class="network-toolbar">
     <div class="network-search" bind:this={searchBox}>
-      <input aria-label="搜索网络节点" placeholder="搜索名称、ID、品质或温度…"
+      <input bind:this={searchInput} aria-label="搜索网络节点" placeholder="搜索名称、ID、品质或温度…"
         role="combobox" aria-autocomplete="list" aria-expanded={searchOpen} aria-controls={searchResultsId}
         aria-activedescendant={searchOpen && matches[searchIndex] ? `${searchResultsId}-${searchIndex}` : undefined}
         bind:value={query} onfocus={() => searchOpen = true} oninput={() => { searchOpen = true; searchIndex = 0; }} onkeydown={searchKey} />
@@ -423,7 +706,7 @@
       {/if}
     </div>
     <button class="btn" disabled={!ready || busy} onclick={relayout}>重排</button>
-    <button class="btn" disabled={!ready} onclick={() => cy?.fit(undefined, 35)}>适应窗口</button>
+    <button class="btn" disabled={!ready} onclick={fitGraph}>适应窗口</button>
     {#if needle}<button class="btn" disabled={!ready || !matches.length} onclick={() => choose(matches[0].id)}>定位匹配</button>{/if}
     <button class="btn" disabled={!ready || busy || exporting} onclick={exportPng}>{exporting ? '导出中…' : '导出 PNG'}</button>
     {#if exporting}<button class="btn" disabled={exportCancelled} onclick={()=>exportCancelled=true}>取消导出</button>{/if}
@@ -437,18 +720,24 @@
     <label><input type="checkbox" bind:checked={onlyEnabled} />仅启用</label>
   </div>
   <div class="network-status" role="status">
-    <span>{model.nodes.filter(node => node.kind === 'mechanic').length} 个机制节点 · {model.edges.length} 条关系</span>
+    <span class="status-pill">{model.nodes.filter(node => node.kind === 'mechanic').length} 个机制节点 · {model.edges.length} 条关系</span>
     <span>{solved ? '实际求解流量' : '未求解：单位机制流量；分组变体分别列量'}</span>
     {#if !ready}<span>加载绘图库…</span>{:else if busy}<span>布局中…</span>{/if}
     {#if workspace.pending}<span>展开 {workspace.completed} / {entries.length}</span>{/if}
-    {#if workspace.failures.length}<span class="warn">{workspace.failures.length} 个机制展开失败</span><button class="btn" onclick={() => workspace.retry++}>重试展开</button>{/if}
+    {#if workspace.failures.length}<span class="warn">{workspace.failures.length} 个机制展开失败</span><button class="btn status-btn" onclick={() => workspace.retry++}>重试展开</button>{/if}
   </div>
   {#if error}<div class="network-error" role="alert">{error}<button class="btn" onclick={relayout}>重试布局</button></div>{/if}
   <div class="export-status" role="status" aria-live="polite" aria-atomic="true">{exportStatus}</div>
   {#if exportError}<div class="network-error" role="alert">{exportError}</div>{/if}
-  <div class="network-stage">
+  <div class="network-stage" class:has-details={!!(selectedNode || selectedEdge)}>
     <!-- Keyboard focus returns here when the node editor is closed. -->
     <div class="network-canvas" bind:this={container} role="group" tabindex="-1" aria-label="生产网络画布"></div>
+    <div class="zoom-hud" role="group" aria-label="画布缩放控制">
+      <button type="button" class="hud-btn" disabled={!ready} aria-label="缩小画布" title="缩小画布" onclick={() => zoomStep(1 / 1.25)}>−</button>
+      <button type="button" class="hud-btn hud-zoom mono" disabled={!ready} title="点击复位为 100%" onclick={resetZoom}>{Math.round(currentZoom * 100)}%</button>
+      <button type="button" class="hud-btn" disabled={!ready} aria-label="放大画布" title="放大画布" onclick={() => zoomStep(1.25)}>+</button>
+      <button type="button" class="hud-btn hud-fit" disabled={!ready} title="适应窗口" onclick={fitGraph}>适应</button>
+    </div>
     <div class="network-help">
       <SecondaryMenu title="图例与来源">
         {#snippet trigger(toggle, open)}
@@ -466,7 +755,15 @@
       </SecondaryMenu>
     </div>
     {#if !model.nodes.length && ready}
-      <div class="network-empty">{workspace.active ? '没有匹配的机制，可更换条件或清除筛选。' : '还没有机制，可添加机制或使用自动规划。'}</div>
+      <div class="network-empty">
+        {#if workspace.active}
+          没有匹配的机制，可更换条件或清除筛选。
+        {:else if locationFilter}
+          当前地点（{locationLabel(locationFilter, (k, n) => runtime.localizedName(k, n))}）暂无网络节点。
+        {:else}
+          还没有机制，可添加机制或使用自动规划。
+        {/if}
+      </div>
     {/if}
     {#if filterOpen || workspace.active}
       <div class="network-filter">
@@ -475,23 +772,98 @@
       </div>
     {/if}
   {#if selectedNode || selectedEdge}
-    <div class="network-details" role="dialog" aria-label="网络对象详情" tabindex="-1" bind:this={detailsPanel} style:left={`${popupLeft}px`} style:top={`${popupTop}px`}>
-      <button class="icon-btn close" aria-label="关闭网络详情" onclick={() => { selectObject(); container?.focus({preventScroll: true}); }}>×</button>
+    <div class="network-details" role="dialog" aria-label="网络对象详情" tabindex="-1" bind:this={detailsPanel}>
+      <div class="details-head">
+        <div class="details-title">
+          {#if selectedNode}
+            {#if selectedNode.location}<LocationIcon location={selectedNode.location} size={18} />{/if}
+            {#if selectedNode.flow}<FlowRef flow={selectedNode.flow} />{:else}<strong>{selectedNode.label.replaceAll('\n', ' · ')}</strong>{/if}
+          {:else if selectedEdge}
+            {#if selectedEdge.flow}<FlowRef flow={selectedEdge.flow} />{/if}
+          {/if}
+        </div>
+        <div class="details-head-actions">
+          {#if onRevealInList && selectedNode?.kind === 'mechanic' && editing}
+            <button type="button" class="btn ghost details-reveal" onclick={() => onRevealInList(editing.id)}>在列表中定位</button>
+          {/if}
+          <button type="button" class="icon-btn close" aria-label="关闭网络详情" onclick={() => { selectObject(); container?.focus({preventScroll: true}); }}>×</button>
+        </div>
+      </div>
+      <div class="chain-scope-bar" role="group" aria-label="上下游高亮范围">
+        <span class="chain-scope-label">链路高亮</span>
+        <div class="chain-scope-switch">
+          <button type="button" class="scope-btn" class:active={chainScope === 'direct'} aria-pressed={chainScope === 'direct'} onclick={() => chainScope = 'direct'}>直接相邻</button>
+          <button type="button" class="scope-btn" class:active={chainScope === 'chain'} aria-pressed={chainScope === 'chain'} onclick={() => chainScope = 'chain'}>完整上下游</button>
+        </div>
+      </div>
       {#if selectedNode}
-        {#if selectedNode.location}<LocationIcon location={selectedNode.location}/>{/if}
-        {#if selectedNode.flow}<FlowRef flow={selectedNode.flow} />{:else}<strong>{selectedNode.label.replaceAll('\n', ' · ')}</strong>{/if}
-        {#if selectedNode.kind === 'external'}<p>{selectedNode.implicit ? '隐式外部输入 · 成本 0' : `手动外部输入 · 成本 ${selectedNode.external?.penalty}`}</p>{/if}
+        {#if selectedNode.kind === 'external'}<p class="details-meta">{selectedNode.implicit ? '隐式外部输入 · 成本 0' : `手动外部输入 · 成本 ${selectedNode.external?.penalty}`}</p>{/if}
         {#if selectedNode.entries.length > 1}
-          <div class="variant-options">{#each selectedNode.entries as entry (entry.id)}<button class="btn" class:active={editing?.id === entry.id} onclick={() => selectedMechanic = entry.id}>机制 #{entry.id}</button>{/each}</div>
+          <div class="variant-options" role="group" aria-label="合并机制变体">
+            {#each selectedNode.entries as entry (entry.id)}
+              {@const meta = variantMeta(entry)}
+              <button
+                type="button"
+                class="btn variant-btn"
+                class:active={editing?.id === entry.id}
+                class:disabled-variant={!meta.enabled}
+                data-mechanic-id={entry.id}
+                aria-pressed={editing?.id === entry.id}
+                title={[meta.qualityLabel, meta.machineLabel, meta.amountText || '未求解', !meta.enabled ? '已停用' : ''].filter(Boolean).join(' · ')}
+                onclick={() => selectedMechanic = entry.id}
+              >
+                <Icon type="quality" name={meta.quality} size={13} bare />
+                <span>{meta.qualityLabel}</span>
+                {#if solved}
+                  <span class="variant-amount mono">{meta.amountText}</span>
+                {:else if meta.machineLabel}
+                  <span class="variant-machine">{meta.machineLabel}</span>
+                {/if}
+                {#if !meta.enabled}<span class="variant-off">停用</span>{/if}
+              </button>
+            {/each}
+          </div>
         {/if}
         {#if editing}<div class="edit-card"><MechanicEditor entry={editing} {project} {factory} {actions} solution={solutions.get(editing.id) ?? (solved ? {amount: 0, cost: 0} : null)} /></div>{/if}
-        {#if neighbours.length}<details class="neighbours"><summary>相邻对象</summary><div class="node-options">{#each neighbours as node (node.id)}<button class="btn" onclick={() => choose(node.id)}>{#if node.location}<LocationIcon location={node.location} size={18}/>{/if}{node.label.replaceAll('\n', ' · ')}</button>{/each}</div></details>{/if}
+        {#if neighbours.length}<details class="neighbours"><summary>相邻对象（{neighbours.length}）</summary><div class="node-options">{#each neighbours as node (node.id)}<button type="button" class="btn" onclick={() => choose(node.id)}>{#if node.location}<LocationIcon location={node.location} size={18}/>{/if}{node.label.replaceAll('\n', ' · ')}</button>{/each}</div></details>{/if}
       {:else if selectedEdge}
-        {#if selectedEdge.flow}<FlowRef flow={selectedEdge.flow} />{/if}
-        <p>{edgeDescription(selectedEdge)}</p>
-        {#each selectedEdge.contributions as item, i (`${item.mechanic}:${i}`)}
-          <p>机制 #{item.mechanic} · {item.unitAmount < 0 ? '消耗' : '产出'} {networkRate(selectedEdge.flow!, solved ? item.amount : item.unitAmount, timeScale)}</p>
-        {/each}
+        <p class="details-meta">{edgeDescription(selectedEdge)}</p>
+        {#if selectedEdge.contributions.length}
+          <div class="contrib-list" role="group" aria-label="关系贡献机制">
+            {#each selectedEdge.contributions as item, i (`${item.mechanic}:${i}`)}
+              {@const info = contributionInfo(item)}
+              <button
+                type="button"
+                class="btn contrib-btn"
+                class:disabled-variant={!info.enabled}
+                data-mechanic-id={item.mechanic}
+                onclick={() => focusMechanicInGraph(item.mechanic)}
+              >
+                <span class="contrib-main">
+                  {#if info.location}<LocationIcon location={info.location} size={15} />{/if}
+                  {#if info.quality && info.quality !== 'normal'}<Icon type="quality" name={info.quality} size={13} bare />{/if}
+                  <strong class="contrib-name">{info.name}</strong>
+                  <span class="contrib-meta">{info.kind}{#if info.machine} · {info.machine}{/if}</span>
+                </span>
+                <span class="contrib-rate mono">{info.role} {info.rate}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+        {#if selectedEdgeEndpoints.length}
+          <details class="neighbours" open>
+            <summary>连接节点</summary>
+            <div class="node-options">
+              {#each selectedEdgeEndpoints as endpoint (endpoint.role + ':' + endpoint.node.id)}
+                <button type="button" class="btn" onclick={() => choose(endpoint.node.id)}>
+                  <span class="endpoint-role">{endpoint.role}</span>
+                  {#if endpoint.node.location}<LocationIcon location={endpoint.node.location} size={16} />{/if}
+                  <span>{endpoint.node.label.replaceAll('\n', ' · ')}</span>
+                </button>
+              {/each}
+            </div>
+          </details>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -512,25 +884,25 @@
     box-shadow: var(--shadow-sm, var(--shadow));
     overflow: hidden;
   }
-  .network-toolbar, .network-status, .node-options, .variant-options { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .network-toolbar, .network-status, .node-options, .variant-options { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
   .network-toolbar {
-    gap: 5px;
-    padding: 7px 8px;
+    gap: 4px;
+    padding: 5px 8px;
     background: var(--panel-elev);
     border-bottom: 1px solid var(--line);
   }
-  .network-toolbar .btn { padding: 0 8px; font-size: 11px; }
-  .network-search { position: relative; min-width: 120px; width: 175px; max-width: 100%; }
+  .network-toolbar .btn { min-height: 24px; padding: 0 7px; font-size: 11px; }
+  .network-search { position: relative; min-width: 120px; width: 158px; max-width: 100%; }
   .network-search input {
     width: 100%;
-    min-height: 28px;
-    padding: 0 8px;
+    min-height: 24px;
+    padding: 0 7px;
     box-sizing: border-box;
     color: var(--text);
     background: var(--input-bg);
     border: 1px solid var(--line-strong);
     border-radius: var(--radius-sm);
-    font-size: 11.5px;
+    font-size: 11px;
     transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
       box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
   }
@@ -576,16 +948,16 @@
   .network-toolbar label {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    min-height: 28px;
+    gap: 4px;
+    min-height: 24px;
     color: var(--muted);
     font-size: 11px;
     white-space: nowrap;
     user-select: none;
   }
   .network-toolbar select {
-    min-height: 28px;
-    padding: 0 6px;
+    min-height: 24px;
+    padding: 0 5px;
     color: var(--text);
     background: var(--input-bg);
     border: 1px solid var(--line-strong);
@@ -628,17 +1000,65 @@
     cursor: pointer;
   }
   .network-status {
-    padding: 6px 10px;
+    padding: 3px 8px;
     background: var(--panel);
     border-bottom: 1px solid var(--line);
     color: var(--muted);
-    font-size: 11px;
+    font-size: 10.5px;
+    line-height: 1.3;
     font-variant-numeric: tabular-nums;
-    gap: 6px 12px;
+    gap: 4px 10px;
   }
+  .status-pill { color: var(--text); font-weight: 500; }
+  .status-btn { min-height: 20px; padding: 0 7px; font-size: 10.5px; }
   .network-stage { position: relative; min-width: 0; min-height: 360px; flex: 1 0 clamp(360px, 62vh, 820px); }
   .network-canvas { position: absolute; inset: 0; height: 100%; width: 100%; }
-  .network-help { position: absolute; right: 8px; bottom: 8px; z-index: 10; }
+  .zoom-hud {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    z-index: 10;
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    padding: 2px;
+    background: var(--surface-glass, var(--panel));
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-sm, var(--shadow));
+  }
+  .hud-btn {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 550;
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .hud-btn:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--card-hover);
+    border-color: var(--line);
+  }
+  .hud-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .hud-zoom { min-width: 44px; font-variant-numeric: tabular-nums; }
+  .network-help { position: absolute; right: 8px; bottom: 8px; z-index: 10; transition: right var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)); }
+  @media (min-width: 700px) {
+    .network-stage.has-details .network-help { right: calc(min(390px, calc(100% - 16px)) + 16px); }
+  }
   .help-button {
     min-height: 26px;
     padding: 2px 9px;
@@ -665,11 +1085,21 @@
   .neighbours summary:hover { color: var(--text); }
   .node-options { padding-top: 6px; max-height: 200px; overflow: auto; }
   .node-options .btn { white-space: normal; text-align: left; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
+  .endpoint-role {
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
   .network-details {
     position: absolute;
     z-index: 15;
-    width: min(420px, calc(100% - 16px));
-    max-height: calc(100% - 16px);
+    top: 8px;
+    right: 8px;
+    bottom: 8px;
+    width: min(390px, calc(100% - 16px));
     overflow: auto;
     box-sizing: border-box;
     padding: 12px;
@@ -680,17 +1110,75 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow-strong);
   }
-  .network-details > strong {
+  .details-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .details-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .details-title > strong {
     display: block;
-    padding-right: 30px;
-    margin-bottom: 4px;
     font-size: 12.5px;
     font-weight: 650;
     line-height: 1.35;
     overflow-wrap: anywhere;
   }
-  .network-details > :global(.flow-ref) {
-    padding-right: 30px;
+  .details-head-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+  }
+  .details-reveal { min-height: 26px; padding: 0 8px; font-size: 11px; }
+  .chain-scope-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 5px 8px;
+    margin-bottom: 8px;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+  .chain-scope-label { color: var(--muted); font-size: 10.5px; font-weight: 600; }
+  .chain-scope-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+  .scope-btn {
+    min-height: 22px;
+    padding: 0 7px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 550;
+    cursor: pointer;
+    transition: color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      background-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .scope-btn:hover { color: var(--text); background: var(--card-hover); }
+  .scope-btn.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    border-color: var(--accent);
+    font-weight: 700;
   }
   .network-filter {
     position: absolute;
@@ -717,15 +1205,51 @@
   }
   .network-filter :global(.mechanic-filter) { margin: 0; border: 0; }
   .network-empty { position: absolute; inset: 45% 12px auto; text-align: center; color: var(--faint); font-size: 12px; pointer-events: none; }
-  .network-details p { font-size: 11.5px; color: var(--muted); margin: 8px 0; line-height: 1.45; }
-  .close { position: absolute; top: 8px; right: 8px; }
+  .network-details p.details-meta { font-size: 11.5px; color: var(--muted); margin: 6px 0; line-height: 1.45; }
   .variant-options { margin: 8px 0; }
-  .variant-options .btn.active {
+  .variant-btn {
+    min-height: 26px;
+    padding: 2px 8px;
+    font-size: 11px;
+    gap: 5px;
+  }
+  .variant-btn.active {
     color: var(--accent-ink);
     background: var(--accent);
     border-color: var(--accent);
     font-weight: 700;
   }
+  .variant-machine { color: var(--muted); font-weight: 500; }
+  .variant-btn.active .variant-machine { color: inherit; opacity: 0.85; }
+  .variant-off {
+    font-size: 9.5px;
+    padding: 0 4px;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    color: var(--faint);
+  }
+  .variant-btn.active .variant-off { color: inherit; border-color: currentColor; }
+  .disabled-variant { opacity: 0.68; }
+  .contrib-list { display: grid; gap: 5px; margin: 8px 0; }
+  .contrib-btn {
+    width: 100%;
+    min-height: 30px;
+    padding: 5px 8px;
+    justify-content: space-between;
+    text-align: left;
+    white-space: normal;
+    gap: 8px;
+  }
+  .contrib-main {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-width: 0;
+  }
+  .contrib-name { font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+  .contrib-meta { font-size: 10.5px; color: var(--muted); }
+  .contrib-rate { font-size: 11px; font-weight: 600; white-space: nowrap; flex: 0 0 auto; }
   .edit-card { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
   .edit-card :global(.identity) { padding-inline: 0; }
   .network-error {

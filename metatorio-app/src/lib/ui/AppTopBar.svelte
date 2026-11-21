@@ -19,6 +19,9 @@
     project,
     factory,
     projectContext,
+    projectUnsaved = false,
+    leftCollapsed = false,
+    rightCollapsed = false,
     onOpenData,
     onOpenLoadGame,
     onOpenFontSettings,
@@ -31,10 +34,18 @@
     onRequestConfirm,
     onShowNotice,
     onMenuOpen,
+    onToggleLeftRail,
+    onToggleRightRail,
+    onOpenCommandPalette,
+    onSaveProject,
+    onSaveProjectAs,
   }: {
     project: ProjectDocument | null;
     factory: FactoryDocument | null;
     projectContext: ContextInfo | null;
+    projectUnsaved?: boolean;
+    leftCollapsed?: boolean;
+    rightCollapsed?: boolean;
     onOpenData: () => void;
     onOpenLoadGame: () => void;
     onOpenFontSettings: () => void;
@@ -47,6 +58,11 @@
     onRequestConfirm: (state: ConfirmState) => void;
     onShowNotice: (message: string) => void;
     onMenuOpen?: () => void;
+    onToggleLeftRail?: () => void;
+    onToggleRightRail?: () => void;
+    onOpenCommandPalette?: () => void;
+    onSaveProject?: () => void;
+    onSaveProjectAs?: () => void;
   } = $props();
 
   // 应用版本号（来自 tauri.conf.json version，无则空串）
@@ -119,7 +135,9 @@
     <button
       class="project-trigger"
       aria-expanded={projectMenuOpen}
-      title={project ? `当前项目：${project.name} · 点击切换或管理项目` : "选择或新建项目"}
+      title={project
+        ? `当前项目：${project.name}${projectUnsaved ? "（有未保存更改）" : ""} · 点击切换或管理项目`
+        : "选择或新建项目"}
       onclick={() => {
         projectMenuOpen = !projectMenuOpen;
         factoryMenuOpen = false;
@@ -129,6 +147,9 @@
     >
       <span class="trigger-label">项目</span>
       <span class="trigger-value">{project?.name ?? "未选择项目"}</span>
+      {#if project && projectUnsaved}
+        <span class="unsaved-dot" title="有未保存更改（Ctrl+S 保存）" aria-label="未保存">•</span>
+      {/if}
       <span class="caret">{projectMenuOpen ? "▴" : "▾"}</span>
     </button>
     {#if projectMenuOpen}
@@ -162,13 +183,30 @@
           <button onclick={() => { projectMenuOpen = false; onRenameProject(); }}>重命名项目…</button>
           <button
             disabled={runtime.busy}
-            title={runtime.projectSavePath(currentProject.id) ? `保存到 ${runtime.projectSavePath(currentProject.id)}` : "保存项目（首次保存会询问位置）"}
-            onclick={() => { projectMenuOpen = false; runtime.saveCurrentProject().catch(() => {}); }}
-          >保存项目</button>
+            title={runtime.projectSavePath(currentProject.id) ? `保存到 ${runtime.projectSavePath(currentProject.id)}（Ctrl+S）` : "保存项目（首次保存会询问位置 · Ctrl+S）"}
+            onclick={() => {
+              projectMenuOpen = false;
+              if (onSaveProject) onSaveProject();
+              else runtime.saveCurrentProject().catch(() => {});
+            }}
+          >
+            <span class="menu-item-main">
+              保存项目
+              {#if projectUnsaved}<span class="menu-unsaved-dot" aria-hidden="true">•</span>{/if}
+            </span>
+            <span class="menu-meta">Ctrl+S</span>
+          </button>
           <button
             disabled={runtime.busy}
-            onclick={() => { projectMenuOpen = false; runtime.saveProjectAs().catch(() => {}); }}
-          >另存为…</button>
+            onclick={() => {
+              projectMenuOpen = false;
+              if (onSaveProjectAs) onSaveProjectAs();
+              else runtime.saveProjectAs().catch(() => {});
+            }}
+          >
+            <span class="menu-item-main">另存为…</span>
+            <span class="menu-meta">Ctrl+Shift+S</span>
+          </button>
           <button
             class="danger"
             onclick={() => {
@@ -202,8 +240,14 @@
             onclick={() => runtime.selectUniverse(item.id).catch(() => {})}
           >{item.name}</button>
         {/each}
-        <button class="ftab add" title="新建工厂" onclick={onNewFactory}>+</button>
-        <button class="ftab add universe-add" title="新建宇宙工厂" onclick={onNewUniverse}>✦</button>
+        <button class="ftab add" title="新建工厂" aria-label="新建工厂" onclick={onNewFactory}>+</button>
+        <button class="ftab add universe-add" title="新建宇宙工厂" aria-label="新建宇宙工厂" onclick={onNewUniverse}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="8.5" r="3.1" stroke="currentColor" stroke-width="1.3" />
+            <ellipse cx="7" cy="8.5" rx="6" ry="2.2" transform="rotate(-24 7 8.5)" stroke="currentColor" stroke-width="1.2" />
+            <path d="M12.5 2.5V6.5M10.5 4.5H14.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
       {#if factory}
         {@const currentFactory = factory}
@@ -231,9 +275,81 @@
         </div>
       {/if}
     </div>
+  {:else}
+    <span class="spacer"></span>
   {/if}
 
-  <span class="spacer"></span>
+  {#if project}
+    <div class="scale-switch" role="group" aria-label="快捷速率单位">
+      {#each [
+        { id: "seconds" as const, label: "/s", title: "每秒 (/s)" },
+        { id: "minutes" as const, label: "/m", title: "每分钟 (/min)" },
+        { id: "hours" as const, label: "/h", title: "每小时 (/h)" },
+      ] as opt (opt.id)}
+        <button
+          class="scale-btn"
+          class:active={project.settings.time_scale === opt.id}
+          aria-pressed={project.settings.time_scale === opt.id}
+          title={`时间刻度：${opt.title}`}
+          disabled={runtime.busy}
+          onclick={() => runtime.setTimeScale(opt.id).catch(() => {})}
+        >{opt.label}</button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if onOpenCommandPalette}
+    <button
+      class="palette-btn"
+      title="打开命令面板（Ctrl/Cmd+K）"
+      aria-label="命令面板"
+      onclick={() => { closeMenus(); onOpenCommandPalette(); }}
+    >
+      <span class="palette-text">命令</span>
+      <kbd class="palette-kbd">Ctrl+K</kbd>
+    </button>
+  {/if}
+
+  {#if onToggleLeftRail || onToggleRightRail}
+    <div class="rail-toggle-group" role="group" aria-label="侧栏折展">
+      {#if onToggleLeftRail}
+        <button
+          class="icon-btn"
+          class:active={!leftCollapsed}
+          aria-pressed={!leftCollapsed}
+          aria-label={leftCollapsed ? "展开左栏" : "折叠左栏"}
+          title={leftCollapsed ? "展开左栏（[）" : "折叠左栏（[）"}
+          onclick={onToggleLeftRail}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.3" />
+            <line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor" stroke-width="1.3" />
+            {#if !leftCollapsed}
+              <rect x="2.5" y="3.5" width="2.5" height="9" rx="0.5" fill="currentColor" opacity="0.55" />
+            {/if}
+          </svg>
+        </button>
+      {/if}
+      {#if onToggleRightRail}
+        <button
+          class="icon-btn"
+          class:active={!rightCollapsed}
+          aria-pressed={!rightCollapsed}
+          aria-label={rightCollapsed ? "展开右栏" : "折叠右栏"}
+          title={rightCollapsed ? "展开右栏（]）" : "折叠右栏（]）"}
+          onclick={onToggleRightRail}
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" stroke="currentColor" stroke-width="1.3" />
+            <line x1="10" y1="2.5" x2="10" y2="13.5" stroke="currentColor" stroke-width="1.3" />
+            {#if !rightCollapsed}
+              <rect x="11" y="3.5" width="2.5" height="9" rx="0.5" fill="currentColor" opacity="0.55" />
+            {/if}
+          </svg>
+        </button>
+      {/if}
+    </div>
+  {/if}
 
   <!-- 数据状态：点击打开游戏数据/上下文管理 -->
   <button
@@ -436,6 +552,7 @@
 
   /* 工厂段：与左侧项目区分，用竖线隔开。 */
   .factory-bar {
+    flex: 1 1 100px;
     min-width: 0;
     display: flex;
     align-items: center;
@@ -454,7 +571,7 @@
 
   .factory-tabs {
     min-width: 0;
-    max-width: min(42vw, 620px);
+    flex: 0 1 auto;
     display: flex;
     align-items: center;
     gap: 3px;
@@ -765,22 +882,161 @@
     font-weight: 700;
   }
 
+  .unsaved-dot,
+  .menu-unsaved-dot {
+    flex: 0 0 auto;
+    color: var(--warn);
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .menu-unsaved-dot {
+    margin-left: 4px;
+  }
+
+  .scale-switch {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 1px;
+    padding: 2px;
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+  }
+
+  .scale-btn {
+    min-width: 26px;
+    height: 26px;
+    padding: 0 6px;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+  }
+
+  .scale-btn:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--card-hover);
+  }
+
+  .scale-btn.active {
+    color: var(--accent-ink);
+    background: var(--accent);
+    font-weight: 700;
+  }
+
+  .scale-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .palette-btn {
+    flex: 0 0 auto;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+    color: var(--muted);
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  }
+
+  .palette-btn:hover {
+    color: var(--text);
+    background: var(--card-hover);
+    border-color: var(--line-strong);
+  }
+
+  .palette-kbd {
+    padding: 1px 4px;
+    color: var(--faint);
+    background: var(--input-bg);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    line-height: 1.2;
+  }
+
+  .rail-toggle-group {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    background: var(--panel-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+
+  .rail-toggle-group .icon-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 0;
+    color: var(--faint);
+  }
+
+  .rail-toggle-group .icon-btn.active {
+    color: var(--text);
+    background: var(--accent-dim);
+  }
+
+  .rail-toggle-group .icon-btn + .icon-btn {
+    border-left: 1px solid var(--line);
+  }
+
   @media (max-width: 1360px) {
-    .factory-tabs {
-      max-width: 34vw;
-    }
     .status-text {
-      max-width: 150px;
+      max-width: 130px;
+    }
+    .palette-text {
+      display: none;
     }
   }
 
   @media (max-width: 1120px) {
     .trigger-label,
-    .bar-label {
+    .bar-label,
+    .status-action {
       display: none;
     }
     .project-trigger {
-      max-width: 180px;
+      max-width: 160px;
+    }
+    .status-text {
+      max-width: 96px;
+    }
+  }
+
+  @media (max-width: 920px) {
+    .appbar {
+      padding: 0 10px;
+      gap: 6px;
+    }
+    .brand-name {
+      display: none;
+    }
+    .project-trigger {
+      max-width: 120px;
+      padding: 0 7px;
+      gap: 5px;
+    }
+    .status-pill {
+      padding: 0 8px;
+    }
+    .status-text {
+      max-width: 68px;
     }
   }
 </style>

@@ -1,25 +1,52 @@
 <script lang="ts">
+  import { tick, untrack } from "svelte";
   import {locationKey, locationLabel} from "$lib/mechanics/located";
   import LocationIcon from "./LocationIcon.svelte";
   import { dndzone } from 'svelte-dnd-action';
   import { runtime } from '$lib/runtime/store.svelte';
   import { mechanicPrototype } from '$lib/display-labels';
-  import type { MechanicEntry } from '$lib/runtime/types';
-  import type { MechanicViewProps } from '$lib/mechanics/workspace';
+  import { compactNumber } from "$lib/format";
+  import type { Location, MechanicEntry } from '$lib/runtime/types';
+  import type { FlowTraceHandler, MechanicViewProps } from '$lib/mechanics/workspace';
   import MechanicCard from './MechanicCard.svelte';
   import MechanicRow from './MechanicRow.svelte';
   import { rememberMechanicScroll } from '$lib/mechanics/view-scroll';
 
-  let {project, factory, entries, visibleIds, mergeRecipes, groupLocations = false, actions, solutions, scrollState}: {
-    mergeRecipes: boolean; groupLocations?: boolean;
+  let {
+    project,
+    factory,
+    entries,
+    visibleIds,
+    mergeRecipes,
+    groupLocations = false,
+    locationFilter = null,
+    highlightMechanicId = null,
+    highlightSeq = 0,
+    onTraceFlow,
+    onRevealInNetwork,
+    actions,
+    solutions,
+    scrollState,
+  }: {
+    mergeRecipes: boolean;
+    groupLocations?: boolean;
+    locationFilter?: Location | null;
+    highlightMechanicId?: number | null;
+    highlightSeq?: number;
+    onTraceFlow?: FlowTraceHandler;
+    onRevealInNetwork?: (mechanicId: number) => void;
   } & MechanicViewProps = $props();
-  let filterActive = $derived(visibleIds !== null);
-  let dragMechanics = $state<MechanicEntry[]>([]);
+  let filterActive = $derived(visibleIds !== null || !!locationFilter);
+  let dragMechanics = $state<MechanicEntry[]>(untrack(() => entries));
   $effect(() => { dragMechanics = entries; });
   let visibleMechanics = $derived.by(() => {
-    if (visibleIds === null) return dragMechanics;
-    const ids = new Set(visibleIds);
-    return dragMechanics.filter(entry => ids.has(entry.id));
+    const ids = visibleIds !== null ? new Set(visibleIds) : null;
+    const locKey = locationFilter ? locationKey(locationFilter) : null;
+    if (ids === null && locKey === null) return dragMechanics;
+    return dragMechanics.filter(entry =>
+      (ids === null || ids.has(entry.id)) &&
+      (locKey === null || locationKey(entry.location) === locKey)
+    );
   });
   function groupTitle(entries: MechanicEntry[]): string {
     const first = entries[0]?.mechanic;
@@ -62,8 +89,76 @@
     })(),
   );
   type MechanicGroup = { id: string; key: string; entries: import("$lib/runtime/types").MechanicEntry[] };
-  let dragGroups = $state<MechanicGroup[]>([]);
+  let dragGroups = $state<MechanicGroup[]>(untrack(() => mechGroups.map((group) => ({ ...group, id: group.key }))));
   $effect(() => { dragGroups = mechGroups.map((group) => ({ ...group, id: group.key })); });
+
+  let collapsedGroups = $state<Record<string, boolean>>({});
+  function isCollapsed(key: string): boolean {
+    return !!collapsedGroups[key];
+  }
+  function toggleGroup(key: string) {
+    collapsedGroups = { ...collapsedGroups, [key]: !collapsedGroups[key] };
+  }
+  function groupSummary(groupEntries: MechanicEntry[]) {
+    let totalAmount = 0;
+    let totalCost = 0;
+    let hasSolution = false;
+    let enabledCount = 0;
+    for (const entry of groupEntries) {
+      if (entry.enabled) enabledCount += 1;
+      const sol = solutions.get(entry.id);
+      if (sol && Number.isFinite(sol.amount)) {
+        hasSolution = true;
+        const amt = Math.max(0, sol.amount);
+        totalAmount += amt;
+        if (Number.isFinite(sol.cost)) totalCost += amt * sol.cost;
+      }
+    }
+    return { hasSolution, totalAmount, totalCost, enabledCount };
+  }
+
+  let listNode = $state<HTMLDivElement>();
+  let activeHighlightId = $state<number | null>(null);
+  let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+
+  $effect(() => {
+    const targetId = highlightMechanicId;
+    void highlightSeq;
+    if (targetId == null) return;
+    let alive = true;
+    let frame1 = 0;
+    let frame2 = 0;
+    untrack(() => {
+      const ownerGroup = dragGroups.find((group) => group.entries.some((entry) => entry.id === targetId));
+      if (ownerGroup && collapsedGroups[ownerGroup.key]) {
+        collapsedGroups = { ...collapsedGroups, [ownerGroup.key]: false };
+      }
+      activeHighlightId = targetId;
+      clearTimeout(highlightTimer);
+      highlightTimer = setTimeout(() => {
+        if (alive) activeHighlightId = null;
+      }, 2400);
+    });
+    void tick().then(() => {
+      if (!alive) return;
+      // 双帧延迟确保在 rememberMechanicScroll 的初始 rAF 恢复之后再滚动定位。
+      frame1 = requestAnimationFrame(() => {
+        if (!alive) return;
+        frame2 = requestAnimationFrame(() => {
+          if (!alive || !listNode) return;
+          const targetRow = listNode.querySelector<HTMLElement>(`[data-mechanic-row="${targetId}"]`);
+          targetRow?.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      });
+    });
+    return () => {
+      alive = false;
+      cancelAnimationFrame(frame1);
+      cancelAnimationFrame(frame2);
+      clearTimeout(highlightTimer);
+    };
+  });
+
   function handleMechanicsConsider(event: CustomEvent<{ items: MechanicGroup[] }>) {
     if (filterActive || groupLocations) return;
     dragGroups = event.detail.items;
@@ -76,42 +171,79 @@
   }
 </script>
 
-{#snippet row(entry: MechanicEntry)}
-  <MechanicRow mechanicId={entry.id} virtualize={entries.length > 80}>
+{#snippet row(entry: MechanicEntry, draggable: boolean)}
+  <MechanicRow
+    mechanicId={entry.id}
+    virtualize={entries.length > 80}
+    {draggable}
+    highlighted={activeHighlightId === entry.id}
+  >
     {#snippet children(pin)}
-      <MechanicCard {entry} {project} {factory} {actions}
-        solution={solutions.get(entry.id) ?? null} onInteractionChange={pin} />
+      <MechanicCard
+        {entry}
+        {project}
+        {factory}
+        {actions}
+        {onTraceFlow}
+        {onRevealInNetwork}
+        solution={solutions.get(entry.id) ?? null}
+        onInteractionChange={pin}
+      />
     {/snippet}
   </MechanicRow>
 {/snippet}
 
 {#snippet renderGroup(group: MechanicGroup)}
           {#if group.entries.length > 1}
-            <!-- 配方合并组：标题（配方名 + 机器名），子机制完整显示 -->
-            <div class="mech-group">
+            {@const collapsed = isCollapsed(group.key)}
+            {@const summary = collapsed ? groupSummary(group.entries) : null}
+            <!-- 配方合并组：标题（配方名 + 机器名），支持一键折叠/展开 -->
+            <div class="mech-group" class:collapsed>
               <div class="mech-group-head">
-                <span class="mech-group-title" title={groupTitle(group.entries)}>
-                  {groupTitle(group.entries)}
-                </span>
-                {#if groupMachine(group.entries)}
-                  <span class="chip">{groupMachine(group.entries)}</span>
+                {#if !filterActive && !groupLocations}
+                  <span class="drag-handle-inline" aria-hidden="true" title="拖拽整组排序">⋮⋮</span>
                 {/if}
-                <span class="chip muted">{group.entries.length} 变体</span>
+                <button
+                  type="button"
+                  class="mech-group-toggle"
+                  aria-expanded={!collapsed}
+                  onclick={() => toggleGroup(group.key)}
+                >
+                  <span class="collapse-chevron" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+                  <span class="mech-group-title" title={groupTitle(group.entries)}>
+                    {groupTitle(group.entries)}
+                  </span>
+                  {#if groupMachine(group.entries)}
+                    <span class="chip">{groupMachine(group.entries)}</span>
+                  {/if}
+                  <span class="chip muted">{group.entries.length} 变体</span>
+                  {#if summary}
+                    {#if summary.hasSolution}
+                      <span class="chip mono">{compactNumber(summary.totalAmount)} 台</span>
+                      <span class="chip mono muted">总成本 {compactNumber(summary.totalCost)}</span>
+                    {:else}
+                      <span class="chip muted">{summary.enabledCount}/{group.entries.length} 启用 · 未求解</span>
+                    {/if}
+                  {/if}
+                </button>
               </div>
-              {#each group.entries as entry (entry.id)}
-                <div class="mech-group-row">
-                  {@render row(entry)}
-                </div>
-              {/each}
+              {#if !collapsed}
+                {#each group.entries as entry (entry.id)}
+                  <div class="mech-group-row">
+                    {@render row(entry, false)}
+                  </div>
+                {/each}
+              {/if}
             </div>
           {:else}
             {#each group.entries as entry (entry.id)}
-              {@render row(entry)}
+              {@render row(entry, !filterActive && !groupLocations)}
             {/each}
           {/if}
 {/snippet}
       <div
         class="mech-list"
+        bind:this={listNode}
         use:rememberMechanicScroll={scrollState}
         use:dndzone={{ items: dragGroups, type: "mechanic-groups", flipDurationMs: 120, dragDisabled: filterActive || groupLocations }}
         onconsider={handleMechanicsConsider}
@@ -177,10 +309,52 @@
   .mech-group-head {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 7px 12px;
+    gap: 6px;
+    padding: 0 8px;
+    min-height: 34px;
     background: var(--panel-elev);
     border-bottom: 1px solid var(--line);
+  }
+
+  .mech-group.collapsed .mech-group-head {
+    border-bottom: 0;
+  }
+
+  .drag-handle-inline {
+    flex: 0 0 auto;
+    padding: 4px 2px;
+    color: var(--faint);
+    font-size: 11px;
+    letter-spacing: -1px;
+    user-select: none;
+    cursor: grab;
+  }
+
+  .mech-group-head:hover .drag-handle-inline {
+    color: var(--text);
+  }
+
+  .mech-group-toggle {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 4px;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .collapse-chevron {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 11px;
+    width: 12px;
+    text-align: center;
   }
 
   .mech-group-title {
