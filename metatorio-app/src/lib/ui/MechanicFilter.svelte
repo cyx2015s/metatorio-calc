@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { runtime } from "$lib/runtime/store.svelte.ts";
   import { presentFlow } from "$lib/dual-var";
   import { normalizeSearch } from "$lib/rich-text";
@@ -7,12 +8,36 @@
   import type { MechanicWorkspaceState } from "$lib/mechanics/workspace.svelte";
   import FlowRef from "./FlowRef.svelte";
 
-  let { workspace, entries, expanded }: {
-    workspace: MechanicWorkspaceState; entries: MechanicEntry[]; expanded: boolean;
+  let {
+    workspace,
+    entries,
+    expanded,
+    focusSearchSeq = 0,
+    externalLocationActive = false,
+    onRequestClose,
+  }: {
+    workspace: MechanicWorkspaceState;
+    entries: MechanicEntry[];
+    expanded: boolean;
+    focusSearchSeq?: number;
+    externalLocationActive?: boolean;
+    onRequestClose?: () => void;
   } = $props();
   type Side = "input" | "output";
   let picker = $state<Side | null>(null);
   let query = $state("");
+  let textInput = $state<HTMLInputElement>();
+  let lastFocusSeq = 0;
+
+  $effect(() => {
+    if (!focusSearchSeq || focusSearchSeq === lastFocusSeq || !expanded) return;
+    lastFocusSeq = focusSearchSeq;
+    void tick().then(() => {
+      textInput?.focus();
+      textInput?.select();
+    });
+  });
+
   let input = $derived(workspace.input);
   let output = $derived(workspace.output);
   let index = $derived(workspace.index);
@@ -21,7 +46,34 @@
   let active = $derived(workspace.active);
   let pending = $derived(workspace.pending);
   let matching = $derived(workspace.matchingIds);
+  let canClear = $derived(
+    workspace.flowFilterActive ||
+    workspace.textQuery.trim().length > 0 ||
+    (!externalLocationActive && workspace.locationFilter !== null),
+  );
   const label = (flow: DualVar) => presentFlow(flow, (kind, name) => runtime.localizedName(kind, name)).description;
+
+  function clearAll() {
+    if (externalLocationActive) {
+      workspace.input = null;
+      workspace.output = null;
+      workspace.textQuery = "";
+    } else {
+      workspace.clearFilters();
+    }
+    picker = null;
+  }
+
+  function handleTextKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (workspace.textQuery) {
+      workspace.textQuery = "";
+    } else {
+      onRequestClose?.();
+    }
+  }
 
   let candidates = $derived.by(() => {
     const objects = new Map<string, DualVar>();
@@ -66,6 +118,26 @@
 {#if expanded || active}
   <section class="mechanic-filter" aria-label="机制流筛选">
     {#if expanded}
+      <div class="text-filter-row">
+        <input
+          bind:this={textInput}
+          type="text"
+          class="text-filter-input"
+          aria-label="即时搜索机制"
+          placeholder="搜索配方、物品、机器、内部 ID 或地点…"
+          bind:value={workspace.textQuery}
+          onkeydown={handleTextKeydown}
+        />
+        {#if workspace.textQuery}
+          <button
+            type="button"
+            class="icon-btn"
+            aria-label="清除文本搜索"
+            title="清除文本搜索"
+            onclick={() => { workspace.textQuery = ""; textInput?.focus(); }}
+          >×</button>
+        {/if}
+      </div>
       <div class="filter-fields">
         {#each ["input", "output"] as side}
           {@const direction = side as Side}
@@ -112,13 +184,34 @@
       {#if pending}<span>正在读取 {completed} / {entries.length} · 结果逐步补齐</span>{/if}
       {#if failures.length}<span class="warn">{failures.length} 个机制读取失败，尚未判定</span><button class="btn" onclick={() => workspace.retry += 1}>重试</button>{/if}
       {#if expanded && !pending && !failures.length}<span class="muted">消耗与产出取交集 · 先筛选变体，再合并配方</span>{/if}
-      {#if active}<button class="btn" onclick={() => { workspace.clearFilters(); picker = null; }}>清除筛选</button>{/if}
+      {#if canClear}<button class="btn" onclick={clearAll}>清除筛选</button>{/if}
     </div>
   </section>
 {/if}
 
 <style>
   .mechanic-filter { flex: 0 0 auto; padding: 8px; margin-top: 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+  .text-filter-row { display: flex; align-items: center; gap: 6px; min-width: 0; margin-bottom: 6px; }
+  .text-filter-input {
+    flex: 1 1 180px;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 28px;
+    padding: 0 8px;
+    color: var(--text);
+    background: var(--input-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    font-size: 11.5px;
+    transition: border-color var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1)),
+      box-shadow var(--transition-fast, 120ms cubic-bezier(0.22, 1, 0.36, 1));
+  }
+  .text-filter-input::placeholder { color: var(--faint); }
+  .text-filter-input:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
   .filter-fields, .filter-field, .filter-status { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
   .filter-fields { gap: 8px 16px; }
   .filter-field > span { font-size: 12px; color: var(--muted); }
