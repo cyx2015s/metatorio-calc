@@ -53,7 +53,8 @@ fn write_mps(
         }
     }
 
-    let mut out = String::with_capacity(64 * 1024 * 1024);
+    let approx_capacity = (defs.len() + rows.len()).saturating_mul(128).min(64 * 1024 * 1024);
+    let mut out = String::with_capacity(approx_capacity);
     writeln!(out, "NAME          METATORIO").map_err(|e| ResolutionError::Str(e.to_string()))?;
     writeln!(out, "ROWS").map_err(|e| ResolutionError::Str(e.to_string()))?;
     writeln!(out, " N  OBJ").map_err(|e| ResolutionError::Str(e.to_string()))?;
@@ -89,9 +90,16 @@ fn write_mps(
     for (index, definition) in defs.iter().enumerate() {
         let lower = definition.get_min();
         let upper = definition.get_max();
-        if lower == upper {
+        if lower.is_finite() && lower == upper {
             writeln!(bounds, " FX BND  X{index}  {lower:.17e}")
                 .map_err(|e| ResolutionError::Str(e.to_string()))?;
+        } else if lower == f64::NEG_INFINITY {
+            writeln!(bounds, " FR BND  X{index}")
+                .map_err(|e| ResolutionError::Str(e.to_string()))?;
+            if upper.is_finite() {
+                writeln!(bounds, " UP BND  X{index}  {upper:.17e}")
+                    .map_err(|e| ResolutionError::Str(e.to_string()))?;
+            }
         } else {
             if lower != 0.0 {
                 writeln!(bounds, " LO BND  X{index}  {lower:.17e}")
@@ -192,4 +200,38 @@ pub(crate) fn solve(
         solved.num_iterations()
     );
     Ok(values)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lp_model::variable;
+
+    #[test]
+    fn write_mps_emits_standard_bounds_for_fixed_free_and_half_bounded_vars() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("metatorio-mps-bounds-{}.mps", std::process::id()));
+        let defs = vec![
+            variable().min(3.0).max(3.0),               // FX
+            variable(),                                 // FR (-inf..+inf)
+            variable().max(5.0),                        // FR + UP (-inf..5)
+            variable().min(1.0).max(10.0),              // LO + UP
+        ];
+        let rows = vec![ParsedRow {
+            is_equality: false,
+            rhs: 10.0,
+            terms: vec![(0, 1.0), (1, 1.0), (2, 1.0), (3, 1.0)],
+        }];
+        write_mps(&path, &defs, &[(1, 1.0)], &rows).expect("write_mps");
+        let text = std::fs::read_to_string(&path).expect("read mps");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(text.contains(" FX BND  X0  "), "{text}");
+        assert!(text.contains(" FR BND  X1\n"), "{text}");
+        assert!(text.contains(" FR BND  X2\n"), "{text}");
+        assert!(text.contains(" UP BND  X2  "), "{text}");
+        assert!(text.contains(" LO BND  X3  "), "{text}");
+        assert!(text.contains(" UP BND  X3  "), "{text}");
+        assert!(!text.contains("-inf"), "MPS 不应出现字面量 -inf:\n{text}");
+    }
 }

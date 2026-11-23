@@ -374,8 +374,18 @@ where
         let mut source_vars = AIndexMap::default();
         // 物品汇变量
         let mut sink_vars = AIndexMap::default();
-        for f_id in self.flows.keys() {
-            let definition = variable().min(0);
+        for (f_id, flow_spec) in &self.flows {
+            let mut definition = variable().min(0.0);
+            if let Some(fixed) = flow_spec.fixed {
+                if !fixed.is_finite() || fixed < 0.0 {
+                    return SolverSolution::NotSolved {
+                        no_provider: vec![],
+                        no_consumer: vec![],
+                        description: format!("无效的固定流值: {fixed}"),
+                    };
+                }
+                definition = definition.min(fixed).max(fixed);
+            }
             #[cfg(feature = "rust-lp")]
             let definition = definition.name(format!("flow:{f_id:?}"));
             let var = problem_variables.add(definition);
@@ -687,10 +697,25 @@ where
         std::thread::spawn(move || {
             log::info!("求解线程启动");
             loop {
+                let first = match problem_rx.recv() {
+                    Ok(req) => req,
+                    Err(_) => break,
+                };
                 let mut reqs = AIndexMap::default();
+                reqs.insert(first.0, first.1);
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                while let Ok((req_id, req)) = problem_rx.try_recv() {
-                    reqs.insert(req_id, req);
+                let mut disconnected = false;
+                loop {
+                    match problem_rx.try_recv() {
+                        Ok((req_id, req)) => {
+                            reqs.insert(req_id, req);
+                        }
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            disconnected = true;
+                            break;
+                        }
+                    }
                 }
                 for (req_id, req) in reqs.into_iter() {
                     let result = req.solve();
@@ -698,10 +723,14 @@ where
                     if solution_tx.send((req_id, result)).is_err() {
                         // 接收方已关闭，退出线程
                         log::info!("求解线程退出");
-                        break;
+                        return;
                     }
                 }
+                if disconnected {
+                    break;
+                }
             }
+            log::info!("求解线程退出");
         });
     }
 }
@@ -1181,5 +1210,81 @@ mod tests {
         assert_eq!(data.pruned_missing, vec!["previous", "missing"]);
         assert_eq!(data.flows.len(), 513);
         assert_eq!(data.flows[&0].coefficients["missing"], -1.0);
+    }
+
+    #[test]
+    fn flow_spec_fixed_constrains_variable_value() {
+        let mut target = AIndexMap::default();
+        target.insert("out", 10.0);
+
+        let mut flows = AIndexMap::default();
+        flows.insert(
+            "cheap_fixed",
+            FlowSpec {
+                coefficients: [("out", 1.0)].into_iter().collect(),
+                cost: 1.0,
+                fixed: Some(4.0),
+            },
+        );
+        flows.insert(
+            "expensive_flex",
+            FlowSpec {
+                coefficients: [("out", 1.0)].into_iter().collect(),
+                cost: 10.0,
+                fixed: None,
+            },
+        );
+
+        let data = SolverData {
+            target: vec![TargetSpec {
+                constant: 10.0,
+                coefficients: [("out", 1.0)].into_iter().collect(),
+            }],
+            flows,
+            sources: AIndexMap::default(),
+            sinks: AIndexMap::default(),
+            strict_source: true,
+            strict_sink: true,
+            pruned_missing: Vec::new(),
+            unconstrained: AIndexSet::default(),
+            solver: crate::lp_solver::LpSolver::default(),
+        };
+
+        match data.solve() {
+            SolverSolution::Solved { prim, cost, .. } => {
+                assert!((prim["cheap_fixed"] - 4.0).abs() < 1e-6, "{prim:?}");
+                assert!((prim["expensive_flex"] - 6.0).abs() < 1e-6, "{prim:?}");
+                assert!((cost - 64.0).abs() < 1e-6, "cost={cost}");
+            }
+            SolverSolution::NotSolved { description, .. } => panic!("应可解: {description}"),
+        }
+    }
+
+    #[test]
+    fn flow_spec_fixed_rejects_negative_or_nonfinite() {
+        let mut flows = AIndexMap::default();
+        flows.insert(
+            "bad",
+            FlowSpec {
+                coefficients: [("out", 1.0)].into_iter().collect(),
+                cost: 1.0,
+                fixed: Some(-1.0),
+            },
+        );
+        let data = SolverData {
+            target: vec![TargetSpec {
+                constant: 1.0,
+                coefficients: [("out", 1.0)].into_iter().collect(),
+            }],
+            flows,
+            sources: AIndexMap::default(),
+            sinks: AIndexMap::default(),
+            strict_source: true,
+            strict_sink: true,
+            pruned_missing: Vec::new(),
+            unconstrained: AIndexSet::default(),
+            solver: crate::lp_solver::LpSolver::default(),
+        };
+        assert!(matches!(data.solve(), SolverSolution::NotSolved { .. }));
     }
 }

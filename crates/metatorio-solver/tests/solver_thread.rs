@@ -119,3 +119,26 @@ fn batched_solver_thread_aggregates_multiple_requests() {
     assert!((results[1].1 - 3.0).abs() < 1e-5, "{results:?}");
     drop(problem_tx);
 }
+
+#[test]
+fn batched_solver_thread_flushes_pending_batch_then_exits_on_disconnect() {
+    let (solution_tx, solution_rx) = channel();
+    let (problem_tx, problem_rx) = channel();
+    SolverData::make_solver_thread(solution_tx, problem_rx);
+
+    problem_tx.send((7usize, smelting_problem(2.5))).unwrap();
+    drop(problem_tx);
+
+    let (id, solution) = solution_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("断开前已发送的请求仍应完成返回");
+    assert_eq!(id, 7);
+    assert_solved("断连前请求", solution);
+
+    // 发送端已断开且无剩余请求，求解线程应退出并关闭 solution_tx
+    let closed = solution_rx.recv_timeout(Duration::from_secs(2));
+    assert!(
+        matches!(closed, Err(std::sync::mpsc::RecvTimeoutError::Disconnected)),
+        "输入通道关闭后求解线程应退出并关闭输出通道，实际收到: {closed:?}"
+    );
+}

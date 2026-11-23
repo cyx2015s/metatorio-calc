@@ -185,6 +185,17 @@ impl RuntimeState {
                     });
                 }
             }
+            for universe in &project.universes {
+                if previous.is_none_or(|previous| {
+                    previous.settings != project.settings
+                        || previous.universes.iter().find(|u| u.id == universe.id) != Some(universe)
+                }) {
+                    outcome.commands.push(RuntimeCommand::RecomputeUniverse {
+                        project: project.id,
+                        universe: universe.id,
+                    });
+                }
+            }
         }
         // 撤销「新建项目」时把脏标记一并收回。
         for project in &before.projects {
@@ -1983,6 +1994,7 @@ impl RuntimeState {
     /// 与现有项目 id 冲突时整体重分配：项目 → 工厂 → 目标/表达式/项 →
     /// 外部输入 → 机制（所有子 id 同步映射，保持引用一致）。
     pub fn import_projects(&mut self, imported: &AppDocument) {
+        let previous_next_id = self.next_id;
         // 在两份文档的最大 ID 之上预留新分配 ID，避免与尚未写入的其他导入对象冲突。
         let imported_max = imported
             .projects
@@ -2003,19 +2015,8 @@ impl RuntimeState {
             // 工厂/机制等子 id 若与现有文档冲突也要重分配（全局唯一，
             // 避免跨项目引用歧义）。为简化，项目冲突时整套重分配。
             let remap_all = project_id_collides;
-            if remap_all {
+            if remap_all || occupied.contains(&project.id.0) {
                 project.id = self.allocate_id();
-            }
-            for factory in &mut project.factories {
-                if remap_all
-                    || self
-                        .document
-                        .projects
-                        .iter()
-                        .any(|p| p.factories.iter().any(|f| f.id == factory.id))
-                {
-                    factory.id = self.allocate_id();
-                }
             }
             let mut remap = |id: &mut u64| {
                 if remap_all || occupied.contains(id) {
@@ -2023,6 +2024,7 @@ impl RuntimeState {
                 }
             };
             for factory in &mut project.factories {
+                remap(&mut factory.id.0);
                 for target in &mut factory.targets {
                     remap(&mut target.id.0);
                 }
@@ -2061,6 +2063,7 @@ impl RuntimeState {
             self.document.projects.push(project);
         }
         self.refresh_next_id();
+        self.next_id = self.next_id.max(previous_next_id);
         // 导入（打开项目文件）也是一步可撤销的编辑：把追加后的状态记入历史。
         self.history.record(&self.document, "导入项目");
     }
@@ -4547,5 +4550,114 @@ mod tests {
             }),
         );
         assert!(matches!(error, Err(RuntimeError::InvalidOperation(_))));
+    }
+
+    #[test]
+    fn undo_and_redo_universe_edit_emit_recompute_universe() {
+        let (mut state, project, _factory) = state_with_factory();
+        let added = state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddUniverse {
+                    name: "u".to_string(),
+                },
+            })
+            .unwrap();
+        let universe = added.created.universes[0];
+
+        state
+            .dispatch(AppMessage::Universe {
+                project,
+                universe,
+                action: crate::message::UniverseAction::AddTarget {
+                    flow: metatorio_core::LocatedDualVar {
+                        location: metatorio_core::Location::Planet("nauvis".to_string()),
+                        flow: DualVar::Item(IdWithQuality::new("iron-plate", "normal")),
+                    },
+                    amount: 10.0,
+                },
+            })
+            .unwrap();
+
+        let undone = state.undo().unwrap();
+        assert!(
+            undone.commands.iter().any(|c| matches!(
+                c,
+                RuntimeCommand::RecomputeUniverse {
+                    project: p,
+                    universe: u
+                } if *p == project && *u == universe
+            )),
+            "撤销宇宙工厂编辑应触发 RecomputeUniverse: {:?}",
+            undone.commands
+        );
+
+        let redone = state.redo().unwrap();
+        assert!(
+            redone.commands.iter().any(|c| matches!(
+                c,
+                RuntimeCommand::RecomputeUniverse {
+                    project: p,
+                    universe: u
+                } if *p == project && *u == universe
+            )),
+            "重做宇宙工厂编辑应触发 RecomputeUniverse: {:?}",
+            redone.commands
+        );
+    }
+
+    #[test]
+    fn import_projects_remaps_duplicate_factory_ids_and_preserves_next_id() {
+        let (mut state, project, _factory) = state_with_factory();
+        // 先新建再撤销，确保 next_id 高水位高于当前文档最大 ID
+        state
+            .dispatch(AppMessage::Project {
+                project,
+                action: ProjectAction::AddFactory {
+                    name: "temp".to_string(),
+                    template: FactoryTemplate::Empty,
+                },
+            })
+            .unwrap();
+        state.undo().unwrap();
+        let high_water_before = state.next_id;
+
+        // 导入包含两个项目且各自含有相同 factory id 的文档
+        let imported = AppDocument {
+            schema_version: 2,
+            projects: vec![
+                ProjectDocument {
+                    id: ProjectId(100),
+                    name: "p1".to_string(),
+                    factories: vec![FactoryDocument {
+                        id: FactoryId(200),
+                        name: "f1".to_string(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                ProjectDocument {
+                    id: ProjectId(101),
+                    name: "p2".to_string(),
+                    factories: vec![FactoryDocument {
+                        id: FactoryId(200),
+                        name: "f2".to_string(),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            ],
+        };
+        state.import_projects(&imported);
+
+        let f_ids: Vec<FactoryId> = state
+            .document
+            .projects
+            .iter()
+            .flat_map(|p| p.factories.iter().map(|f| f.id))
+            .collect();
+        let unique_f_ids: HashSet<FactoryId> = f_ids.iter().copied().collect();
+        assert_eq!(f_ids.len(), unique_f_ids.len(), "工厂 ID 不应重复: {f_ids:?}");
+        assert!(state.next_id >= high_water_before);
     }
 }

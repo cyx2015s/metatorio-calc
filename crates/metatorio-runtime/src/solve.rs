@@ -404,20 +404,23 @@ impl Runtime {
 
     /// 按上下文缓存的可达性依赖图：每个上下文构建一次并供 `milestone_order` /
     /// `compute_accessibility` 复用，避免每次交互重扫整个原型仓库。
-    fn graph_for_context(&self, context_id: &str) -> Arc<metatorio_core::GraphData> {
+    fn graph_for_context(
+        &self,
+        context_id: &str,
+    ) -> Result<Arc<metatorio_core::GraphData>, RuntimeError> {
         if let Some(graph) = self.graph_cache.lock().unwrap().get(context_id) {
-            return graph.clone();
+            return Ok(graph.clone());
         }
         let store = self
             .contexts
             .get(context_id)
-            .expect("graph_for_context: context not loaded");
+            .ok_or_else(|| RuntimeError::ContextNotFound(context_id.to_string()))?;
         let graph = Arc::new(metatorio_core::build_graph(store));
         self.graph_cache
             .lock()
             .unwrap()
             .insert(context_id.to_string(), graph.clone());
-        graph
+        Ok(graph)
     }
 
     /// 获取项目所属上下文的缓存依赖图（便捷封装）。
@@ -426,7 +429,7 @@ impl Runtime {
         project_id: ProjectId,
     ) -> Result<Arc<metatorio_core::GraphData>, RuntimeError> {
         let context_id = self.context_id_for(project_id)?;
-        Ok(self.graph_for_context(&context_id))
+        self.graph_for_context(&context_id)
     }
 
     /// 计算并缓存项目的可达性结果（选择器过滤 / 自动规划过滤共用）。
@@ -4661,6 +4664,7 @@ mod tests {
     /// 临时基准：py(Pyanodon) 上下文下各命令的 Rust 侧耗时（诊断用）。
     /// 机器上没有该 dump 时跳过；本地运行看各 eprintln 的毫秒。
     #[test]
+    #[ignore = "需要本机 py dump（C:\\Users\\mirac\\...）"]
     fn py_context_command_timings() {
         let path = "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\c3544821b3232cf9\\data-raw-dump.json";
         if !std::path::Path::new(path).exists() {
@@ -4754,6 +4758,7 @@ mod tests {
     /// 目的:找出哪些科技包不可达、以及默认设置下不可达的原因——为
     /// "py 下大量物品/配方不可达"定位根因(是不是科技包链路本身断了)。
     #[test]
+    #[ignore = "需要本机 py dump（C:\\Users\\mirac\\...）"]
     fn py_science_pack_reachability() {
         let path = "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\c3544821b3232cf9\\data-raw-dump.json";
         if !std::path::Path::new(path).exists() {
@@ -4942,6 +4947,7 @@ mod tests {
     /// 诊断:沿"可达配方 → 第一个不可达原料"递归下钻,定位科技包不可达的
     /// 根因链(哪一环先断、以及为什么——无配方/配方不可达/原料不可达)。
     #[test]
+    #[ignore = "需要本机 py dump（C:\\Users\\mirac\\...）"]
     fn py_trace_science_pack_ingredients() {
         let path = "C:\\Users\\mirac\\AppData\\Roaming\\com.mirac.metatorio-app\\contexts\\c3544821b3232cf9\\data-raw-dump.json";
         if !std::path::Path::new(path).exists() {
@@ -5325,5 +5331,20 @@ mod tests {
             }
             other => panic!("自动规划回写后应可解，实际：{other:?}"),
         }
+    }
+
+    #[test]
+    fn project_accessibility_returns_context_not_found_instead_of_panicking() {
+        let mut runtime = Runtime::new();
+        runtime.set_active_context(Some("missing-ctx".to_string()));
+        let project = new_project(&mut runtime);
+
+        let err = runtime
+            .project_accessibility(project)
+            .expect_err("未载入上下文时应返回 ContextNotFound 而非 panic");
+        assert!(
+            matches!(err, RuntimeError::ContextNotFound(ref id) if id == "missing-ctx"),
+            "unexpected error: {err:?}"
+        );
     }
 }

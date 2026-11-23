@@ -668,6 +668,7 @@ fn emit_struct(
                         "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
                     ));
                     stats.lenient_vec_fields += 1;
+                    stats.fields += 1;
                 }
                 // 嵌套数组（Vec<Vec<X>>）或普通元素：泛型宽松 Vec（serde 字面量替换）
                 _ => {
@@ -681,6 +682,7 @@ fn emit_struct(
                         "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
                     ));
                     stats.lenient_vec_fields += 1;
+                    stats.fields += 1;
                 }
             }
             continue;
@@ -720,6 +722,7 @@ fn emit_struct(
                     "{doc}    #[serde(deserialize_with = \"{fn_name}\")]\n    pub {field_name}: {field_ty},\n"
                 ));
                 stats.lenient_int_fields += 1;
+                stats.fields += 1;
             }
             Mapped::Rust(ty) => {
                 let field_name = rust_field_name(&prop.base.name);

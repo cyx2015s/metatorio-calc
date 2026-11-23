@@ -354,6 +354,11 @@ fn solve_lp_impl(
         .collect();
 
     if defs.is_empty() {
+        for row in &rows {
+            if (row.is_equality && row.rhs.abs() > 1e-12) || (!row.is_equality && row.rhs < 0.0) {
+                return Err(ResolutionError::Infeasible);
+            }
+        }
         return Ok(assemble(
             Vec::new(),
             vec![1.0; rows.len()],
@@ -628,5 +633,44 @@ mod tests {
         let x = vars.add(variable().min(0));
         let unbounded = solve_lp_with_solver(-1.0 * x, vec![], vars, LpSolver::Highs);
         assert!(matches!(unbounded, Err(ResolutionError::Unbounded)));
+    }
+
+    #[test]
+    fn zero_variable_lp_rejects_infeasible_empty_rows() {
+        for solver in LpSolver::ALL {
+            if !solver.is_available() {
+                continue;
+            }
+            let eq_infeasible = solve_lp_with_solver(
+                Expression::from(0.0),
+                vec![Expression::from(0.0).eq(1.0)],
+                ProblemVariables::new(),
+                solver,
+            );
+            assert!(
+                matches!(eq_infeasible, Err(ResolutionError::Infeasible)),
+                "{solver} should reject 0 == 1"
+            );
+
+            let leq_infeasible = solve_lp_with_solver(
+                Expression::from(0.0),
+                vec![Expression::from(0.0).leq(-1.0)],
+                ProblemVariables::new(),
+                solver,
+            );
+            assert!(
+                matches!(leq_infeasible, Err(ResolutionError::Infeasible)),
+                "{solver} should reject 0 <= -1"
+            );
+
+            let trivial_feasible = solve_lp_with_solver(
+                Expression::from(3.5),
+                vec![Expression::from(0.0).eq(0.0), Expression::from(0.0).leq(1.0)],
+                ProblemVariables::new(),
+                solver,
+            )
+            .unwrap_or_else(|e| panic!("{solver}: {e}"));
+            assert!((trivial_feasible.cost - 3.5).abs() < 1e-12);
+        }
     }
 }

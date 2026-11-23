@@ -145,8 +145,8 @@ fn test_calc_quality_distribution() {
             "/../../assets/data-raw-dump.json"
         );
         let text = std::fs::read_to_string(path)
-            .expect("modded dump 不存在（assets/data-raw-dump-heavily-modded.json）");
-        serde_json::from_str(&text).expect("modded dump 解析失败")
+            .expect("dump 不存在（assets/data-raw-dump.json）");
+        serde_json::from_str(&text).expect("dump 解析失败")
     }
     fn store() -> metatorio_data::store::PrototypeStore {
         let dump = load_dump();

@@ -1,115 +1,145 @@
-//! allowed_modules 命令核心逻辑的真实 dump 验证：
-//! 装配机-1 + electronic-circuit 配方 → 应允许 speed/efficiency 插件。
-use metatorio_data::store::{PrototypeGroup, PrototypeStore};
-use metatorio_data::types::EffectTypeLimitation;
-use metatorio_data::{CraftingMachineComponent, ModuleComponent, RecipeComponent};
+//! `metatorio_shell::app::allowed_modules` 集成测试：通过 `load_dump` 载入合成原型仓库，
+//! 直接覆盖 CraftingMachine / Beacon 及配方禁用效果过滤。
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-fn real_store() -> PrototypeStore {
-    let path = "C:\\Users\\mirac\\AppData\\Roaming\\Factorio\\script-output\\data-raw-dump.json";
-    if !std::path::Path::new(path).exists() {
-        panic!("无真实 dump");
-    }
-    let raw = std::fs::read(path).expect("读 dump");
-    let dump: serde_json::Value = serde_json::from_slice(&raw).expect("解析 dump");
-    PrototypeStore::load(&dump).expect("dump 加载失败")
+use metatorio_shell::app::{AppState, allowed_modules, load_dump, restore_contexts};
+use metatorio_shell::host::Host;
+use serde_json::json;
+
+struct TestHost {
+    state: AppState,
+    dir: PathBuf,
 }
 
-fn module_allowed(
-    module: &ModuleComponent,
-    machine_categories: &Option<Vec<String>>,
-    machine_allowed_effects: &Option<EffectTypeLimitation>,
-    recipe: Option<&RecipeComponent>,
-) -> bool {
-    // 与 auto_plan::module_allowed 相同的逻辑（此处独立复制便于验证命令路径）。
-    if let Some(categories) = machine_categories
-        && !categories.is_empty()
-        && !categories.contains(&module.category)
-    {
-        return false;
+impl Host for TestHost {
+    fn state(&self) -> &AppState {
+        &self.state
     }
-    let recipe_allowed = |kind: metatorio_data::types::EffectType, recipe_allow: bool| {
-        recipe_allow && machine_allowed_effects.is_none_or(|limits| limits[kind])
-    };
-    let effect = &module.effect;
-    if effect.speed > 0.0
-        && !recipe_allowed(
-            metatorio_data::types::EffectType::Speed,
-            recipe.is_none_or(|r| r.allow_speed),
-        )
-    {
-        return false;
+
+    fn app_data_dir(&self) -> PathBuf {
+        self.dir.clone()
     }
-    if effect.productivity > 0.0
-        && !recipe_allowed(
-            metatorio_data::types::EffectType::Productivity,
-            recipe.is_none_or(|r| r.allow_productivity),
-        )
-    {
-        return false;
-    }
-    if effect.quality > 0.0
-        && !recipe_allowed(
-            metatorio_data::types::EffectType::Quality,
-            recipe.is_none_or(|r| r.allow_quality),
-        )
-    {
-        return false;
-    }
-    if effect.consumption < 0.0
-        && !recipe_allowed(
-            metatorio_data::types::EffectType::Consumption,
-            recipe.is_none_or(|r| r.allow_consumption),
-        )
-    {
-        return false;
-    }
-    if effect.pollution < 0.0
-        && !recipe_allowed(
-            metatorio_data::types::EffectType::Pollution,
-            recipe.is_none_or(|r| r.allow_pollution),
-        )
-    {
-        return false;
-    }
-    true
+
+    fn emit(&self, _event: &str, _payload: serde_json::Value) {}
 }
 
-#[test]
-fn real_dump_machine_with_recipe_allows_modules() {
-    let store = real_store();
-    let Some(record) = store.get(PrototypeGroup::Entity, "assembling-machine-1") else {
-        panic!("装配机-1 不在仓库");
-    };
-    let Some(machine) = record.component::<CraftingMachineComponent>() else {
-        panic!("装配机-1 无 CraftingMachineComponent");
-    };
-    let recipe = store
-        .get(PrototypeGroup::Recipe, "electronic-circuit")
-        .and_then(|r| r.component::<RecipeComponent>())
-        .expect("electronic-circuit 配方存在");
-    let mut allowed: Vec<String> = Vec::new();
-    for item_record in store.group(PrototypeGroup::Item) {
-        let Some(module) = item_record.component::<ModuleComponent>() else {
-            continue;
-        };
-        if module_allowed(
-            module,
-            &machine.allowed_module_categories,
-            &machine.allowed_effects,
-            Some(recipe),
-        ) {
-            allowed.push(item_record.name.clone());
+fn synthetic_dump_json() -> serde_json::Value {
+    json!({
+        "module": {
+            "speed-module": {
+                "name": "speed-module",
+                "type": "module",
+                "category": "speed",
+                "tier": 1,
+                "effect": { "speed": 0.2, "consumption": 0.5 }
+            },
+            "efficiency-module": {
+                "name": "efficiency-module",
+                "type": "module",
+                "category": "efficiency",
+                "tier": 1,
+                "effect": { "consumption": -0.3 }
+            },
+            "productivity-module": {
+                "name": "productivity-module",
+                "type": "module",
+                "category": "productivity",
+                "tier": 1,
+                "effect": { "productivity": 0.04, "consumption": 0.4, "pollution": 0.05 }
+            },
+            "quality-module": {
+                "name": "quality-module",
+                "type": "module",
+                "category": "quality",
+                "tier": 1,
+                "effect": { "quality": 0.01, "speed": -0.05 }
+            }
+        },
+        "recipe": {
+            "electronic-circuit": {
+                "type": "recipe",
+                "name": "electronic-circuit",
+                "allow_speed": true,
+                "allow_efficiency": true,
+                "allow_consumption": true,
+                "allow_pollution": true,
+                "allow_productivity": false,
+                "allow_quality": true
+            }
+        },
+        "assembling-machine": {
+            "assembling-machine-1": {
+                "name": "assembling-machine-1",
+                "type": "assembling-machine",
+                "crafting_speed": 0.5,
+                "crafting_categories": ["crafting"],
+                "module_slots": 2,
+                "allowed_effects": ["speed", "consumption"],
+                "energy_usage": "75kW",
+                "energy_source": { "type": "electric", "usage_priority": "secondary-input" }
+            }
+        },
+        "beacon": {
+            "beacon": {
+                "name": "beacon",
+                "type": "beacon",
+                "allowed_effects": ["speed", "consumption"],
+                "allowed_module_categories": ["speed", "efficiency"],
+                "energy_usage": "480kW",
+                "energy_source": { "type": "electric", "usage_priority": "secondary-input" }
+            }
         }
-    }
-    eprintln!("装配机-1 + electronic-circuit 允许的插件: {allowed:?}");
-    assert!(
-        allowed.iter().any(|name| name.starts_with("speed-module")),
-        "应允许速度插件：{allowed:?}"
-    );
-    assert!(
-        allowed
-            .iter()
-            .any(|name| name.starts_with("efficiency-module")),
-        "应允许效率插件：{allowed:?}"
-    );
+    })
+}
+
+#[tokio::test]
+async fn allowed_modules_filters_by_machine_and_recipe() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!(
+        "metatorio-allowed-modules-{}-{unique}",
+        std::process::id()
+    ));
+    let app_dir = root.join("app_data");
+    std::fs::create_dir_all(&app_dir).unwrap();
+    let dump_path = root.join("dump.json");
+    std::fs::write(&dump_path, synthetic_dump_json().to_string()).unwrap();
+
+    let host: Arc<dyn Host> = Arc::new(TestHost {
+        state: AppState::default(),
+        dir: app_dir,
+    });
+    restore_contexts(&host);
+    let ctx = load_dump(&host, dump_path.to_string_lossy().into_owned())
+        .await
+        .expect("load_dump");
+
+    let allowed = allowed_modules(
+        &host,
+        ctx.id.clone(),
+        "crafting-machine".to_string(),
+        "assembling-machine-1".to_string(),
+        Some("electronic-circuit".to_string()),
+    )
+    .await
+    .expect("allowed_modules");
+
+    assert_eq!(allowed, vec!["efficiency-module", "speed-module"]);
+
+    let beacon_allowed = allowed_modules(
+        &host,
+        ctx.id,
+        "beacon".to_string(),
+        "beacon".to_string(),
+        None,
+    )
+    .await
+    .expect("beacon allowed_modules");
+
+    assert_eq!(beacon_allowed, vec!["efficiency-module", "speed-module"]);
+    let _ = std::fs::remove_dir_all(&root);
 }

@@ -56,11 +56,11 @@ pub fn migrate_old_project(
     let mut planning = default_planning();
     // 把旧版"每机制"的自动规划偏好（recipe/mining）合并到项目级（新版的
     // PlanningPreferences 是项目级）。取第一个含偏好的机制即可。
-    for fact in factories {
+    'planning_search: for fact in factories {
         if let Some(mechs) = fact.get("mechanics").and_then(Value::as_array) {
             for m in mechs {
                 if merge_planning(&mut planning, m, quality_order) {
-                    break;
+                    break 'planning_search;
                 }
             }
         }
@@ -579,5 +579,66 @@ fn dualvar_of(v: &Value, q: &[String]) -> Value {
             v.clone()
         }
         _ => v.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_old_project_format_checks_expected_keys() {
+        assert!(is_old_project_format(&json!({
+            "proj": {},
+            "factories": []
+        })));
+        assert!(!is_old_project_format(&json!({
+            "schema_version": 2,
+            "proj": {},
+            "factories": []
+        })));
+        assert!(!is_old_project_format(&json!({
+            "projects": [],
+            "proj": {},
+            "factories": []
+        })));
+    }
+
+    #[test]
+    fn migrate_old_project_keeps_first_factory_planning_preference() {
+        let old = json!({
+            "name": "legacy",
+            "proj": {},
+            "factories": [
+                {
+                    "name": "f1",
+                    "mechanics": [{
+                        "type": "factorio:recipe",
+                        "alternative_count": 2,
+                        "machine_preferences": [["assembling-machine-2", 0]],
+                        "enumerate_modules": [["speed-module", 0]],
+                        "instances": []
+                    }]
+                },
+                {
+                    "name": "f2",
+                    "mechanics": [{
+                        "type": "factorio:recipe",
+                        "alternative_count": 5,
+                        "machine_preferences": [["assembling-machine-3", 0]],
+                        "enumerate_modules": [["productivity-module", 0]],
+                        "instances": []
+                    }]
+                }
+            ]
+        });
+
+        let migrated = migrate_old_project(&old, Some("ctx"), &["normal".into()], None).unwrap();
+        let planning = &migrated["projects"][0]["planning"];
+        assert_eq!(planning["alternative_count"], 2);
+        assert_eq!(
+            planning["machine_preferences"][0]["id"],
+            "assembling-machine-2"
+        );
     }
 }
