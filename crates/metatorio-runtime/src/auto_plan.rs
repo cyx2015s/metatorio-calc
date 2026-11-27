@@ -166,7 +166,7 @@ pub fn enumerate_all(
 /// **销毁**（`TileDispose`）也在同一趟里枚举：当前环境只取**一个**
 /// `destroys_dropped_items` 的地格，再对全部物品展开——只需一个地格就能
 /// 代表该环境的销毁途径，按地格展开只会让候选数乘上地格数。
-fn enumerate_tiles(
+pub(crate) fn enumerate_tiles(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
@@ -237,14 +237,14 @@ fn enumerate_tiles(
 }
 
 /// 同一次枚举共享地形闭包，避免为每个机器/配方重复计算铺地可达性。
-struct SurfaceEnvironment {
-    properties: Option<std::collections::BTreeMap<String, f64>>,
+pub(crate) struct SurfaceEnvironment {
+    pub(crate) properties: Option<std::collections::BTreeMap<String, f64>>,
     tiles: Option<Vec<TileComponent>>,
     is_space_platform: bool,
 }
 
 impl SurfaceEnvironment {
-    fn new(store: &PrototypeStore, options: &EnumerateOptions) -> Self {
+    pub(crate) fn new(store: &PrototypeStore, options: &EnumerateOptions) -> Self {
         Self {
             properties: crate::planet::surface_properties_of(
                 store,
@@ -273,7 +273,7 @@ impl SurfaceEnvironment {
 }
 
 /// 表面属性与地格放置限制都是硬约束；在候选排名/截取之前检查。
-fn buildable_on_surface(
+pub(crate) fn buildable_on_surface(
     store: &PrototypeStore,
     record: &PrototypeRecord,
     environment: &SurfaceEnvironment,
@@ -318,7 +318,7 @@ fn buildable_on_surface(
 }
 
 /// 在排名/截取替代机器之前过滤，避免未解锁的高速机器占满候选名额。
-fn entity_available(
+pub(crate) fn entity_available(
     store: &PrototypeStore,
     record: &PrototypeRecord,
     options: &EnumerateOptions,
@@ -331,7 +331,7 @@ fn entity_available(
 }
 
 /// 当前表面可用的枚举插件塔方案：方案里**每个**插件塔实体都要能在此建造。
-fn buildable_beacon_plans<'a>(
+pub(crate) fn buildable_beacon_plans<'a>(
     store: &PrototypeStore,
     options: &'a EnumerateOptions,
     environment: &SurfaceEnvironment,
@@ -351,7 +351,7 @@ fn buildable_beacon_plans<'a>(
 
 // ── 通用工具 ──────────────────────────────────────────────────────
 
-fn quality_name(ctx: &Context, level: usize) -> String {
+pub(crate) fn quality_name(ctx: &Context, level: usize) -> String {
     ctx.game
         .qualities
         .get(level)
@@ -366,7 +366,7 @@ fn fluid_record<'a>(ctx: &'a Context, name: &str) -> Option<&'a FluidComponent> 
         .and_then(|record| record.component())
 }
 
-fn machine_fits_recipe(machine: &CraftingMachineComponent, recipe: &RecipeComponent) -> bool {
+pub(crate) fn machine_fits_recipe(machine: &CraftingMachineComponent, recipe: &RecipeComponent) -> bool {
     if !machine.supports_recipe_fluid_input(recipe) {
         return false;
     }
@@ -452,7 +452,7 @@ pub fn module_allowed(
 /// 的品质**），其次分数（复刻原版 measure_crafter：速度/碰撞箱面积 ×
 /// (1+基础效果速度) × (1+基础效果产能×2) × 电动机器×8 × (1+插件槽)）。
 /// 自动枚举出的机器品质 = 主品质；与用户偏好重复时优先用户的品质。
-fn pick_machines<F, S>(
+pub(crate) fn pick_machines<F, S>(
     store: &PrototypeStore,
     prefs: &[IdWithQuality],
     alternative_count: usize,
@@ -504,7 +504,7 @@ where
 
 /// 机器打分（复刻原版 recipe.rs::measure_crafter）：
 /// 速度 / 碰撞箱面积 × (1+基础效果速度) × (1+基础效果产能×2) × 电动×8 × (1+插件槽)。
-fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityComponent>) -> f64 {
+pub(crate) fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityComponent>) -> f64 {
     let area = entity
         .and_then(|e| e.collision_box.as_ref())
         .map_or(25.0, |bb| (bb.1.0 - bb.0.0).abs() * (bb.1.1 - bb.0.1).abs());
@@ -523,7 +523,7 @@ fn crafter_score(machine: &CraftingMachineComponent, entity: Option<&EntityCompo
 }
 
 /// 采矿机打分（复刻原版 mining.rs::measure_miner）：mining_speed 同构。
-fn miner_score(miner: &MiningDrillComponent, entity: Option<&EntityComponent>) -> f64 {
+pub(crate) fn miner_score(miner: &MiningDrillComponent, entity: Option<&EntityComponent>) -> f64 {
     let area = entity
         .and_then(|e| e.collision_box.as_ref())
         .map_or(25.0, |bb| (bb.1.0 - bb.0.0).abs() * (bb.1.1 - bb.0.1).abs());
@@ -568,7 +568,7 @@ fn compositions(parts: usize, sum: usize) -> Vec<Vec<usize>> {
 
 /// 插件组合枚举（复刻 egui recipe.rs:1320-1345 的状态空间降级策略）。
 /// 返回 (每插件数量向量, 每插件重复系数 dup)。
-fn module_combinations(
+pub(crate) fn module_combinations(
     allowed_modules: usize,
     module_slots: usize,
     quality_involved: bool,
@@ -884,7 +884,7 @@ fn enumerate_mining(
 
 // ── 简单机制（无机器/插件） ───────────────────────────────────────
 
-fn enumerate_simple(
+pub(crate) fn enumerate_simple(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,
@@ -981,7 +981,7 @@ fn enumerate_simple(
 
 // ── 能量机制（发电机/锅炉/反应堆） ───────────────────────────────
 
-fn enumerate_energy(
+pub(crate) fn enumerate_energy(
     store: &PrototypeStore,
     ctx: &Context,
     options: &EnumerateOptions,

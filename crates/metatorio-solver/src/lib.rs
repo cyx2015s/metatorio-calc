@@ -12,6 +12,8 @@
 //!     与前端渲染及外壳环境完全解耦，可在无头环境独立测试；
 //! - **组合搜索与行列生成**：提供模块化的模型裁剪、变量生成与增量求解基础设施。
 
+#[cfg(feature = "highs")]
+pub mod column_gen;
 pub mod comb;
 pub mod concept;
 pub mod control;

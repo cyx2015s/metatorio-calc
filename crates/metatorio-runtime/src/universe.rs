@@ -407,6 +407,132 @@ pub fn preview_universe(
     UniversePreview { mechanics, sources }
 }
 
+/// 构建宇宙工厂的 LP 求解数据与变量来源映射（供普通求解与列生成共用）。
+pub(crate) fn build_universe_problem(
+    store: &PrototypeStore,
+    project: &ProjectDocument,
+    universe: &UniverseDocument,
+    accessibility: &metatorio_core::Accessibility,
+) -> Result<(SolverData<LocatedDualVar, UniverseVarId>, HashMap<UniverseVarId, MechanicId>, u64), String> {
+    let base = make_game_state_with_accessibility(store, project, accessibility);
+    let mut flows: metatorio_core::AIndexMap<UniverseVarId, (SolverFlow<LocatedDualVar>, f64)> =
+        metatorio_core::AIndexMap::default();
+    let mut var_to_mechanic: HashMap<UniverseVarId, MechanicId> = HashMap::new();
+    let mut next_id = 0u64;
+
+    // 按地点缓存 GameState，避免为每条本地机制重复克隆与计算环境参数。
+    let mut env_games: HashMap<Location, metatorio_core::GameState> = HashMap::new();
+    project.settings.orbital_transport_costs.validate()?;
+
+    for entry in &universe.mechanics {
+        if !entry.enabled {
+            continue;
+        }
+        let expanded = match &entry.mechanic {
+            LocatedMechanic::Local(local) => {
+                let game = env_games.entry(local.location.clone()).or_insert_with(|| {
+                    let (planet, surface) = environment_for(&local.location);
+                    let mut g = base.clone();
+                    apply_environment_to_game_state(store, &mut g, planet, surface);
+                    g
+                });
+                let context = Context::new(store, game);
+                metatorio_core::expand::expand([(0usize, &local.mechanic)], &context)
+                    .variables
+                    .into_iter()
+                    .map(|v| (locate_flow(&local.location, v.flow), v.cost))
+                    .collect::<Vec<_>>()
+            }
+            _ => expand_located_mechanic_with_costs(
+                store,
+                &base,
+                &entry.mechanic,
+                &project.settings.orbital_transport_costs,
+            )?,
+        };
+        for (flow, cost) in expanded {
+            let id = UniverseVarId(next_id);
+            next_id += 1;
+            flows.insert(id, (flow, cost));
+            var_to_mechanic.insert(id, entry.id);
+        }
+    }
+
+    let locations = used_locations(universe);
+    let mut sources: SolverFlow<LocatedDualVar> = SolverFlow::default();
+    for location in &locations {
+        let source_flow = match location {
+            Location::Planet(name) => planet_source_flows(store, name),
+            Location::Space => space_source_flows(store),
+        };
+        for (flow, penalty) in locate_flow(location, source_flow) {
+            sources.insert(flow, penalty);
+        }
+    }
+    for input in &universe.external_inputs {
+        if !input.penalty.is_finite() || input.penalty < 0.0 {
+            return Err("外部输入成本必须为非负有限数".into());
+        }
+        sources.insert(input.flow.clone(), input.penalty);
+    }
+    let mut target: SolverFlow<LocatedDualVar> = SolverFlow::default();
+    for target_entry in &universe.targets {
+        *target.entry(target_entry.flow.clone()).or_insert(0.0) += target_entry.amount;
+    }
+    let mut expression_flows: SolverFlow<LocatedDualVar> = SolverFlow::default();
+    for expression in &universe.target_expressions {
+        for term in &expression.terms {
+            expression_flows.insert(term.flow.clone(), 1.0);
+        }
+    }
+    let conversion_target =
+        crate::solve::conversion_targets(&target, expression_flows.keys().cloned());
+
+    add_located_conversion_flows(
+        &mut flows,
+        &locations,
+        &conversion_target,
+        &sources,
+        store,
+        &mut next_id,
+    );
+
+    let mut unconstrained: metatorio_solver::AIndexSet<LocatedDualVar> =
+        metatorio_solver::AIndexSet::default();
+    for located in flows
+        .values()
+        .flat_map(|(flow, _)| flow.keys())
+        .chain(sources.keys())
+        .chain(target.keys())
+        .chain(expression_flows.keys())
+    {
+        if matches!(located.flow, DualVar::Pollution { .. }) {
+            unconstrained.insert(located.clone());
+        }
+    }
+
+    let expression_targets: Vec<TargetSpec<LocatedDualVar>> = universe
+        .target_expressions
+        .iter()
+        .map(|expression| TargetSpec {
+            constant: expression.constant,
+            coefficients: expression
+                .terms
+                .iter()
+                .map(|term| (term.flow.clone(), term.coefficient))
+                .collect(),
+        })
+        .collect();
+    let mut problem = SolverData::new_simple(target, flows);
+    problem.target.extend(expression_targets);
+    problem.sources = sources;
+    problem.strict_source = universe.strict_source;
+    problem.strict_sink = universe.strict_sink;
+    problem.unconstrained = unconstrained;
+    problem.solver = project.settings.solver;
+    Ok((problem, var_to_mechanic, next_id))
+}
+
 /// 使用项目选定的后端构建并求解宇宙工厂。
 pub fn solve_universe(
     store: &PrototypeStore,

@@ -1011,6 +1011,53 @@ pub fn plan_universe_with_progress(
     let store = &snapshot.store;
     let universe_doc = &snapshot.universe_doc;
     let universe_id = universe_doc.id;
+    #[cfg(feature = "highs")]
+    if project_doc.settings.solver == metatorio_solver::LpSolver::Highs
+        && std::env::var_os("METATORIO_FULL_ENUM_AUTOPLAN").is_none()
+    {
+        progress(AutoPlanProgress {
+            stage: AutoPlanStage::Building,
+            ..AutoPlanProgress::preparing()
+        });
+        match crate::column_gen::solve_universe_autoplan_column_gen(
+            store,
+            project_doc,
+            universe_doc,
+            accessibility,
+            |variables, constraints| {
+                progress(AutoPlanProgress::sized(
+                    AutoPlanStage::Solving,
+                    metatorio_solver::ProblemSize {
+                        variables,
+                        constraints,
+                    },
+                ));
+            },
+        ) {
+            Ok((used, _cost, stats)) => {
+                let candidates_used = used.len();
+                let report = AutoPlanReport {
+                    candidates_total: stats.final_cols,
+                    candidates_considered: stats.seed_candidates + stats.added_columns,
+                    candidates_used,
+                    variables_before: stats.final_cols,
+                    variables_after: candidates_used,
+                    solver: project_doc.settings.solver,
+                    planning_optimization: None,
+                    ..Default::default()
+                };
+                return Ok((used, report));
+            }
+            Err((description, no_provider)) => {
+                let mut diagnostic = crate::Diagnostic::new(
+                    "auto-plan-not-solved",
+                    format!("宇宙自动规划未求解：{description}"),
+                );
+                diagnostic.located_no_provider = no_provider;
+                return Err(RuntimeError::Diagnostic(Box::new(diagnostic)));
+            }
+        }
+    }
     // 枚举完整候选集：每个已解锁行星的本地机制、太空机制以及各星球各品质物品的双向货运，
     // 再组装为统一的宇宙 LP 一次联合求解。
     let mut locations: Vec<Location> = store
@@ -1425,26 +1472,6 @@ pub fn plan_auto_plan_with_progress(
         accessibility: Some(accessibility.clone()),
     };
     phase("environment-ready", 0);
-    let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
-    check_solve_cancelled()?;
-    phase("enumerated", candidates.len());
-    let (mut candidates, dropped) =
-        crate::auto_plan::filter_accessible_candidates(store, accessibility, candidates);
-    if project_doc.planning.preserve_existing_mechanics && !factory_doc.mechanics.is_empty() {
-        include_existing_candidates(&mut candidates, factory_doc);
-    }
-    phase("accessibility-filtered", candidates.len());
-    if candidates.is_empty() {
-        return Err(RuntimeError::InvalidValue(if dropped == 0 {
-            "没有可枚举的机制候选".to_string()
-        } else {
-            format!(
-                "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
-                dropped
-            )
-        }));
-    }
-
     let target = factory_doc
         .targets
         .iter()
@@ -1468,6 +1495,104 @@ pub fn plan_auto_plan_with_progress(
             implicit.shift_remove(key);
         }
         all_sources.extend(implicit);
+    }
+
+    #[cfg(feature = "highs")]
+    if project_doc.settings.solver == metatorio_solver::LpSolver::Highs
+        && std::env::var_os("METATORIO_FULL_ENUM_AUTOPLAN").is_none()
+    {
+        let extra_existing: Vec<Mechanic> = if project_doc.planning.preserve_existing_mechanics {
+            factory_doc
+                .mechanics
+                .iter()
+                .filter(|entry| entry.enabled)
+                .map(|entry| entry.mechanic.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        progress(AutoPlanProgress {
+            stage: AutoPlanStage::Building,
+            ..AutoPlanProgress::preparing()
+        });
+        let cg_result = crate::column_gen::solve_autoplan_column_gen(
+            store,
+            &context,
+            &options,
+            accessibility,
+            |seed_mechanics| {
+                build_autoplan_problem(
+                    store,
+                    &context,
+                    factory_doc,
+                    &target,
+                    &all_sources,
+                    seed_mechanics,
+                )
+            },
+            &extra_existing,
+            |variables, constraints| {
+                progress(AutoPlanProgress::sized(
+                    AutoPlanStage::Solving,
+                    metatorio_solver::ProblemSize {
+                        variables,
+                        constraints,
+                    },
+                ));
+            },
+        );
+        match cg_result {
+            Ok((used, _cost, stats)) => {
+                let candidates_used = used.len();
+                phase("column-gen-complete", candidates_used);
+                return Ok((
+                    used,
+                    AutoPlanReport {
+                        cutoff: 1e-9,
+                        candidates_total: stats.final_cols,
+                        candidates_considered: stats.seed_candidates + stats.added_columns,
+                        candidates_used,
+                        variables_before: stats.final_cols,
+                        variables_after: candidates_used,
+                        solver: project_doc.settings.solver,
+                        planning_optimization: None,
+                    },
+                ));
+            }
+            Err((description, no_provider)) => {
+                let environment_note = if project_doc.planning.preserve_existing_mechanics {
+                    String::new()
+                } else {
+                    existing_recipe_surface_note(store, factory_doc)
+                };
+                let mut diagnostic = crate::Diagnostic::new(
+                    "auto-plan-not-solved",
+                    format!("自动规划未求解：{description}{environment_note}"),
+                );
+                diagnostic.no_provider = no_provider;
+                return Err(RuntimeError::Diagnostic(Box::new(diagnostic)));
+            }
+        }
+    }
+
+    let candidates = crate::auto_plan::enumerate_all(store, &context, &options);
+    check_solve_cancelled()?;
+    phase("enumerated", candidates.len());
+    let (mut candidates, dropped) =
+        crate::auto_plan::filter_accessible_candidates(store, accessibility, candidates);
+    if project_doc.planning.preserve_existing_mechanics && !factory_doc.mechanics.is_empty() {
+        include_existing_candidates(&mut candidates, factory_doc);
+    }
+    phase("accessibility-filtered", candidates.len());
+    if candidates.is_empty() {
+        return Err(RuntimeError::InvalidValue(if dropped == 0 {
+            "没有可枚举的机制候选".to_string()
+        } else {
+            format!(
+                "所有 {} 个候选机制都不可达（目标依赖的科技未解锁？可用\"无视可达性\"开关或显式标记可达）",
+                dropped
+            )
+        }));
     }
 
     // 展开全部候选为一个 LP。

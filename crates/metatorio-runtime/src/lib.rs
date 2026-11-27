@@ -11,6 +11,8 @@
 //! - **结构化诊断**：产出带实体身份标识、便于机器消费与人类排错的高内聚 [`Diagnostic`] 结构。
 
 pub mod auto_plan;
+#[cfg(feature = "highs")]
+pub mod column_gen;
 pub mod diagnostic;
 pub mod document;
 pub mod id;
